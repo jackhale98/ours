@@ -46,8 +46,9 @@ Every stored field (keep in sync with `apps/api/migrations` and the privacy poli
 | invites | id, space_id, kind, wrapped (ciphertext), created_by, expires_at, used_at | Pairing and device linking |
 | key_backups | user_id, wrapped (ciphertext), version, updated_at | Recovery |
 | records | id, space_id, scope, owner_user_id, key_version, nonce, ciphertext, deleted, rev, updated_at, updated_by | Sync. Reveals record count, padded size (64-byte buckets), change times, who changed it, whether it is private, deletion |
-| reminders | id, space_id, record_id, target_user_id, fire_at, payload (ciphertext), sent_at | Reveals **when** reminders fire |
-| push_subs | id, user_id, device_id, endpoint, p256dh, auth, created_at, last_ok, failures | Web Push delivery |
+| reminders | id, space_id, target_user_id, kind (`reminder` or `deferred`), fire_at, key_version, payload (ciphertext), created_at | Reminders a user set for themselves (up to 64, at most 8 days ahead) and partner notifications held for quiet hours. Reveals **when** reminders fire, not which plan; deleted when sent |
+| push_subs | id, user_id, device_id, endpoint, p256dh, auth, created_at, last_ok, failures | Web Push delivery, one per device; dropped when the push service says it is gone |
+| users (added) | quiet_start, quiet_end, quiet_tz | Quiet hours, only if set: reveals the user's time zone |
 | feed_tokens | token_hash, user_id, created_at, revoked_at | Calendar feed |
 | feed_busy | user_id, start_utc, end_utc | **Plaintext** busy blocks, only if the user opts in to the calendar feed |
 | users (added) | last_active | Inactive-account policy (warn at 12 months, delete at 13) |
@@ -58,6 +59,8 @@ Every stored field (keep in sync with `apps/api/migrations` and the privacy poli
 | rate_limits | key (salted hash, no IP or email), window_start, count | Abuse protection; deleted after a day |
 
 **Imported calendars (opt-in):** when a user adds a calendar by subscription link, each refresh is relayed by the Worker, which sees the subscription URL and that calendar's contents **in transit** (not stored, not logged). The URL itself is stored only inside an encrypted record. File imports never reach the server. See ADR 0011.
+
+**Notifications (ADR 0010):** the sender's device seals the text with the space key (`sealNotification`, with an authenticated time window and replay id). The Worker wraps that ciphertext in Web Push encryption (RFC 8291) for each of the recipient's subscriptions and signs with its VAPID key. The push service sees neither layer's content; the Worker never sees the text. The recipient's service worker opens it with the key ring on that device and drops replays and stale messages. The server learns who notified whom and when, and when reminders fire. The push endpoint allowlist stops the Worker being used to send requests anywhere else.
 
 The service worker precaches only the static build (HTML, JS, CSS, fonts, icons). It never caches API responses; user data lives only in the encrypted IndexedDB store.
 

@@ -16,6 +16,15 @@ if (obs?.enabled && obs?.logs?.invocation_logs !== false) {
   );
 }
 if (obs?.traces?.enabled) problems.push('observability.traces must stay disabled');
+for (const secret of [
+  'VAPID_PRIVATE_KEY',
+  'EMAIL_API_KEY',
+  'TURNSTILE_SECRET',
+  'RATE_LIMIT_SALT',
+]) {
+  if (config.vars && secret in config.vars)
+    problems.push(`${secret} must be a secret (wrangler secret put), not a var`);
+}
 if (config.vars?.EMAIL_PROVIDER === 'dev-outbox')
   problems.push("EMAIL_PROVIDER 'dev-outbox' is for local tests only");
 if (problems.length) {

@@ -50,6 +50,8 @@
           <tr><td>Encrypted records</td><td>Sync and backup. We can see how many there are, roughly how big (rounded up to 64 bytes), when and by whom they changed, whether one is private, and whether it was deleted</td><td>Until deleted by you</td></tr>
           <tr><td>Encrypted key backup</td><td>Restoring on a new device with your recovery phrase</td><td>Until you delete your account</td></tr>
           <tr><td>Invite links (encrypted key material)</td><td>Pairing and linking devices</td><td>24 hours, erased once used</td></tr>
+          <tr><td>Notification settings: this device's push address, and your quiet hours and time zone if you set them</td><td>Sending notifications, and holding your partner's until quiet hours end</td><td>Until you turn notifications off or remove the device</td></tr>
+          <tr><td>Reminder times (the text is encrypted)</td><td>Sending a reminder while your phone is asleep</td><td>Deleted once sent</td></tr>
           <tr><td>Rate-limit counters (salted hashes, never your IP or email)</td><td>Stopping abuse</td><td>One day</td></tr>
           <tr><td>Last activity date</td><td>Removing abandoned accounts</td><td>We email you at 12 months of inactivity and delete the account at 13 months</td></tr>
         </tbody>
@@ -58,7 +60,7 @@
       <h2>Optional features that reveal more</h2>
       <ul>
         <li><strong>Calendar subscription links.</strong> If you subscribe to an outside calendar by link, our server fetches it for you, so it sees that link and that calendar's contents while passing them on. They are not stored or logged. Importing a file instead keeps everything on your device.</li>
-        <li><strong>Reminders and notifications.</strong> To send a reminder while your device is asleep, the server must know when it fires and which device to wake. The reminder text stays encrypted.</li>
+        <li><strong>Reminders and notifications.</strong> To send a reminder while your device is asleep, the server must know when it fires and which device to wake, and it sees when you and your partner notify each other. The text stays encrypted; not even the push service can read it.</li>
         <li><strong>Calendar feed for other apps.</strong> If you turn this on, your busy times (start and end only) are stored unencrypted so your calendar app can read them. Turning it off deletes them.</li>
       </ul>
 

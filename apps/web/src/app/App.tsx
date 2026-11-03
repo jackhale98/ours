@@ -3,12 +3,12 @@
 import { signal } from '@preact/signals';
 import { lazy, Suspense } from 'preact/compat';
 import { useEffect } from 'preact/hooks';
-import { account, consumeSignInLink } from '../account/session';
+import { account, consumeSignInLink, syncNow } from '../account/session';
 import { syncStatus } from '../account/sync';
 import { LogoMark } from '../Logo';
-import { mode, names, partner, viewer } from './model';
+import { findEntry, mode, names, partner, viewer } from './model';
 import { now } from './select';
-import { afterAdd, openQuick, SheetHost, sheet } from './sheets';
+import { accept, afterAdd, openEvent, openQuick, SheetHost, sheet } from './sheets';
 import { Avatar, Icon, type IconName, ToastHost, toast } from './ui';
 import { PlanView } from './views/Plan';
 
@@ -30,8 +30,29 @@ const TABS: [Tab, string, IconName][] = [
 export const isTab = (h: string): h is Tab => TABS.some(([t]) => t === h);
 
 export const tab = signal<Tab>('plan');
+/** Links from notifications: #accept=<id> (the "Yes" action) and #plan&open=<id>. */
+async function deepLink(action: 'accept' | 'open', id: string): Promise<void> {
+  history.replaceState(null, '', '#plan');
+  tab.value = 'plan';
+  startRequested.value = false;
+  if (!findEntry(id)) await syncNow()?.catch(() => undefined);
+  const e = findEntry(id);
+  if (e?.rec.kind !== 'event') {
+    toast('That plan isn’t on this device yet. It will appear once it syncs.');
+    return;
+  }
+  const d = e.rec.data;
+  if (action === 'accept' && d.status === 'proposed' && d.proposed_by === partner.value) accept(id);
+  else openEvent(id);
+}
+
 function syncFromHash() {
   const h = location.hash.slice(1);
+  const link = /^(accept|plan&open)=([A-Za-z0-9-]{1,64})$/.exec(h);
+  if (link?.[2]) {
+    void deepLink(link[1] === 'accept' ? 'accept' : 'open', link[2]);
+    return;
+  }
   if (h === 'start') startRequested.value = true;
   if (isTab(h)) {
     tab.value = h;
@@ -100,10 +121,18 @@ export function App() {
     const onVisible = () => {
       if (document.visibilityState === 'visible') now.value = Date.now();
     };
+    // The service worker says a notification arrived, or asks to open a plan.
+    const onWorker = (e: MessageEvent) => {
+      const data = e.data as { type?: string; hash?: string } | null;
+      if (data?.type === 'ours-sync') void syncNow();
+      if (data?.type === 'ours-open' && typeof data.hash === 'string') location.hash = data.hash;
+    };
+    navigator.serviceWorker?.addEventListener('message', onWorker);
     window.addEventListener('hashchange', onHash);
     document.addEventListener('keydown', onKey);
     document.addEventListener('visibilitychange', onVisible);
     return () => {
+      navigator.serviceWorker?.removeEventListener('message', onWorker);
       window.removeEventListener('hashchange', onHash);
       document.removeEventListener('keydown', onKey);
       document.removeEventListener('visibilitychange', onVisible);

@@ -8,6 +8,10 @@ import { defineConfig, devices } from '@playwright/test';
 const API = 'http://localhost:8788';
 const WEB = 'http://localhost:4174';
 const STATE = '.wrangler/state/e2e';
+// Test-only VAPID key pair (same as the Worker unit tests; never used elsewhere).
+const VAPID_PUBLIC =
+  'BGeytqcryzLQx3zBK5A7_loabsm6Ix96hNmpqoGtFaiLEweHpaAbiP4axcF84pAgikzuk8jCvr74j3Mn-j0jM1k';
+const VAPID_PRIVATE = 'ongJxsqwXoRhxS8gJTJ8L8GXL0d6On19rO70dERTb0I';
 
 export default defineConfig({
   testDir: 'e2e-sync',
@@ -25,7 +29,7 @@ export default defineConfig({
       command: [
         `rm -rf ${STATE}`,
         `npx wrangler d1 migrations apply ours --local --persist-to ${STATE}`,
-        `npx wrangler dev --port 8788 --local --persist-to ${STATE} --var EMAIL_PROVIDER:dev-outbox --var ALLOWED_ORIGINS:${WEB} --var APP_URL:${WEB}/ --var RP_ID:localhost`,
+        `npx wrangler dev --port 8788 --local --persist-to ${STATE} --var EMAIL_PROVIDER:dev-outbox --var ALLOWED_ORIGINS:${WEB} --var APP_URL:${WEB}/ --var RP_ID:localhost --var VAPID_PUBLIC_KEY:${VAPID_PUBLIC} --var VAPID_PRIVATE_KEY:${VAPID_PRIVATE}`,
       ].join(' && '),
       url: `${API}/health`,
       env: { WRANGLER_SEND_METRICS: 'false', CI: '1' },
@@ -41,5 +45,6 @@ export default defineConfig({
       timeout: 120_000,
     },
   ],
-  projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
+  // Full Chromium (new headless): the headless shell blocks notifications.
+  projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'], channel: 'chromium' } }],
 });

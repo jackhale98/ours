@@ -99,6 +99,30 @@ test('quick add parses natural language and adds a plan', async ({ page }) => {
   await expect(page.getByRole('button', { name: /Pottery/ })).toBeVisible();
 });
 
+test('a reminder can be set on a plan and is kept', async ({ page }) => {
+  await openDemo(page);
+  await page.keyboard.press('n');
+  const dialog = page.getByRole('dialog', { name: 'New plan' });
+  await page.getByRole('textbox', { name: 'What’s the plan?' }).fill('Dentist tomorrow 9am');
+  await dialog.getByRole('button', { name: 'Mine' }).click();
+  await dialog.getByRole('button', { name: 'Add plan' }).click();
+  await page
+    .getByRole('button', { name: /Dentist/ })
+    .first()
+    .click();
+  const sheet = page.getByRole('dialog', { name: 'Dentist' });
+  await sheet.getByRole('combobox', { name: 'Remind me' }).selectOption({ label: '1 hour before' });
+  await expect(sheet.getByText('reminders are saved but not sent')).toBeVisible();
+  await page.keyboard.press('Escape');
+  await page
+    .getByRole('button', { name: /Dentist/ })
+    .first()
+    .click();
+  await expect(
+    page.getByRole('dialog', { name: 'Dentist' }).getByRole('combobox', { name: 'Remind me' }),
+  ).toHaveValue('60');
+});
+
 test('a private plan is hidden from the partner but visible as Busy', async ({ page }) => {
   await openDemo(page);
   await page.keyboard.press('n');

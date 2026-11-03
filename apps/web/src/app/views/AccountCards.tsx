@@ -3,8 +3,18 @@
 import { generateRecoveryPhrase } from '@ours/core/crypto';
 import { useState } from 'preact/hooks';
 import { ApiError, api } from '../../account/api';
+import {
+  disablePush,
+  enablePush,
+  type PushState,
+  pushState,
+  type QuietHours,
+  quietHours,
+  sendTest,
+  setQuietHours,
+} from '../../account/notify';
 import { linkDevice, me, saveBackup, signOut } from '../../account/session';
-import { Icon, toast } from '../ui';
+import { Icon, Switch, toast } from '../ui';
 
 const when = (ms: number | null) => (ms ? new Date(ms).toLocaleDateString() : 'never');
 
@@ -187,6 +197,103 @@ export function AccountCard() {
             plans stay with your partner.
           </span>
         </p>
+      )}
+    </section>
+  );
+}
+
+const QUIET_OPTIONS: { label: string; value: QuietHours | null }[] = [
+  { label: 'Off', value: null },
+  { label: '9 PM to 7 AM', value: { start: 21 * 60, end: 7 * 60 } },
+  { label: '10 PM to 7 AM', value: { start: 22 * 60, end: 7 * 60 } },
+  { label: '10 PM to 8 AM', value: { start: 22 * 60, end: 8 * 60 } },
+  { label: '11 PM to 8 AM', value: { start: 23 * 60, end: 8 * 60 } },
+];
+
+const PUSH_HINT: Record<PushState, string> = {
+  unsupported: 'This browser can’t receive notifications.',
+  'needs-install':
+    'On iPhone and iPad, add Ours to your Home Screen first (Share, then “Add to Home Screen”), then open it from there.',
+  unavailable: 'Notifications aren’t set up on this server yet.',
+  denied: 'Notifications are blocked for this site. Allow them in your browser settings.',
+  off: 'Get a heads-up when your partner asks about a plan or answers yours, and reminders you set.',
+  on: 'On for this device. The text is encrypted: the server only knows when to send.',
+};
+
+export function NotificationsCard() {
+  const state = pushState.value;
+  const quiet = quietHours.value;
+  const [busy, setBusy] = useState(false);
+  const can = state === 'on' || state === 'off';
+  const current = QUIET_OPTIONS.findIndex(
+    (o) =>
+      (o.value === null && quiet === null) ||
+      (o.value && quiet && o.value.start === quiet.start && o.value.end === quiet.end),
+  );
+  const run = async (fn: () => Promise<void>, ok?: string) => {
+    setBusy(true);
+    try {
+      await fn();
+      if (ok) toast(ok);
+    } catch (err) {
+      toast(err instanceof Error ? err.message : 'That didn’t work. Try again.');
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <section class="card" aria-labelledby="notif-h">
+      <h2 class="h3" id="notif-h">
+        Notifications
+      </h2>
+      {can ? (
+        <Switch
+          checked={state === 'on'}
+          onChange={(on) =>
+            void run(on ? enablePush : disablePush, on ? 'Notifications on.' : 'Notifications off.')
+          }
+          label="Notifications on this device"
+          hint={PUSH_HINT[state]}
+        />
+      ) : (
+        <p class="d">{PUSH_HINT[state]}</p>
+      )}
+      {state === 'on' && (
+        <>
+          <div class="field">
+            <label for="quiet">Quiet hours</label>
+            <select
+              id="quiet"
+              class="txt"
+              value={String(Math.max(current, 0))}
+              disabled={busy}
+              onChange={(e) => {
+                const o = QUIET_OPTIONS[Number(e.currentTarget.value)];
+                void run(() => setQuietHours(o?.value ?? null), 'Quiet hours saved.');
+              }}
+            >
+              {QUIET_OPTIONS.map((o, i) => (
+                <option key={o.label} value={String(i)}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+          </div>
+          <p class="d small">
+            Your partner’s messages wait until quiet hours end. Reminders you set still arrive on
+            time.
+          </p>
+          <div class="btnrow">
+            <button
+              type="button"
+              class="btn sm"
+              disabled={busy}
+              onClick={() => void run(sendTest, 'Test sent. It should arrive in a few seconds.')}
+            >
+              Send a test
+            </button>
+          </div>
+        </>
       )}
     </section>
   );

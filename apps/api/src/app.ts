@@ -4,10 +4,12 @@ import type { AppEnv } from './auth/session';
 import type { Env } from './env';
 import { devOutbox } from './lib/email';
 import { HttpError } from './lib/http';
+import { devPushes } from './push/send';
 import { auth } from './routes/auth';
 import { invites } from './routes/invites';
 import { keys } from './routes/keys';
 import { me } from './routes/me';
+import { push } from './routes/push';
 import { spaces } from './routes/spaces';
 import { sync } from './routes/sync';
 
@@ -77,12 +79,19 @@ export function createApp() {
     const to = c.req.query('to');
     return c.json(devOutbox.filter((m) => !to || m.to === to.toLowerCase()));
   });
+  app.get('/dev/pushes', (c) => {
+    const host = new URL(c.req.url).hostname;
+    const local = host === 'localhost' || host === '127.0.0.1' || host === '[::1]';
+    if (c.env.EMAIL_PROVIDER !== 'dev-outbox' || !local) return c.json({ error: 'not_found' }, 404);
+    return c.json(devPushes);
+  });
   app.route('/auth', auth);
   app.route('/', me);
   app.route('/spaces', spaces);
   app.route('/invites', invites);
   app.route('/keys', keys);
   app.route('/sync', sync);
+  app.route('/push', push);
 
   app.notFound((c) => c.json({ error: 'not_found' }, 404));
   app.onError((err, c) => {

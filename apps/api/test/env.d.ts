@@ -8,5 +8,7 @@ declare namespace Cloudflare {
     ALLOWED_ORIGINS: string;
     ALLOW_SIGNUPS: 'open' | 'invite_only' | 'closed';
     TEST_MIGRATIONS: import('@cloudflare/vitest-plugin').D1Migration[];
+    VAPID_PUBLIC_KEY: string;
+    VAPID_PRIVATE_KEY: string;
   }
 }

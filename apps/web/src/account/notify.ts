@@ -1,0 +1,345 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+/**
+ * Notifications for a signed-in account (phase 5, ADR 0010).
+ *
+ * - This device subscribes with its browser push service; the Worker learns
+ *   the push address and keys for it, nothing else.
+ * - Telling the partner about a proposal or an answer: the text is sealed
+ *   here with the space key (core sealNotification) and sent after the record
+ *   itself has synced, so a tap always finds the plan.
+ * - Reminders: this device works out its upcoming reminders (8 days ahead),
+ *   seals each and replaces the server's list whenever they change.
+ */
+import {
+  type KeyRing,
+  type NotificationInput,
+  sealNotification,
+  toBase64Url,
+} from '@ours/core/crypto';
+import { expand, toInstant, toWall } from '@ours/core/time';
+import { effect, signal } from '@preact/signals';
+import { byKind, nameOf, type Slot, store, viewer } from '../app/model';
+import { fmtTime, zone } from '../app/select';
+import { ApiError, api } from './api';
+import { kvGet, kvSet } from './db';
+
+export type PushState =
+  | 'unsupported' // this browser has no Web Push
+  | 'needs-install' // iPhone/iPad: only after adding to the Home Screen
+  | 'unavailable' // this server has no push keys configured
+  | 'denied' // the person blocked notifications for this site
+  | 'off'
+  | 'on';
+
+export interface QuietHours {
+  start: number; // minutes after midnight
+  end: number;
+}
+
+export const pushState = signal<PushState>('off');
+export const quietHours = signal<QuietHours | null>(null);
+
+interface Context {
+  ring: KeyRing;
+  spaceId: string;
+  slot: Slot;
+  /** Resolves once local changes have reached the server. */
+  synced: () => Promise<void>;
+}
+let ctx: Context | null = null;
+let vapidKey: string | null = null;
+
+const REMINDER_HORIZON_MS = 8 * 86_400_000;
+const MAX_REMINDERS = 64;
+/** All-day plans: reminders count back from 9 AM on the day. */
+const ALL_DAY_TIME = '09:00';
+
+function isIos(): boolean {
+  return (
+    /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+    (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
+  );
+}
+function standalone(): boolean {
+  return (
+    window.matchMedia?.('(display-mode: standalone)').matches ||
+    (navigator as Navigator & { standalone?: boolean }).standalone === true
+  );
+}
+function supported(): boolean {
+  return 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+}
+
+/** Called by the session once sync is running. */
+export async function startNotifications(next: Context): Promise<void> {
+  ctx = next;
+  await refreshPushState();
+}
+
+export function stopNotifications(): void {
+  ctx = null;
+  pushState.value = 'off';
+  quietHours.value = null;
+}
+
+async function registration(): Promise<ServiceWorkerRegistration | null> {
+  if (!('serviceWorker' in navigator)) return null;
+  return (await navigator.serviceWorker.getRegistration()) ?? null;
+}
+
+export async function refreshPushState(): Promise<void> {
+  if (!supported()) {
+    pushState.value = isIos() && !standalone() ? 'needs-install' : 'unsupported';
+    return;
+  }
+  try {
+    const cfg = await api<{
+      key: string | null;
+      subscribed: boolean;
+      quiet: { start: number; end: number; tz: string } | null;
+    }>('/push/config');
+    vapidKey = cfg.key;
+    quietHours.value = cfg.quiet ? { start: cfg.quiet.start, end: cfg.quiet.end } : null;
+    if (!cfg.key) {
+      pushState.value = 'unavailable';
+      return;
+    }
+    if (Notification.permission === 'denied') {
+      pushState.value = 'denied';
+      return;
+    }
+    const sub = await (await registration())?.pushManager.getSubscription();
+    const granted = Notification.permission === 'granted';
+    // The browser renewed or replaced the subscription: tell the server.
+    if (sub && granted && (!cfg.subscribed || (await kvGet('push-endpoint')) !== sub.endpoint)) {
+      await sendSubscription(sub);
+      return;
+    }
+    pushState.value = cfg.subscribed && sub && granted ? 'on' : 'off';
+    if (pushState.value === 'on') scheduleReminders();
+  } catch {
+    // Offline: keep the last state.
+  }
+}
+
+async function sendSubscription(sub: PushSubscription): Promise<void> {
+  const json = sub.toJSON();
+  await api('/push/subscription', {
+    method: 'PUT',
+    body: { endpoint: sub.endpoint, p256dh: json.keys?.p256dh, auth: json.keys?.auth },
+  });
+  await kvSet('push-endpoint', sub.endpoint);
+  pushState.value = 'on';
+  lastReminderSig = null;
+  scheduleReminders();
+}
+
+function keyBytes(b64: string): Uint8Array<ArrayBuffer> {
+  const s = b64.replace(/-/g, '+').replace(/_/g, '/');
+  const bin = atob(s + '='.repeat((4 - (s.length % 4)) % 4));
+  return Uint8Array.from(bin, (ch) => ch.charCodeAt(0));
+}
+
+/** Asks permission (must follow a tap) and subscribes this device. */
+export async function enablePush(): Promise<void> {
+  if (!vapidKey) await refreshPushState();
+  if (!vapidKey) throw new Error('Notifications aren’t set up on this server.');
+  const permission = await Notification.requestPermission();
+  if (permission !== 'granted') {
+    pushState.value = permission === 'denied' ? 'denied' : 'off';
+    throw new Error(
+      permission === 'denied'
+        ? 'Notifications are blocked for this site. Allow them in your browser settings.'
+        : 'Notifications were not allowed.',
+    );
+  }
+  const reg = await navigator.serviceWorker.ready;
+  let sub = await reg.pushManager.getSubscription();
+  // A subscription made with another server key cannot be reused.
+  if (sub) {
+    const key = sub.options.applicationServerKey;
+    if (key && toBase64Url(new Uint8Array(key)) !== vapidKey) {
+      await sub.unsubscribe();
+      sub = null;
+    }
+  }
+  sub ??= await reg.pushManager.subscribe({
+    userVisibleOnly: true,
+    applicationServerKey: keyBytes(vapidKey),
+  });
+  await sendSubscription(sub);
+}
+
+export async function disablePush(): Promise<void> {
+  const sub = await (await registration())?.pushManager.getSubscription();
+  await sub?.unsubscribe().catch(() => false);
+  await api('/push/subscription', { method: 'DELETE' }).catch(() => undefined);
+  if (ctx) {
+    await api('/push/reminders', {
+      method: 'PUT',
+      body: { space_id: ctx.spaceId, items: [] },
+    }).catch(() => undefined);
+  }
+  lastReminderSig = null;
+  await kvSet('reminders-sig', null);
+  pushState.value = 'off';
+}
+
+export async function setQuietHours(q: QuietHours | null): Promise<void> {
+  await api('/push/quiet', { method: 'PUT', body: q ? { ...q, tz: zone } : null });
+  quietHours.value = q;
+}
+
+/* ---------- sending ---------- */
+
+function sealFor(input: NotificationInput) {
+  if (!ctx) return null;
+  const key = ctx.ring.currentSpaceKey(ctx.spaceId);
+  const s = sealNotification(key.key, ctx.spaceId, key.version, input);
+  return {
+    key_version: key.version,
+    payload: { nonce: toBase64Url(s.nonce), ciphertext: toBase64Url(s.ciphertext) },
+  };
+}
+
+const truncate = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
+
+/**
+ * Tells the partner's devices, once local changes have synced. Best effort:
+ * offline, or with nobody subscribed, nothing happens and the plan still
+ * arrives on their next sync.
+ */
+export function notifyPartner(input: NotificationInput): void {
+  const c = ctx;
+  if (!c) return;
+  void c
+    .synced()
+    .then(() => {
+      const sealed = sealFor({
+        ...input,
+        title: truncate(input.title, 120),
+        body: truncate(input.body, 400),
+      });
+      if (!sealed) return;
+      return api('/push/notify', {
+        body: { space_id: c.spaceId, to: 'partner', ...sealed },
+      });
+    })
+    .catch(() => undefined);
+}
+
+/** Sends a test notification to this person's own devices. */
+export async function sendTest(): Promise<void> {
+  if (!ctx) return;
+  const sealed = sealFor({
+    title: 'Notifications are on',
+    body: `This is how ${nameOf(ctx.slot === 'a' ? 'b' : 'a')}’s plans and your reminders will look.`,
+    kind: 'test',
+  });
+  if (!sealed) return;
+  try {
+    await api('/push/notify', { body: { space_id: ctx.spaceId, to: 'me', ...sealed } });
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 429)
+      throw new Error('That’s a lot of tests. Try again later.');
+    throw err;
+  }
+}
+
+/* ---------- reminders ---------- */
+
+interface Planned {
+  fire_at: number;
+  title: string;
+  body: string;
+  record_id: string;
+  start: number;
+}
+
+export function reminderLabel(minutes: number): string {
+  if (minutes === 0) return 'At the start';
+  if (minutes < 60) return `${minutes} minutes before`;
+  if (minutes < 1440) return minutes === 60 ? '1 hour before' : `${minutes / 60} hours before`;
+  return minutes === 1440 ? '1 day before' : `${minutes / 1440} days before`;
+}
+
+/** The reminders this person wants in the next 8 days, soonest first. */
+export function plannedReminders(now = Date.now()): Planned[] {
+  const me = viewer.value;
+  const out: Planned[] = [];
+  for (const e of byKind('event')) {
+    if (e.rec.kind !== 'event') continue;
+    const d = e.rec.data;
+    const minutes = d.remind?.[me];
+    if (minutes === null || minutes === undefined || d.status === 'declined') continue;
+    const lead = minutes * 60_000;
+    const occurrences = expand(d, now, now + REMINDER_HORIZON_MS + lead + 86_400_000, zone);
+    for (const o of occurrences) {
+      const day = toWall(o.start, zone).slice(0, 10);
+      const anchor = d.all_day ? toInstant(`${day}T${ALL_DAY_TIME}`, zone) : o.start;
+      const fire = anchor - lead;
+      if (fire < now || fire > now + REMINDER_HORIZON_MS) continue;
+      const when = d.all_day
+        ? new Date(anchor).toLocaleDateString(undefined, { weekday: 'long', timeZone: zone })
+        : fmtTime(toWall(o.start, zone).slice(11, 16));
+      const leadText =
+        minutes === 0
+          ? d.all_day
+            ? 'Today'
+            : 'Starting now'
+          : `In ${reminderLabel(minutes).replace(' before', '')}`;
+      out.push({
+        fire_at: fire,
+        start: o.start,
+        record_id: e.id,
+        title: d.title,
+        body: [leadText, minutes === 0 && d.all_day ? null : when, d.location]
+          .filter(Boolean)
+          .join(' · '),
+      });
+    }
+  }
+  return out.sort((a, b) => a.fire_at - b.fire_at).slice(0, MAX_REMINDERS);
+}
+
+let lastReminderSig: string | null = null;
+let reminderTimer: ReturnType<typeof setTimeout> | undefined;
+
+function scheduleReminders(): void {
+  clearTimeout(reminderTimer);
+  reminderTimer = setTimeout(() => void syncReminders(), 1500);
+}
+
+/** Replaces the server's list when this device's planned reminders changed. */
+export async function syncReminders(): Promise<void> {
+  const c = ctx;
+  if (!c || pushState.value !== 'on') return;
+  const planned = plannedReminders();
+  const sig = JSON.stringify(planned.map((p) => [p.fire_at, p.title, p.body, p.record_id]));
+  lastReminderSig ??= (await kvGet<string | null>('reminders-sig')) ?? null;
+  if (sig === lastReminderSig) return;
+  const items = planned.flatMap((p) => {
+    const sealed = sealFor({
+      title: truncate(p.title, 120),
+      body: truncate(p.body, 400),
+      record_id: p.record_id,
+      kind: 'reminder',
+      not_before: p.fire_at,
+      ttl_ms: 2 * 3_600_000,
+    });
+    return sealed ? [{ fire_at: p.fire_at, ...sealed }] : [];
+  });
+  try {
+    await api('/push/reminders', { method: 'PUT', body: { space_id: c.spaceId, items } });
+    lastReminderSig = sig;
+    await kvSet('reminders-sig', sig);
+  } catch {
+    // Retried on the next change or app start.
+  }
+}
+
+// Re-plan whenever the plans change.
+effect(() => {
+  void store.value;
+  if (ctx && pushState.value === 'on') scheduleReminders();
+});

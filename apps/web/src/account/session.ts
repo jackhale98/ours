@@ -31,6 +31,7 @@ import { HAS_API } from '../config';
 import { ApiError, api, setToken } from './api';
 import { kvGet, kvSet, wipe } from './db';
 import { loadRing, saveRing } from './keystore';
+import { disablePush, startNotifications, stopNotifications } from './notify';
 import { SyncEngine } from './sync';
 
 export interface Session {
@@ -139,6 +140,13 @@ async function refresh(session: Session): Promise<void> {
       slot: space.role,
     });
     await engine.start();
+    const e = engine;
+    void startNotifications({
+      ring,
+      spaceId: space.space_id,
+      slot: space.role,
+      synced: () => e.sync(),
+    });
   }
   account.value = {
     status: 'ready',
@@ -239,6 +247,9 @@ function deviceLabel(): string {
  * phrase or another device, private data can't come back, so the UI warns first.
  */
 export async function signOut(callServer = true): Promise<void> {
+  // The push subscription belongs to this device's session: drop it first.
+  if (callServer) await disablePush().catch(() => {});
+  stopNotifications();
   if (callServer) await api('/auth/logout', { body: {} }).catch(() => {});
   engine?.stop();
   engine = null;

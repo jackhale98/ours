@@ -31,6 +31,14 @@ export interface Env {
   MAX_DEVICES_PER_USER?: string;
   MAX_SPACE_BYTES?: string;
   MAX_PUSHES_PER_MINUTE?: string;
+  /** Notifications a user may send per hour (default 60). */
+  MAX_PUSHES_PER_HOUR?: string;
+  /** Web Push (VAPID, RFC 8292). Without both keys, notifications are off. */
+  VAPID_PUBLIC_KEY?: string;
+  /** Secret: `wrangler secret put VAPID_PRIVATE_KEY`. */
+  VAPID_PRIVATE_KEY?: string;
+  /** Contact for push services, `mailto:` or https URL (defaults to APP_URL). */
+  VAPID_SUBJECT?: string;
 }
 
 export const num = (value: string | undefined, fallback: number): number => {

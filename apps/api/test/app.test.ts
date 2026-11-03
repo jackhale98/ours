@@ -67,5 +67,7 @@ describe('dev outbox', () => {
   it('is off unless EMAIL_PROVIDER is dev-outbox', async () => {
     const res = await exports.default.fetch(new Request('https://api.example/dev/outbox'));
     expect(res.status).toBe(404);
+    const pushes = await exports.default.fetch(new Request('https://api.example/dev/pushes'));
+    expect(pushes.status).toBe(404);
   });
 });

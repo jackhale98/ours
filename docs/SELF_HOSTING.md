@@ -21,8 +21,20 @@ You need a GitHub account (for Pages) and a Cloudflare account (Workers + D1). B
 | `wrangler secret put` | `EMAIL_API_KEY` | Provider API key. |
 | `wrangler secret put` | `TURNSTILE_SECRET` | Cloudflare Turnstile secret; bot checks are skipped if unset. |
 | `wrangler secret put` | `RATE_LIMIT_SALT` | Random string used to hash rate-limit keys. |
-| `wrangler.jsonc` vars | `MAX_SPACES_PER_USER`, `MAX_DEVICES_PER_USER`, `MAX_SPACE_BYTES`, `MAX_PUSHES_PER_MINUTE` | Quotas (defaults 3, 10, 20 MB, 120). |
+| `wrangler.jsonc` vars | `MAX_SPACES_PER_USER`, `MAX_DEVICES_PER_USER`, `MAX_SPACE_BYTES`, `MAX_PUSHES_PER_MINUTE`, `MAX_PUSHES_PER_HOUR` | Quotas (defaults 3, 10, 20 MB, 120 sync pushes a minute, 60 notifications an hour). |
+| `wrangler.jsonc` vars | `VAPID_PUBLIC_KEY`, `VAPID_SUBJECT` | Web Push public key and contact (`mailto:` or https; defaults to `APP_URL`). Empty key = notifications off. |
+| `wrangler secret put` | `VAPID_PRIVATE_KEY` | Web Push private key. See "Notifications" below. |
 | Repo secrets | `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID` | For `deploy-api.yml`. Set repo variable `CLOUDFLARE_DEPLOY=true` to enable it. |
+
+## Notifications
+
+Generate a VAPID key pair once (any machine with Node 20+):
+
+```sh
+node -e '(async()=>{const k=await crypto.subtle.generateKey({name:"ECDSA",namedCurve:"P-256"},true,["sign"]);console.log("VAPID_PUBLIC_KEY="+Buffer.from(await crypto.subtle.exportKey("raw",k.publicKey)).toString("base64url"));console.log("VAPID_PRIVATE_KEY="+(await crypto.subtle.exportKey("jwk",k.privateKey)).d)})()'
+```
+
+Put the public key in `wrangler.jsonc` and store the private key with `wrangler secret put VAPID_PRIVATE_KEY`. Changing the key pair later invalidates every device's subscription; people turn notifications on again in Privacy. On iPhone and iPad, Web Push works only once Ours is added to the Home Screen (iOS 16.4+).
 
 ## Backups
 
@@ -33,4 +45,4 @@ D1 Time Travel provides point-in-time recovery. To restore: `wrangler d1 time-tr
 - Keep `observability.logs.invocation_logs` set to `false` in `wrangler.jsonc` (CI checks this): Cloudflare's invocation logs would otherwise store client IP addresses and invite URLs.
 - Set `RATE_LIMIT_SALT` in production; with real email (`EMAIL_PROVIDER=resend`) the API refuses sign-ins without it.
 - **GitHub Pages and passkeys:** on `https://<user>.github.io/<repo>/`, the passkey relying party (`RP_ID=<user>.github.io`) and the CORS origin are shared with every other project page under that GitHub account. Any of those pages could request passkeys for your RP ID or call your API from an allowed origin. Use a custom domain for a public instance.
-- Never set `EMAIL_PROVIDER=dev-outbox` outside local tests: it exposes sign-in links at `/dev/outbox`.
+- Never set `EMAIL_PROVIDER=dev-outbox` outside local tests: it exposes sign-in links at `/dev/outbox` and records pushes at `/dev/pushes` instead of sending them.

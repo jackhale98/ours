@@ -57,6 +57,10 @@ if (process.argv.includes('--notices')) {
     '',
     'Build-time data: caniuse-lite (CC-BY-4.0), © Alexis Deveria and contributors.',
     '',
+    '## Vendored code',
+    '',
+    '- `apps/api/src/push/encrypt.ts` and `apps/api/src/push/vapid.ts`: adapted from mycelium-web (https://github.com/jackhale98/mycelium-web), GPL-3.0-or-later, by the same author, relicensed into Ours under AGPL-3.0-or-later (ADR 0010).',
+    '',
   ].join('\n');
   writeFileSync('THIRD_PARTY_NOTICES.md', body);
 }

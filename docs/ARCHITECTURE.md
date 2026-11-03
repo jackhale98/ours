@@ -79,7 +79,7 @@ Timed events store wall-clock `start`/`end` (`YYYY-MM-DDTHH:mm`) plus an IANA zo
 1. License: AGPL-3.0-or-later (assumed, ADR 0001) or MIT?
 2. App name and custom domain (affects `OURS_BASE` and CORS).
 3. Email provider for magic links (needs a DPA).
-4. Push: proposed in ADR 0010 — vendor mycelium-web's WebCrypto VAPID + RFC 8291 code into the Worker; no shared package yet.
+4. Push (ADR 0010): mycelium-web's WebCrypto VAPID + RFC 8291 code vendored into `apps/api/src/push/`. Proposals, answers and notes notify the partner after the record syncs; reminders are planned on device (8 days ahead) and replace the server's list; a per-minute cron sends due reminders and notifications held for quiet hours.
 5. Week start day and default reminder times (assumed Monday; none).
 6. D1 jurisdiction (ADR 0006 proposes `eu`).
 7. Governing law; public abuse/security/privacy contact address.

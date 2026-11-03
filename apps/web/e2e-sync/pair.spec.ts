@@ -57,10 +57,101 @@ async function newPage(browser: Browser) {
   return context.newPage();
 }
 
+/**
+ * Headless browsers can't reach a real push service, so this stands in for
+ * the browser's PushManager: a subscription with real P-256 keys on an
+ * allowed push-service address. The private key stays in the test, which
+ * plays the push service and the browser's decryption step.
+ */
+async function fakePushManager(page: Page) {
+  await page.context().grantPermissions(['notifications'], { origin: 'http://localhost:4174' });
+  await page.addInitScript(() => {
+    const b64 = (b: ArrayBuffer | Uint8Array) =>
+      btoa(String.fromCharCode(...new Uint8Array(b)))
+        .replace(/\+/g, '-')
+        .replace(/\//g, '_')
+        .replace(/=+$/, '');
+    const load = () => {
+      const raw = localStorage.getItem('e2e-push');
+      return raw ? (JSON.parse(raw) as { endpoint: string; p256dh: string; auth: string }) : null;
+    };
+    const asSub = (s: { endpoint: string; p256dh: string; auth: string }) => ({
+      endpoint: s.endpoint,
+      options: { applicationServerKey: null },
+      toJSON: () => ({ endpoint: s.endpoint, keys: { p256dh: s.p256dh, auth: s.auth } }),
+      unsubscribe: async () => {
+        localStorage.removeItem('e2e-push');
+        return true;
+      },
+    });
+    PushManager.prototype.getSubscription = async () => {
+      const s = load();
+      return (s ? asSub(s) : null) as unknown as PushSubscription;
+    };
+    PushManager.prototype.subscribe = async () => {
+      const keys = (await crypto.subtle.generateKey({ name: 'ECDH', namedCurve: 'P-256' }, true, [
+        'deriveBits',
+      ])) as CryptoKeyPair;
+      const s = {
+        endpoint: `https://fcm.googleapis.com/fcm/send/e2e-${Date.now()}`,
+        p256dh: b64(await crypto.subtle.exportKey('raw', keys.publicKey)),
+        auth: b64(crypto.getRandomValues(new Uint8Array(16))),
+        jwk: await crypto.subtle.exportKey('jwk', keys.privateKey),
+      };
+      localStorage.setItem('e2e-push', JSON.stringify(s));
+      return asSub(s) as unknown as PushSubscription;
+    };
+  });
+}
+
+const unb64 = (t: string) => Buffer.from(t, 'base64url');
+
+/** RFC 8291 decryption, as the receiving browser does it. */
+async function openWebPush(
+  pushBody: Buffer,
+  sub: { p256dh: string; auth: string; jwk: JsonWebKey },
+): Promise<string> {
+  const subtle = globalThis.crypto.subtle;
+  const u8 = (b: Uint8Array): Uint8Array<ArrayBuffer> => new Uint8Array(b);
+  const body = u8(pushBody);
+  const salt = body.slice(0, 16);
+  const idlen = body[20] ?? 0;
+  const asPublic = body.slice(21, 21 + idlen);
+  const ecdhAlg = { name: 'ECDH', namedCurve: 'P-256' };
+  const priv = await subtle.importKey('jwk', sub.jwk, ecdhAlg, false, ['deriveBits']);
+  const sender = await subtle.importKey('raw', asPublic, ecdhAlg, false, []);
+  const ecdh = new Uint8Array(await subtle.deriveBits({ name: 'ECDH', public: sender }, priv, 256));
+  const hkdf = async (
+    s: Uint8Array<ArrayBuffer>,
+    ikm: Uint8Array<ArrayBuffer>,
+    info: Uint8Array<ArrayBuffer>,
+    bits: number,
+  ) =>
+    new Uint8Array(
+      await subtle.deriveBits(
+        { name: 'HKDF', hash: 'SHA-256', salt: s, info },
+        await subtle.importKey('raw', ikm, 'HKDF', false, ['deriveBits']),
+        bits,
+      ),
+    );
+  const text = (t: string) => u8(Buffer.from(t));
+  const ua = u8(unb64(sub.p256dh));
+  const info = u8(Buffer.concat([Buffer.from('WebPush: info\0'), ua, asPublic]));
+  const ikm = await hkdf(u8(unb64(sub.auth)), ecdh, info, 256);
+  const cek = await hkdf(salt, ikm, text('Content-Encoding: aes128gcm\0'), 128);
+  const nonce = await hkdf(salt, ikm, text('Content-Encoding: nonce\0'), 96);
+  const key = await subtle.importKey('raw', cek, 'AES-GCM', false, ['decrypt']);
+  const plain = Buffer.from(
+    await subtle.decrypt({ name: 'AES-GCM', iv: nonce }, key, body.slice(21 + idlen)),
+  );
+  return plain.subarray(0, -1).toString('utf8');
+}
+
 test('sign up, pair, compare safety codes, and sync plans both ways', async ({ browser }) => {
   const stamp = Date.now();
   const sam = await newPage(browser);
   const alex = await newPage(browser);
+  await fakePushManager(alex);
 
   // Sam creates the space.
   await sam.goto('/#start');
@@ -97,11 +188,83 @@ test('sign up, pair, compare safety codes, and sync plans both ways', async ({ b
     await expect(page.getByText('Late shift')).toHaveCount(0);
   }
 
+  // Alex turns on notifications on their device.
+  await alex.goto('/#privacy');
+  const toggle = alex.getByRole('switch', { name: 'Notifications on this device' });
+  await toggle.click();
+  await expect(alex.locator('.toast-host')).toContainText('Notifications on.');
+  await expect(toggle).toBeChecked();
+  const alexSub = JSON.parse(
+    (await alex.evaluate(() => localStorage.getItem('e2e-push'))) ?? 'null',
+  ) as { endpoint: string; p256dh: string; auth: string; jwk: JsonWebKey };
+  expect(alexSub.endpoint).toContain('fcm.googleapis.com');
+
   // Sam proposes a shared plan.
   await sam.keyboard.press('n');
   await sam.getByRole('textbox', { name: 'What’s the plan?' }).fill('Dinner tomorrow 7pm @ Vic’s');
   await sam.getByRole('button', { name: 'Send to Alex' }).click();
   await expect(sam.getByRole('button', { name: /Dinner/ })).toBeVisible();
+
+  // The Worker pushed a notification to Alex's subscription. Everything it
+  // handled is ciphertext: the push body, and the wrapper inside it.
+  let pushed: { endpoint: string; body: string; ttl: string } | undefined;
+  for (let i = 0; i < 100 && !pushed; i++) {
+    const all = (await (await sam.request.get(`${API}/dev/pushes`)).json()) as {
+      endpoint: string;
+      body: string;
+      ttl: string;
+    }[];
+    pushed = all.find((p) => p.endpoint === alexSub.endpoint);
+    if (!pushed) await sam.waitForTimeout(100);
+  }
+  expect(pushed, 'a push for Alex').toBeTruthy();
+  const pushBody = unb64(pushed?.body ?? '');
+  for (const secret of ['Dinner', 'Vic', 'Sam asked']) {
+    expect(pushBody.includes(Buffer.from(secret))).toBe(false);
+  }
+  const wrapper = await openWebPush(pushBody, alexSub);
+  expect(Object.keys(JSON.parse(wrapper)).sort()).toEqual(['k', 'p', 's', 'v']);
+  for (const secret of ['Dinner', 'Vic', 'Sam asked']) expect(wrapper).not.toContain(secret);
+
+  // Hand it to Alex's service worker the way the browser would: it decrypts
+  // with Alex's keys and shows the notification, with a "Yes" action.
+  const cdp = await alex.context().newCDPSession(alex);
+  const registration = new Promise<string>((resolve) => {
+    cdp.on('ServiceWorker.workerRegistrationUpdated', (e) => {
+      const r = e.registrations.find((x) => x.scopeURL.startsWith('http://localhost:4174'));
+      if (r) resolve(r.registrationId);
+    });
+  });
+  await cdp.send('ServiceWorker.enable');
+  await cdp.send('ServiceWorker.deliverPushMessage', {
+    origin: 'http://localhost:4174',
+    registrationId: await registration,
+    data: wrapper,
+  });
+  await expect
+    .poll(
+      () =>
+        alex.evaluate(async () =>
+          (await (await navigator.serviceWorker.ready).getNotifications()).map((n) => ({
+            title: n.title,
+            body: n.body,
+          })),
+        ),
+      { timeout: 10_000 },
+    )
+    .toEqual([{ title: 'Sam asked: Dinner', body: expect.stringContaining('7 PM') }]);
+  // A replayed push is dropped: still one notification.
+  await cdp.send('ServiceWorker.deliverPushMessage', {
+    origin: 'http://localhost:4174',
+    registrationId: await registration,
+    data: wrapper,
+  });
+  await alex.waitForTimeout(500);
+  expect(
+    await alex.evaluate(
+      async () => (await (await navigator.serviceWorker.ready).getNotifications()).length,
+    ),
+  ).toBe(1);
 
   // Sam also adds a private plan.
   await sam.keyboard.press('n');
@@ -114,6 +277,7 @@ test('sign up, pair, compare safety codes, and sync plans both ways', async ({ b
   await expect(sam.locator('.rail .demo')).toHaveText('Synced', { timeout: 15_000 });
 
   // Alex sees the proposal (and only "Busy" for the private plan), and accepts.
+  await alex.goto('/#plan');
   await alex.reload();
   await expect(alex.getByText('Sam asked · needs your answer')).toBeVisible({ timeout: 15_000 });
   await expect(alex.getByText('Surprise shopping')).toHaveCount(0);

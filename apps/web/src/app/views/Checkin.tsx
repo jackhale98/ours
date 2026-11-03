@@ -5,6 +5,7 @@ import { signal } from '@preact/signals';
 import type { ComponentChildren } from 'preact';
 import { choresList, ideasList, itemsOf } from '../lists';
 import { byKind, createEvent, nameOf, partner, put, settings, viewer } from '../model';
+import { noticeProposal } from '../notices';
 import { agenda, dow, fmtLong, freeEvenings, relDay, today, zone } from '../select';
 import { Icon, Marker, toast } from '../ui';
 import { ItemRow } from './Lists';
@@ -235,7 +236,7 @@ export function CheckinView() {
                   class="btn primary"
                   onClick={() => {
                     if (!date) return;
-                    createEvent({
+                    const id = createEvent({
                       title: idea.rec.data.text,
                       start: `${date}T19:00`,
                       end: `${date}T21:00`,
@@ -252,6 +253,7 @@ export function CheckinView() {
                       countdown: false,
                       stub_id: null,
                     });
+                    noticeProposal(id);
                     const done = [...d.done];
                     done[2] = true;
                     setDraft({ done });

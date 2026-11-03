@@ -67,6 +67,9 @@ const whenEntries = {
 };
 const WHEN_MESSAGE = 'start/end must match all_day, end must not precede start';
 
+/** Reminder offsets: at the start, up to a week before. */
+const ReminderMinutes = v.pipe(v.number(), v.integer(), v.minValue(0), v.maxValue(7 * 24 * 60));
+
 export const EventData = v.pipe(
   v.strictObject({
     ...whenEntries,
@@ -81,6 +84,10 @@ export const EventData = v.pipe(
     countdown: v.boolean(),
     /** For privacy 'busy': id of the shared busy_stub that shadows this event. */
     stub_id: v.nullable(RefId),
+    /** Each person's own reminder: minutes before the start, or null for none. */
+    remind: v.optional(
+      v.strictObject({ a: v.nullable(ReminderMinutes), b: v.nullable(ReminderMinutes) }),
+    ),
   }),
   v.check((e) => isValidWhen(e), WHEN_MESSAGE),
 );

@@ -7,7 +7,7 @@ import { setTheme, type ThemePref, theme } from '../../theme';
 import { mode, names, SPACE_ID, setViewer, spaceKey, store, viewer } from '../model';
 import { seedDemo } from '../seed';
 import { Avatar, Icon, toast } from '../ui';
-import { AccountCard, DevicesCard, RecoveryCard } from './AccountCards';
+import { AccountCard, DevicesCard, NotificationsCard, RecoveryCard } from './AccountCards';
 import { CalendarsCard } from './Calendars';
 
 const REPO = 'https://github.com/jackhale98/ours';
@@ -98,7 +98,10 @@ export function PrivacyView() {
             </p>
           </section>
         ) : (
-          <DevicesCard />
+          <>
+            <DevicesCard />
+            <NotificationsCard />
+          </>
         )}
 
         <CalendarsCard />

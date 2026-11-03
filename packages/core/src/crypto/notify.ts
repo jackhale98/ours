@@ -25,6 +25,8 @@ export const NotificationBody = v.pipe(
     title: v.pipe(v.string(), v.maxLength(120)),
     body: v.pipe(v.string(), v.maxLength(400)),
     record_id: v.optional(v.pipe(v.string(), v.maxLength(128))),
+    /** Lets the receiving device offer the right actions (e.g. "Yes" on a proposal). */
+    kind: v.optional(v.picklist(['proposal', 'answer', 'note', 'reminder', 'test'])),
     not_before: Ms,
     expires_at: Ms,
   }),

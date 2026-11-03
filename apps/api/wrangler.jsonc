@@ -22,7 +22,11 @@
     "MAX_SPACES_PER_USER": "3",
     "MAX_DEVICES_PER_USER": "10",
     "MAX_SPACE_BYTES": "20971520",
-    "MAX_PUSHES_PER_MINUTE": "120"
+    "MAX_PUSHES_PER_MINUTE": "120",
+    "MAX_PUSHES_PER_HOUR": "60",
+    // Web Push: set VAPID_PUBLIC_KEY here and `wrangler secret put VAPID_PRIVATE_KEY`
+    // (see docs/SELF_HOSTING.md). Empty = notifications off.
+    "VAPID_PUBLIC_KEY": ""
   },
   "d1_databases": [
     {

@@ -4,12 +4,14 @@ import { parseQuickAdd } from '@ours/core/parse';
 import { addDays, addWallMinutes } from '@ours/core/time';
 import { signal } from '@preact/signals';
 import { useState } from 'preact/hooks';
+import { pushState, reminderLabel } from '../account/notify';
 import {
   addComment,
   commentsFor,
   createEvent,
   deleteEvent,
   findEntry,
+  mode,
   nameOf,
   partner,
   type Slot,
@@ -17,6 +19,7 @@ import {
   update,
   viewer,
 } from './model';
+import { noticeAnswer, noticeNote, noticeProposal } from './notices';
 import { fmtTime, ownerLabel, type Row, relDay, repeatText, today, whenText, zone } from './select';
 import { Avatar, CloseButton, Icon, Marker, Sheet, Switch, toast } from './ui';
 
@@ -94,7 +97,7 @@ function QuickAdd({ preset }: { preset: QuickPreset }) {
       if (end <= start) end = `${addDays(date, 1)}T${parsed.endTime}`;
     }
     try {
-      createEvent({
+      const id = createEvent({
         title,
         start,
         end,
@@ -111,6 +114,7 @@ function QuickAdd({ preset }: { preset: QuickPreset }) {
         countdown: false,
         stub_id: null,
       });
+      if (proposing) noticeProposal(id);
     } catch {
       toast('That plan couldn’t be saved. Check the title and time.');
       return;
@@ -251,10 +255,13 @@ function QuickAdd({ preset }: { preset: QuickPreset }) {
 
 /* ---------- event details ---------- */
 
+const REMIND_OPTIONS = [0, 15, 60, 1440] as const;
+
 export function accept(id: string): void {
   const e = findEntry(id);
   if (e?.rec.kind !== 'event') return;
   update<'event'>(id, { status: 'confirmed' });
+  noticeAnswer(id, true);
   toast(`Added. ${nameOf(e.rec.data.proposed_by ?? partner.value)} will see your yes.`);
 }
 
@@ -263,6 +270,7 @@ export function decline(id: string): void {
   const e = findEntry(id);
   if (e?.rec.kind !== 'event') return;
   update<'event'>(id, { status: 'declined' });
+  noticeAnswer(id, false);
   toast(`Declined. ${nameOf(partner.value)} will see you can’t make it.`, () =>
     update<'event'>(id, { status: 'proposed' }),
   );
@@ -320,6 +328,7 @@ function EventSheet({ id }: { id: string }) {
     const text = note.trim();
     if (!text) return;
     addComment(id, text);
+    noticeNote(id, text);
     setNote('');
   };
 
@@ -391,6 +400,7 @@ function EventSheet({ id }: { id: string }) {
               class="btn"
               onClick={() => {
                 update<'event'>(id, { status: 'proposed' });
+                noticeProposal(id);
                 toast(`Asked ${nameOf(p)} again.`);
               }}
             >
@@ -423,6 +433,39 @@ function EventSheet({ id }: { id: string }) {
           hint={`${nameOf(p)} sees “Busy” and nothing else.`}
         />
       )}
+      {e.status !== 'declined' &&
+        (e.owner === me || e.owner === 'both' || e.proposed_by === me) && (
+          <div class="field">
+            <label for="remind">Remind me</label>
+            <select
+              id="remind"
+              class="txt"
+              value={String(e.remind?.[me] ?? 'none')}
+              onChange={(ev) => {
+                const v = ev.currentTarget.value;
+                const minutes = v === 'none' ? null : Number(v);
+                const prev = e.remind ?? { a: null, b: null };
+                update<'event'>(id, { remind: { ...prev, [me]: minutes } });
+              }}
+            >
+              <option value="none">No reminder</option>
+              {REMIND_OPTIONS.map((m) => (
+                <option key={m} value={String(m)}>
+                  {reminderLabel(m)}
+                </option>
+              ))}
+            </select>
+            {mode.value === 'demo' ? (
+              <p class="small muted">In the demo, reminders are saved but not sent.</p>
+            ) : (
+              pushState.value !== 'on' && (
+                <p class="small muted">
+                  Turn on notifications in Privacy to get reminders on this device.
+                </p>
+              )
+            )}
+          </div>
+        )}
       <div class="thread">
         <p class="eyebrow">Notes</p>
         {comments.length ? (
