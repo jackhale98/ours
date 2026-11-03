@@ -6,13 +6,14 @@ import { defineConfig, loadEnv, type Plugin } from 'vite';
 /**
  * Configuration via environment (see docs/SELF_HOSTING.md):
  *   OURS_BASE     base path, e.g. "/ours/" for a GitHub Pages project site, "/" for a custom domain
- *   VITE_API_URL  origin of the API Worker, e.g. "https://ours-api.example.workers.dev"
+ *   VITE_API_URL  origin of the API Worker, e.g. "https://ours-api.example.workers.dev".
+ *                 Empty or unset in production builds = demo-only site (no API, connect-src 'self').
  */
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '');
   const base = env.OURS_BASE ?? '/';
-  const api = env.VITE_API_URL ?? 'http://localhost:8787';
-  const apiOrigin = new URL(api).origin;
+  const api = env.VITE_API_URL || (mode === 'development' ? 'http://localhost:8787' : '');
+  const apiOrigin = api ? new URL(api).origin : '';
 
   // GitHub Pages cannot send headers, so the CSP lives in a meta tag.
   const csp = [
@@ -21,7 +22,7 @@ export default defineConfig(({ mode }) => {
     "style-src 'self'",
     "img-src 'self' data: blob:",
     "font-src 'self'",
-    `connect-src 'self' ${apiOrigin}`,
+    `connect-src 'self'${apiOrigin ? ` ${apiOrigin}` : ''}`,
     "worker-src 'self'",
     "manifest-src 'self'",
     "object-src 'none'",
