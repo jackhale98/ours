@@ -35,7 +35,11 @@ export interface Occurrence {
   end: number;
   /** Wall-clock start in the event's zone (or the date for all-day events). */
   localStart: string;
-  /** 0 for the first occurrence. Stable while the rule is unchanged. */
+  /**
+   * Stable id of this occurrence within its series: its wall-clock start as
+   * minutes since 1970 (floating). Unique per occurrence, and computed without
+   * walking the series from its first date.
+   */
   index: number;
 }
 
@@ -51,6 +55,63 @@ const ALLOWED_RULE_PARTS = new Set([
   'WKST',
 ]);
 
+const MONTH_DAYS = [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+
+/**
+ * Whether a rule can ever produce a date. rrule.js walks day by day to the
+ * year 9999 looking for a match, so an impossible rule (e.g. the 30th of
+ * February) would freeze the app (security review 0004, M1). With the parts
+ * allowed above, impossibility comes from month days that no allowed month
+ * has, or ordinal weekdays combined with month days.
+ */
+function feasible(opts: Partial<import('rrule').Options>): boolean {
+  const months = (
+    Array.isArray(opts.bymonth) ? opts.bymonth : opts.bymonth ? [opts.bymonth] : []
+  ).map(Number);
+  const longest = months.length ? Math.max(...months.map((m) => MONTH_DAYS[m - 1] ?? 0)) : 31;
+  const days = Array.isArray(opts.bymonthday)
+    ? opts.bymonthday
+    : opts.bymonthday !== undefined && opts.bymonthday !== null
+      ? [opts.bymonthday]
+      : [];
+  if (days.length && !days.some((d) => d !== 0 && Math.abs(d) <= longest)) return false;
+  const weekdays = Array.isArray(opts.byweekday)
+    ? opts.byweekday
+    : opts.byweekday !== undefined && opts.byweekday !== null
+      ? [opts.byweekday]
+      : [];
+  const ordinal = weekdays.some((w) => typeof w === 'object' && w !== null && 'n' in w && !!w.n);
+  if (ordinal && days.length) return false;
+  // BYSETPOS picks the nth candidate in each period. Allowed only where every
+  // period is sure to have that many candidates (e.g. "last Monday": -1).
+  const setpos = Array.isArray(opts.bysetpos)
+    ? opts.bysetpos
+    : opts.bysetpos !== undefined && opts.bysetpos !== null
+      ? [opts.bysetpos]
+      : [];
+  if (setpos.length) {
+    if (days.length || ordinal) return false;
+    const perWeek = Math.max(1, weekdays.length);
+    const nMonths = Math.max(1, months.length);
+    const candidates =
+      opts.freq === RRule.WEEKLY
+        ? weekdays.length || 1
+        : opts.freq === RRule.MONTHLY
+          ? weekdays.length
+            ? 4 * perWeek
+            : 28
+          : opts.freq === RRule.YEARLY
+            ? weekdays.length
+              ? (months.length ? 4 * nMonths : 52) * perWeek
+              : months.length
+                ? 28 * nMonths
+                : 365
+            : 1;
+    if (!setpos.every((p) => p !== 0 && Math.abs(p) <= candidates)) return false;
+  }
+  return true;
+}
+
 /** Accepts a bare RRULE value such as "FREQ=WEEKLY;BYDAY=SA". No DTSTART or TZID. */
 export function isValidRRule(rule: string): boolean {
   if (rule.length > 500) return false;
@@ -59,7 +120,13 @@ export function isValidRRule(rule: string): boolean {
   if (!parts.some((p) => p[0] === 'FREQ')) return false;
   try {
     const opts = RRule.parseString(rule);
-    return opts.freq !== undefined && opts.freq >= RRule.YEARLY && opts.freq <= RRule.DAILY;
+    return (
+      opts.freq !== undefined &&
+      opts.freq >= RRule.YEARLY &&
+      opts.freq <= RRule.DAILY &&
+      (opts.interval ?? 1) >= 1 &&
+      feasible(opts)
+    );
   } catch {
     return false;
   }
@@ -80,7 +147,7 @@ function fromFloating(d: Date): string {
   });
 }
 
-/** Hard cap so a pathological rule cannot hang the UI. */
+/** Most occurrences returned for one window. */
 export const MAX_OCCURRENCES = 1000;
 
 /**
@@ -118,12 +185,17 @@ export function expand(
   // Search a floating window wide enough to cover any zone offset (±14 h)
   // and occurrences that start before `from` but are still running.
   const pad = 15 * 60 * 60_000 + duration * 60_000;
-  const all = rule.all((d, i) => i < MAX_OCCURRENCES && d.getTime() < to + pad);
-  const lower = from - pad;
+  // Only the window is collected (rrule still counts COUNT from the first
+  // date), so a long-running series isn't cut off by the cap (review 0004, L5).
+  const all = rule.between(
+    new Date(from - pad),
+    new Date(to + pad),
+    true,
+    (_d, i) => i < MAX_OCCURRENCES,
+  );
   const out: Occurrence[] = [];
-  all.forEach((d, i) => {
-    if (d.getTime() < lower) return;
-    const o = make(fromFloating(d), i);
+  all.forEach((d) => {
+    const o = make(fromFloating(d), Math.floor(d.getTime() / 60_000));
     if (overlaps(o) || (o.start === o.end && o.start >= from && o.start < to)) out.push(o);
   });
   return out;

@@ -152,8 +152,19 @@ export const SettingsData = v.strictObject({
   default_reminder_minutes: v.optional(v.nullable(v.pipe(v.number(), v.integer(), v.minValue(0)))),
   members: v.optional(v.strictObject({ a: v.optional(Member), b: v.optional(Member) })),
   theme: v.optional(v.picklist(['system', 'light', 'dark'])),
-  /** Personal: include the partner's busy times in this user's calendar feed. */
+  /** Unused since review 0004 (L4); kept so older records still parse. */
   feed_include_partner: v.optional(v.boolean()),
+  /**
+   * Calendar feed (review 0004, L4): `feed_share_busy[x]` is x's consent for
+   * the partner to put x's busy times in the partner's (plaintext) feed;
+   * `feed_include[x]` is x's choice to do so. Both must be true.
+   */
+  feed_share_busy: v.optional(
+    v.strictObject({ a: v.optional(v.boolean()), b: v.optional(v.boolean()) }),
+  ),
+  feed_include: v.optional(
+    v.strictObject({ a: v.optional(v.boolean()), b: v.optional(v.boolean()) }),
+  ),
   /** Which shared check list the weekly check-in uses for chores. */
   chores_list: v.optional(v.nullable(RefId)),
 });

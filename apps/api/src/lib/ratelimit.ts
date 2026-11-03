@@ -57,3 +57,11 @@ export async function rateLimit(
     throw new HttpError(429, 'rate_limited', 'Too many requests. Try again later.');
   }
 }
+
+/** Client network for rate limiting: the full IPv4 address, or the IPv6 /64. Hashed before storage. */
+export function clientNet(c: { req: { header(name: string): string | undefined } }): string {
+  const ip = c.req.header('CF-Connecting-IP') ?? 'unknown';
+  if (!ip.includes(':')) return ip;
+  const parts = ip.split(':');
+  return `${parts.slice(0, 4).join(':')}::/64`;
+}

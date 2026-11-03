@@ -13,7 +13,7 @@
  */
 import { type FeedOccurrence, feedBlocks } from '@ours/core/feed';
 import { normalizeFeedUrl } from '@ours/core/ics';
-import { effect, signal } from '@preact/signals';
+import { computed, effect, signal } from '@preact/signals';
 import {
   type ImportOptions,
   type ImportResult,
@@ -21,7 +21,7 @@ import {
   myCalendars,
   refreshCalendar,
 } from '../app/calendars';
-import { partner, store, viewer } from '../app/model';
+import { partner, settings, store, updateSettings, viewer } from '../app/model';
 import { agenda } from '../app/select';
 import { api } from './api';
 import { kvGet, kvSet } from './db';
@@ -69,12 +69,23 @@ export async function refreshCalendars(force = false): Promise<number> {
 
 export const feedOn = signal(false);
 export const feedUrl = signal<string | null>(null);
-/** This person's choice to add their partner's busy times to their own feed. */
-export const includePartner = signal(false);
+/**
+ * The partner's busy times go into this person's feed only if they chose to
+ * include them and the partner agreed (review 0004, L4). Both choices live in
+ * the shared settings, so every device of both people sees the same.
+ */
+export const partnerAllows = computed(() => !!settings.value.feed_share_busy?.[partner.value]);
+export const includePartner = computed(
+  () => partnerAllows.value && !!settings.value.feed_include?.[viewer.value],
+);
+export const iInclude = computed(() => !!settings.value.feed_include?.[viewer.value]);
+export const iShare = computed(() => !!settings.value.feed_share_busy?.[viewer.value]);
 
 export function setIncludePartner(on: boolean): void {
-  includePartner.value = on;
-  if (active) void kvSet('feed-include-partner', on);
+  updateSettings({ feed_include: { ...settings.value.feed_include, [viewer.value]: on } });
+}
+export function setShareMyBusy(on: boolean): void {
+  updateSettings({ feed_share_busy: { ...settings.value.feed_share_busy, [viewer.value]: on } });
 }
 
 /** Busy blocks this person's feed should hold: the same rules as the preview. */
@@ -149,7 +160,6 @@ export async function turnFeedOff(): Promise<void> {
 export async function startFeeds(): Promise<void> {
   active = true;
   feedUrl.value = (await kvGet<string>('feed-url')) ?? null;
-  includePartner.value = (await kvGet<boolean>('feed-include-partner')) ?? false;
   try {
     feedOn.value = (await api<{ on: boolean }>('/feed/status')).on;
   } catch {

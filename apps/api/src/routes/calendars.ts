@@ -20,7 +20,8 @@ import { rateLimit } from '../lib/ratelimit';
 
 export const MAX_CALENDAR_BYTES = 5 * 1024 * 1024;
 const MAX_REDIRECTS = 3;
-const TIMEOUT_MS = 10_000;
+/** For the whole fetch, redirects included. */
+const TIMEOUT_MS = 15_000;
 
 /** Whether the Worker may fetch this URL (checked again after each redirect). */
 export function isFetchableCalendarUrl(raw: string, ownHost: string): boolean {
@@ -51,6 +52,7 @@ calendars.post('/fetch', async (c) => {
   const ownHost = new URL(c.req.url).hostname;
   let url = input.url;
   let res: Response | null = null;
+  const signal = AbortSignal.timeout(TIMEOUT_MS);
   for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
     if (!isFetchableCalendarUrl(url, ownHost))
       throw new HttpError(
@@ -65,7 +67,7 @@ calendars.post('/fetch', async (c) => {
           Accept: 'text/calendar, text/plain;q=0.5, */*;q=0.1',
           'User-Agent': 'Ours calendar relay (+https://github.com/jackhale98/ours)',
         },
-        signal: AbortSignal.timeout(TIMEOUT_MS),
+        signal,
       });
     } catch {
       throw new HttpError(502, 'unreachable', 'Couldn’t reach that calendar. Try again later.');
@@ -74,7 +76,11 @@ calendars.post('/fetch', async (c) => {
       const next = res.headers.get('Location');
       await res.body?.cancel();
       if (!next) break;
-      url = new URL(next, url).href;
+      try {
+        url = new URL(next, url).href;
+      } catch {
+        throw new HttpError(502, 'upstream', 'That calendar link redirects somewhere invalid.');
+      }
       res = null;
       continue;
     }
@@ -88,7 +94,7 @@ calendars.post('/fetch', async (c) => {
       'upstream',
       res.status === 404 || res.status === 410
         ? 'That calendar link no longer works.'
-        : `The calendar server answered ${res.status}.`,
+        : 'The calendar server didn’t send the calendar. Try again later.',
     );
   }
   const declared = Number(res.headers.get('Content-Length') ?? 0);

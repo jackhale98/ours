@@ -70,6 +70,10 @@ export interface Backend {
   deviceId(author: Slot): string;
   /** Local changes to persist (and, for accounts, encrypt and sync). */
   write(upserts: Entry[], removed: Entry[]): void;
+  /** The space this data belongs to (accounts). */
+  spaceId?(): string;
+  /** Every record id this device has seen in the space, including deleted ones. */
+  knownIds?(): Promise<Set<string>>;
 }
 
 const demoBackend: Backend = {
@@ -88,6 +92,13 @@ export function setBackend(b: Backend | null): void {
 
 /** Latest write time per removed id, so an undo outranks its own deletion. */
 const removedAt = new Map<string, number>();
+
+/** The current space and every id seen in it, live or deleted (used by import). */
+export async function importContext(): Promise<{ spaceId: string; known: Set<string> }> {
+  const known = new Set<string>([...store.value.entries.map((e) => e.id), ...removedAt.keys()]);
+  for (const id of (await backend.knownIds?.()) ?? []) known.add(id);
+  return { spaceId: backend.spaceId?.() ?? SPACE_ID, known };
+}
 
 let persistPaused = false;
 
@@ -141,7 +152,7 @@ export function spaceKey(): Uint8Array {
 
 /* ---------- writes ---------- */
 
-type Data<K extends keyof KindData> = KindData[K];
+export type Data<K extends keyof KindData> = KindData[K];
 
 /**
  * Creates or replaces a record. Throws (RecordError / CryptoError) if the
@@ -312,6 +323,12 @@ export const settings = computed<Data<'settings'>>(() => {
   const s = visible.value.find((e) => e.rec.kind === 'settings' && e.scope === 'space');
   return s && s.rec.kind === 'settings' ? s.rec.data : {};
 });
+
+/** Changes shared settings field by field (merged with the partner's changes on sync). */
+export function updateSettings(patch: Partial<Data<'settings'>>): void {
+  const entry = store.value.entries.find((e) => e.rec.kind === 'settings' && e.scope === 'space');
+  put('settings', { ...settings.value, ...patch }, entry ? { id: entry.id } : {});
+}
 
 export const names = computed(() => ({
   a: settings.value.members?.a?.name ?? 'Partner A',

@@ -119,6 +119,21 @@ function writeSnapshots(
   );
 }
 
+/** Re-creates a calendar's shared copy from its private full copy (after an import). */
+export function rederiveCalendar(id: string): void {
+  const cal = findEntry(id) as CalendarEntry | undefined;
+  if (cal?.rec.kind !== 'calendar') return;
+  const full = snapshotsOf(id).find((e) => e.scope === 'user' && e.rec.kind === 'cal_snapshot');
+  if (full?.rec.kind !== 'cal_snapshot') return;
+  const d = cal.rec.data;
+  writeSnapshots(
+    id,
+    { name: d.name, owner: d.owner, share: d.share, url: d.url },
+    full.rec.data.items,
+    full.rec.data.fetched_at,
+  );
+}
+
 /** Imports .ics text (from a file, or fetched from a subscription link). */
 export function importCalendar(text: string, opts: ImportOptions): ImportResult {
   const cal = parseIcs(text, { defaultTz: zone });

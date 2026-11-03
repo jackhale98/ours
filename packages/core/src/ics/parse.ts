@@ -62,6 +62,22 @@ const RRULE_PARTS = new Set([
   'WKST',
 ]);
 
+/** VEVENT properties the importer reads; others are dropped while parsing. */
+const USED_EVENT_PROPS = new Set([
+  'UID',
+  'SUMMARY',
+  'LOCATION',
+  'DTSTART',
+  'DTEND',
+  'DURATION',
+  'DUE',
+  'RRULE',
+  'EXDATE',
+  'RECURRENCE-ID',
+  'STATUS',
+  'TRANSP',
+]);
+
 interface Prop {
   name: string;
   params: Map<string, string>;
@@ -443,7 +459,9 @@ function parseInner(text: string, opts: ParseOptions, warnings: string[]): IcsCa
     }
 
     if (current && stack.length === 2 && stack[1] === 'VEVENT') {
-      if (current.length < MAX_EVENT_PROPS) current.push(prop);
+      // Only what we use: a hostile file of tiny unknown properties can't
+      // fill memory (security review 0004, L6).
+      if (USED_EVENT_PROPS.has(prop.name) && current.length < MAX_EVENT_PROPS) current.push(prop);
     } else if (stack.length === 1 && stack[0] === 'VCALENDAR' && !calProps.has(prop.name)) {
       calProps.set(prop.name, prop);
     }

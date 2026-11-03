@@ -1,15 +1,24 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
+
+import { env } from 'cloudflare:test';
 import { exports } from 'cloudflare:workers';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { isFetchableCalendarUrl } from '../src/routes/calendars';
-import { call, signIn, uniqueEmail } from './helpers';
+import { call, couple, signIn, uniqueEmail } from './helpers';
 
 afterEach(() => vi.unstubAllGlobals());
 
 async function getFeed(url: string) {
   const path = new URL(url).pathname;
-  const res = await exports.default.fetch(new Request(`https://api.example${path}`));
-  return { status: res.status, text: await res.text(), type: res.headers.get('Content-Type') };
+  const res = await exports.default.fetch(
+    new Request(`https://api.example${path}`, { headers: { 'CF-Connecting-IP': '198.51.100.7' } }),
+  );
+  return {
+    status: res.status,
+    text: await res.text(),
+    type: res.headers.get('Content-Type'),
+    cache: res.headers.get('Cache-Control'),
+  };
 }
 
 describe('calendar feed', () => {
@@ -73,6 +82,43 @@ describe('calendar feed', () => {
   });
 });
 
+describe('calendar feed review fixes (0004)', () => {
+  it('keeps its own caching header (Info)', async () => {
+    const u = await signIn(uniqueEmail());
+    const on = await call('/feed', { token: u.token, body: {} });
+    expect((await getFeed(on.json.url)).cache).toBe('private, max-age=900');
+  });
+
+  it('random links do not add rate-limit rows per guess (L2)', async () => {
+    const rows = async () =>
+      (await env.DB.prepare('SELECT COUNT(*) AS n FROM rate_limits').first<{ n: number }>())?.n ??
+      0;
+    const before = await rows();
+    for (let i = 0; i < 20; i++) {
+      const token = `${'A'.repeat(40)}${String(i).padStart(3, '0')}`;
+      expect((await getFeed(`https://x/feed/${token}.ics`)).status).toBe(404);
+    }
+    expect((await rows()) - before).toBeLessThanOrEqual(1);
+  });
+
+  it('leaving the space turns the feed off and deletes busy times (L3)', async () => {
+    const { sam, spaceId } = await couple();
+    const on = await call('/feed', { token: sam.token, body: {} });
+    const now = Date.now();
+    await call('/feed/busy', {
+      token: sam.token,
+      method: 'PUT',
+      body: { blocks: [{ start: now + 3_600_000, end: now + 7_200_000 }] },
+    });
+    await call(`/spaces/${spaceId}/membership`, { token: sam.token, method: 'DELETE' });
+    expect((await getFeed(on.json.url)).status).toBe(404);
+    const left = await env.DB.prepare('SELECT COUNT(*) AS n FROM feed_busy WHERE user_id = ?')
+      .bind(sam.userId)
+      .first<{ n: number }>();
+    expect(left?.n).toBe(0);
+  });
+});
+
 describe('calendar link relay', () => {
   it('only fetches public https calendar hosts', () => {
     const own = 'api.example';
@@ -122,6 +168,9 @@ describe('calendar link relay', () => {
         });
       }
       if (url.endsWith('/page')) return new Response('<html>hi</html>');
+      if (url.endsWith('/badloc')) {
+        return new Response(null, { status: 302, headers: { Location: 'http://[::1' } });
+      }
       if (url.endsWith('/gone')) return new Response('', { status: 404 });
       return new Response(ics, { headers: { 'Content-Type': 'text/calendar' } });
     });
@@ -150,6 +199,11 @@ describe('calendar link relay', () => {
       body: { url: 'https://cal.example.org/gone' },
     });
     expect(gone.status).toBe(502);
+    const badloc = await call('/calendars/fetch', {
+      token: u.token,
+      body: { url: 'https://cal.example.org/badloc' },
+    });
+    expect(badloc.status).toBe(502);
     const anon = await call('/calendars/fetch', { body: { url: 'https://cal.example.org/a.ics' } });
     expect(anon.status).toBe(401);
   });

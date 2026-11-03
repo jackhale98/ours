@@ -2,11 +2,13 @@
 /** Privacy → Your data: export (readable, encrypted, calendar) and import. */
 import { normalizePhrase } from '@ours/core/crypto';
 import { useRef, useState } from 'preact/hooks';
+import { isCurrentPhrase } from '../../account/session';
 import {
   calendarExport,
   encryptedExport,
   ImportError,
-  importExport,
+  type ImportSummary,
+  planImport,
   readableExport,
 } from '../export';
 import { mode } from '../model';
@@ -25,34 +27,47 @@ function download(name: string, type: string, text: string) {
 
 type Asking = { for: 'export' } | { for: 'import'; text: string } | null;
 
+function summarise(s: ImportSummary): string {
+  const parts = [
+    [s.plans, 'plan'],
+    [s.lists, 'list'],
+    [s.items, 'list item'],
+    [s.notes, 'note'],
+    [s.calendars, 'calendar'],
+    [s.other, 'check-in'],
+  ]
+    .filter(([n]) => (n as number) > 0)
+    .map(([n, w]) => `${n} ${w}${n === 1 ? '' : 's'}`);
+  return parts.length ? parts.join(', ') : 'nothing new';
+}
+
 export function DataCard() {
   const demo = mode.value === 'demo';
   const [asking, setAsking] = useState<Asking>(null);
   const [phrase, setPhrase] = useState('');
   const [resetArmed, setResetArmed] = useState(false);
+  const [pending, setPending] = useState<{ summary: ImportSummary; apply: () => number } | null>(
+    null,
+  );
   const file = useRef<HTMLInputElement>(null);
   const stamp = today.value;
 
-  const doImport = (text: string, words?: (string | null)[]) => {
+  const doImport = async (text: string, words?: (string | null)[]) => {
     try {
-      const r = importExport(text, words);
-      if (r.status === 'needs-phrase') {
+      const plan = await planImport(text, words);
+      if (plan.status === 'needs-phrase') {
         setAsking({ for: 'import', text });
         return;
       }
       setAsking(null);
       setPhrase('');
-      toast(
-        r.added + r.updated
-          ? `Imported ${r.added + r.updated} item${r.added + r.updated === 1 ? '' : 's'}.${r.skipped ? ` ${r.skipped} were already here.` : ''}`
-          : 'Nothing new in that file: everything is already here.',
-      );
+      setPending({ summary: plan.summary, apply: plan.apply });
     } catch (err) {
       toast(err instanceof ImportError ? err.message : 'That file couldn’t be imported.');
     }
   };
 
-  const submitPhrase = (e: Event) => {
+  const submitPhrase = async (e: Event) => {
     e.preventDefault();
     const words = normalizePhrase(phrase);
     if (words.length !== 12 || words.some((w) => !w)) {
@@ -61,7 +76,12 @@ export function DataCard() {
     }
     if (asking?.for === 'export') {
       try {
-        download(`ours-backup-${stamp}.json`, 'application/json', encryptedExport(words));
+        // A valid but mistyped phrase would make a file the real one can't open.
+        if (!(await isCurrentPhrase(words))) {
+          toast('Those aren’t your current recovery phrase words.');
+          return;
+        }
+        download(`ours-backup-${stamp}.json`, 'application/json', await encryptedExport(words));
         setAsking(null);
         setPhrase('');
         toast('Encrypted backup downloaded. It opens only with this recovery phrase.');
@@ -69,7 +89,7 @@ export function DataCard() {
         toast('Those words aren’t a valid recovery phrase.');
       }
     } else if (asking?.for === 'import') {
-      doImport(asking.text, words);
+      await doImport(asking.text, words);
     }
   };
 
@@ -82,14 +102,14 @@ export function DataCard() {
         Everything you can see, decrypted on this device.{' '}
         {demo
           ? 'Demo data lives only in this browser and never leaves it.'
-          : 'A readable export isn’t encrypted, so keep it somewhere safe. The encrypted backup opens only with your recovery phrase.'}
+          : 'A readable export isn’t encrypted (it includes your calendar links), so keep it somewhere safe. The encrypted backup opens only with your recovery phrase.'}
       </p>
       <div class="btnrow">
         <button
           type="button"
           class="btn sm"
-          onClick={() => {
-            download(`ours-export-${stamp}.json`, 'application/json', readableExport());
+          onClick={async () => {
+            download(`ours-export-${stamp}.json`, 'application/json', await readableExport());
             toast('Export downloaded.');
           }}
         >
@@ -137,7 +157,7 @@ export function DataCard() {
               toast('That file is too big.');
               return;
             }
-            doImport(await f.text());
+            await doImport(await f.text());
           }}
         />
         {demo && (
@@ -158,6 +178,32 @@ export function DataCard() {
           </button>
         )}
       </div>
+      {pending && (
+        <section class="stack gap" aria-label="Import preview">
+          <p class="d">
+            This file would add {summarise(pending.summary)}.
+            {pending.summary.skipped
+              ? ` ${pending.summary.skipped} other item${pending.summary.skipped === 1 ? ' is' : 's are'} already here, were deleted or changed here since, or belong to another space, so they’re left out.`
+              : ''}
+          </p>
+          <div class="btnrow">
+            <button
+              type="button"
+              class="btn sm primary"
+              onClick={() => {
+                const n = pending.apply();
+                setPending(null);
+                toast(n ? `Imported ${n} item${n === 1 ? '' : 's'}.` : 'Nothing was imported.');
+              }}
+            >
+              Import
+            </button>
+            <button type="button" class="btn sm ghost" onClick={() => setPending(null)}>
+              Cancel
+            </button>
+          </div>
+        </section>
+      )}
       {asking && (
         <form class="stack gap" onSubmit={submitPhrase}>
           <div class="field">

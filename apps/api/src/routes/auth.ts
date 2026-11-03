@@ -12,7 +12,6 @@ import {
   verifyAuthenticationResponse,
   verifyRegistrationResponse,
 } from '@simplewebauthn/server';
-import type { Context } from 'hono';
 import { Hono } from 'hono';
 import * as v from 'valibot';
 import { type AppEnv, createSession, endSession, requireAuth } from '../auth/session';
@@ -20,7 +19,7 @@ import type { Env } from '../env';
 import { bytesOf, hashToken, newId, newToken } from '../lib/crypto';
 import { sendEmail } from '../lib/email';
 import { body, HttpError } from '../lib/http';
-import { rateLimit } from '../lib/ratelimit';
+import { clientNet, rateLimit } from '../lib/ratelimit';
 import { verifyTurnstile } from '../lib/turnstile';
 
 const EMAIL_TOKEN_MINUTES = 15;
@@ -39,14 +38,6 @@ const Email = v.pipe(
 const DeviceLabel = v.optional(v.pipe(v.string(), v.trim(), v.maxLength(60)), 'Browser');
 const Token = v.pipe(v.string(), v.regex(/^[A-Za-z0-9_-]{43}$/));
 const InviteId = v.optional(v.pipe(v.string(), v.regex(/^[A-Za-z0-9_-]{8,64}$/)));
-
-/** Client network for rate limiting: the full IPv4 address, or the IPv6 /64. */
-function clientNet(c: Context<AppEnv>): string {
-  const ip = c.req.header('CF-Connecting-IP') ?? 'unknown';
-  if (!ip.includes(':')) return ip;
-  const parts = ip.split(':');
-  return `${parts.slice(0, 4).join(':')}::/64`;
-}
 
 /** In production (real email), refuse to run without a stable rate-limit salt. */
 function requireProductionConfig(env: Env): void {

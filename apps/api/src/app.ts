@@ -59,7 +59,11 @@ export function createApp() {
   app.use('*', async (c, next) => {
     const started = Date.now();
     await next();
-    for (const [k, v] of Object.entries(SECURITY_HEADERS)) c.header(k, v);
+    for (const [k, v] of Object.entries(SECURITY_HEADERS)) {
+      // A route may choose its own caching (the calendar feed); everything else is no-store.
+      if (k === 'Cache-Control' && c.res.headers.has(k)) continue;
+      c.header(k, v);
+    }
     console.warn(
       JSON.stringify({
         route: c.req.routePath,
@@ -118,6 +122,8 @@ export async function cleanup(env: Env, now = Date.now()): Promise<void> {
       now - 86_400_000,
     ),
     env.DB.prepare('DELETE FROM sessions WHERE expires_at < ?').bind(now),
+    // Revoked calendar feed links (review 0004, L3).
+    env.DB.prepare('DELETE FROM feed_tokens WHERE revoked_at < ?').bind(now - 86_400_000),
     // Push subscriptions of devices that are no longer signed in (review L4).
     env.DB.prepare(
       'DELETE FROM push_subs WHERE device_id IS NULL OR NOT EXISTS (SELECT 1 FROM sessions s WHERE s.device_id = push_subs.device_id AND s.expires_at > ?)',

@@ -6,9 +6,13 @@ import { useRef, useState } from 'preact/hooks';
 import {
   feedOn,
   feedUrl,
+  iInclude,
   includePartner,
+  iShare,
   newFeedLink,
+  partnerAllows,
   setIncludePartner,
+  setShareMyBusy,
   subscribeCalendar,
   turnFeedOff,
   turnFeedOn,
@@ -336,14 +340,36 @@ function FeedPreview() {
         <input
           type="checkbox"
           role="switch"
-          checked={includePartner.value}
-          aria-checked={includePartner.value}
+          checked={iInclude.value && partnerAllows.value}
+          aria-checked={iInclude.value && partnerAllows.value}
+          disabled={!partnerAllows.value}
           onChange={(e) => setIncludePartner(e.currentTarget.checked)}
         />
         <span class="track" />
         <span class="sw-t">
           Include {nameOf(partner.value)}’s busy times
-          <small>Handy for planning around each other from your work calendar.</small>
+          <small>
+            {partnerAllows.value
+              ? 'Handy for planning around each other from your work calendar.'
+              : `Only if ${nameOf(partner.value)} allows it on their device.`}
+          </small>
+        </span>
+      </label>
+      <label class="sw">
+        <input
+          type="checkbox"
+          role="switch"
+          checked={iShare.value}
+          aria-checked={iShare.value}
+          onChange={(e) => setShareMyBusy(e.currentTarget.checked)}
+        />
+        <span class="track" />
+        <span class="sw-t">
+          Let {nameOf(partner.value)} include my busy times
+          <small>
+            Their feed would then show when you’re busy (never what), including private plans. The
+            server can read busy times in a feed.
+          </small>
         </span>
       </label>
     </>

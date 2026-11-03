@@ -74,6 +74,19 @@ export class SyncEngine implements Backend {
     return this.ctx.deviceId;
   }
 
+  spaceId(): string {
+    return this.ctx.spaceId;
+  }
+
+  /** Every id stored on this device for the space: synced (incl. deleted) and pending. */
+  async knownIds(): Promise<Set<string>> {
+    const d = await db();
+    const ids = new Set<string>();
+    for (const e of await d.getAll('envelopes')) if (e.space_id === this.ctx.spaceId) ids.add(e.id);
+    for (const k of await d.getAllKeys('outbox')) ids.add(String(k));
+    return ids;
+  }
+
   private cursorKey() {
     return `cursor:${this.ctx.spaceId}`;
   }

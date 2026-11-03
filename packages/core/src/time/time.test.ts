@@ -90,7 +90,9 @@ describe('expand', () => {
       '09:00',
       '08:00',
     ]);
-    expect(out.map((o) => o.index)).toEqual([2, 3, 4]);
+    // Indexes are stable per occurrence (wall-clock start, in minutes).
+    expect(new Set(out.map((o) => o.index)).size).toBe(3);
+    expect(out[0]?.index).toBe(Date.UTC(2026, 2, 21, 9, 0) / 60_000);
     expect(out.every((o) => o.end - o.start === H)).toBe(true);
   });
 
@@ -143,7 +145,7 @@ describe('expand', () => {
     };
     const out = expand(bday, utc('2026-01-01T00:00'), utc('2027-01-01T00:00'), 'Europe/Paris');
     expect(out.map((o) => o.localStart)).toEqual(['2026-05-17']);
-    expect(out[0]?.index).toBe(6);
+    expect(out[0]?.index).toBe(Date.UTC(2026, 4, 17) / 60_000);
   });
 
   it('counts zero-length events that start in range', () => {
@@ -212,5 +214,50 @@ describe('free time', () => {
     ]);
     const late = dailyWindows('2026-11-03', 1, 'UTC', '22:00', '01:00');
     expect(late).toEqual([{ start: utc('2026-11-03T22:00'), end: utc('2026-11-04T01:00') }]);
+  });
+});
+
+describe('hostile recurrence rules (review 0004)', () => {
+  it('rejects rules that can never produce a date, instead of scanning to year 9999', () => {
+    for (const bad of [
+      'FREQ=DAILY;BYMONTH=2;BYMONTHDAY=30',
+      'FREQ=YEARLY;BYMONTH=4,6,9,11;BYMONTHDAY=31',
+      'FREQ=MONTHLY;BYDAY=5FR;BYMONTHDAY=1',
+      'FREQ=WEEKLY;BYDAY=MO;BYSETPOS=5',
+      'FREQ=DAILY;INTERVAL=0',
+    ]) {
+      expect(isValidRRule(bad), bad).toBe(false);
+    }
+    for (const ok of [
+      'FREQ=YEARLY;BYMONTH=2;BYMONTHDAY=29',
+      'FREQ=MONTHLY;BYDAY=FR;BYMONTHDAY=13',
+      'FREQ=MONTHLY;BYDAY=-1FR',
+      'FREQ=MONTHLY;BYMONTHDAY=31',
+    ]) {
+      expect(isValidRRule(ok), ok).toBe(true);
+    }
+  });
+
+  it('shows a long-running daily series today, however old (review 0004, L5)', () => {
+    const daily = {
+      start: '2015-01-01T07:00',
+      end: '2015-01-01T07:30',
+      all_day: false,
+      tz: 'UTC',
+      rrule: 'FREQ=DAILY',
+    };
+    const out = expand(daily, utc('2026-11-02T00:00'), utc('2026-11-09T00:00'), 'UTC');
+    expect(out).toHaveLength(7);
+  });
+
+  it('still honours COUNT from the first date', () => {
+    const ten = {
+      start: '2026-01-01T07:00',
+      end: '2026-01-01T07:30',
+      all_day: false,
+      tz: 'UTC',
+      rrule: 'FREQ=DAILY;COUNT=10',
+    };
+    expect(expand(ten, utc('2026-01-05T00:00'), utc('2026-02-01T00:00'), 'UTC')).toHaveLength(6);
   });
 });

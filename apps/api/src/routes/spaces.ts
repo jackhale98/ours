@@ -86,6 +86,11 @@ spaces.delete('/:id/membership', async (c) => {
   await c.env.DB.batch([
     c.env.DB.prepare('DELETE FROM records WHERE space_id = ? AND owner_user_id = ?').bind(id, uid),
     c.env.DB.prepare('DELETE FROM memberships WHERE space_id = ? AND user_id = ?').bind(id, uid),
+    // Their calendar feed published this space's busy times: turn it off (review 0004, L3).
+    c.env.DB.prepare('DELETE FROM feed_busy WHERE user_id = ?').bind(uid),
+    c.env.DB.prepare(
+      'UPDATE feed_tokens SET revoked_at = ? WHERE user_id = ? AND revoked_at IS NULL',
+    ).bind(Date.now(), uid),
     // Their reminders, and notifications they sent that are held for quiet hours.
     c.env.DB.prepare(
       'DELETE FROM reminders WHERE space_id = ? AND (target_user_id = ? OR sender_user_id = ?)',

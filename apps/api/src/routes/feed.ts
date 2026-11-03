@@ -14,7 +14,7 @@ import * as v from 'valibot';
 import { type AppEnv, requireAuth } from '../auth/session';
 import { hashToken, newToken } from '../lib/crypto';
 import { body, HttpError } from '../lib/http';
-import { rateLimit } from '../lib/ratelimit';
+import { clientNet, rateLimit } from '../lib/ratelimit';
 
 export const MAX_FEED_BLOCKS = 500;
 const DAY = 86_400_000;
@@ -122,13 +122,18 @@ feed.get('/:file', async (c) => {
   const m = TOKEN.exec(c.req.param('file'));
   if (!m?.[1]) throw new HttpError(404, 'not_found');
   const tokenHash = await hashToken(m[1]);
-  await rateLimit(c.env, `feed-get:${tokenHash}`, 120, 3600);
   const row = await c.env.DB.prepare(
     'SELECT user_id FROM feed_tokens WHERE token_hash = ? AND revoked_at IS NULL',
   )
     .bind(tokenHash)
     .first<{ user_id: string }>();
-  if (!row) throw new HttpError(404, 'not_found');
+  // Unknown links are limited per network, real ones per link, so random
+  // guesses can't fill the rate-limit table (review 0004, L2).
+  if (!row) {
+    await rateLimit(c.env, `feed-miss:${clientNet(c)}`, 60, 3600);
+    throw new HttpError(404, 'not_found');
+  }
+  await rateLimit(c.env, `feed-get:${tokenHash}`, 120, 3600);
   const now = Date.now();
   const blocks = await c.env.DB.prepare(
     `SELECT start_utc, end_utc FROM feed_busy

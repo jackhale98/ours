@@ -330,6 +330,24 @@ export async function saveBackup(words: string[]): Promise<void> {
   });
 }
 
+/** Whether these words open this account's current backup (checked before an encrypted export). */
+export async function isCurrentPhrase(words: (string | null)[]): Promise<boolean> {
+  const state = account.value;
+  if (state.status !== 'ready') return false;
+  try {
+    const backup = await api<{ version: number; wrapped: { nonce: string; ciphertext: string } }>(
+      '/keys/backup',
+    );
+    openBackup(recoveryKeyFromPhrase(words), state.session.user.id, backup.version, {
+      nonce: fromBase64Url(backup.wrapped.nonce),
+      ciphertext: fromBase64Url(backup.wrapped.ciphertext),
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** Makes an invite link for the partner. The secret exists only in the link. */
 export async function invitePartner(): Promise<string> {
   const state = account.value;
