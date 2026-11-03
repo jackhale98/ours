@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 /** List types and list operations (create, rename, retype, privacy, delete). */
 import type { ListKind } from '@ours/core/schema';
-import { byKind, type Entry, findEntry, put, remove, store, update } from './model';
+import { nextDueDate } from '@ours/core/time';
+import { byKind, type Entry, findEntry, other, put, remove, store, update } from './model';
+import { today } from './select';
 
 export type ListEntry = Entry & { rec: { kind: 'list' } };
 export type ItemEntry = Entry & { rec: { kind: 'item' } };
@@ -133,4 +135,27 @@ export function ideasList(): ListEntry | undefined {
     allLists().find((l) => l.rec.data.kind === 'ideas' && !l.rec.data.private) ??
     allLists().find((l) => l.rec.data.kind === 'ideas')
   );
+}
+
+/**
+ * Ticks an item. A repeating task isn't finished: it moves to its next due
+ * date, remembers when it was done and, if the two of you take turns, passes
+ * to the other person. Returns undo, and the next due date for repeats.
+ */
+export function completeItem(item: ItemEntry): { undo: () => void; next: string | null } {
+  const before = { ...item.rec.data };
+  const d = item.rec.data;
+  if (!d.repeat) {
+    update<'item'>(item.id, { done: true });
+    return { undo: () => update<'item'>(item.id, { done: false }), next: null };
+  }
+  const t = today.value;
+  const next = nextDueDate(d.repeat, d.due, t);
+  const assignee =
+    d.rotate && (d.assignee === 'a' || d.assignee === 'b') ? other(d.assignee) : d.assignee;
+  update<'item'>(
+    item.id,
+    next ? { due: next, last_done: t, assignee, done: false } : { done: true, last_done: t },
+  );
+  return { undo: () => update<'item'>(item.id, before), next };
 }

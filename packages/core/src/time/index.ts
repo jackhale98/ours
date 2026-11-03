@@ -5,6 +5,7 @@ export {
   expand,
   isValidRRule,
   MAX_OCCURRENCES,
+  nextDueDate,
   type Occurrence,
   type Schedulable,
 } from './recurrence';

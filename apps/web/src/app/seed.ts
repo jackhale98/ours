@@ -159,6 +159,35 @@ function seedAll(): void {
     ['Renew car registration', 'a'],
     ['Pay electric bill', 'b', true],
   ]);
+  // Repeating tasks: the bins every Monday, taking turns; the plants twice a week.
+  const nextDay = (dow: number) => d((dow - new Date(`${t}T00:00:00Z`).getUTCDay() + 7) % 7);
+  put(
+    'item',
+    {
+      list_id: home,
+      text: 'Take out the bins',
+      done: false,
+      assignee: 'a',
+      due: nextDay(1),
+      sort_key: '01',
+      repeat: 'FREQ=WEEKLY;BYDAY=MO',
+      rotate: true,
+    },
+    { scope: 'space' },
+  );
+  put(
+    'item',
+    {
+      list_id: home,
+      text: 'Water the plants',
+      done: false,
+      assignee: null,
+      due: nextDay(3),
+      sort_key: '02',
+      repeat: 'FREQ=WEEKLY;BYDAY=WE,SA',
+    },
+    { scope: 'space' },
+  );
   list(
     'Gift ideas',
     'gifts',

@@ -1,10 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
+
+import { parseQuickAdd } from '@ours/core/parse';
 import type { ListKind } from '@ours/core/schema';
 import { keyBetween } from '@ours/core/schema';
 import { signal } from '@preact/signals';
 import { useRef, useState } from 'preact/hooks';
+import { itemSheet } from '../itemsheet';
 import {
   allLists,
+  completeItem,
   createList,
   deleteList,
   type ItemEntry,
@@ -21,7 +25,7 @@ import {
   typeOf,
 } from '../lists';
 import { nameOf, partner, put, remove, type Slot, settings, update, viewer } from '../model';
-import { nextFreeEvening, relDay } from '../select';
+import { nextFreeEvening, relDay, repeatText, today } from '../select';
 import { openQuick } from '../sheets';
 import { CloseButton, colorVar, Icon, Sheet, Switch, toast } from '../ui';
 
@@ -54,8 +58,17 @@ function AssignButton({ item }: { item: ItemEntry }) {
   );
 }
 
+/** When an item is due, in words ("Overdue · was Mon", "Due today", "Due Fri"). */
+function dueText(due: string): { text: string; late: boolean } {
+  const t = today.value;
+  if (due < t) return { text: `Overdue · was ${relDay(due)}`, late: true };
+  return { text: due === t ? 'Due today' : `Due ${relDay(due)}`, late: false };
+}
+
 export function ItemRow({ item, assignable }: { item: ItemEntry; assignable: boolean }) {
-  const [done, setDone] = useState(item.rec.data.done);
+  const d = item.rec.data;
+  const [done, setDone] = useState(d.done);
+  const due = d.due ? dueText(d.due) : null;
   return (
     <li class={`it${done ? ' done' : ''}`}>
       <label class="chk">
@@ -66,18 +79,50 @@ export function ItemRow({ item, assignable }: { item: ItemEntry; assignable: boo
             const v = e.currentTarget.checked;
             setDone(v);
             // Let the tick register visually before the item moves.
-            setTimeout(() => update<'item'>(item.id, { done: v }), 420);
+            setTimeout(() => {
+              if (!v) {
+                update<'item'>(item.id, { done: false });
+                return;
+              }
+              const { undo, next } = completeItem(item);
+              if (d.repeat) {
+                setDone(false);
+                toast(next ? `Done. Next: ${relDay(next)}.` : 'Done.', undo);
+              }
+            }, 420);
           }}
         />
         <span class="box">
           <Icon name="check" size={15} />
         </span>
         <span class="it-t">
-          {item.rec.data.text}
-          {item.rec.data.due && <span class="it-sub">Due {relDay(item.rec.data.due)}</span>}
+          {d.text}
+          {(due || d.repeat) && (
+            <span class={`it-sub${due?.late ? ' late' : ''}`}>
+              {due?.text}
+              {due && d.repeat ? ' · ' : ''}
+              {d.repeat && (
+                <>
+                  <Icon name="repeat" size={12} />
+                  {repeatText(d.repeat)}
+                  {d.rotate ? ', taking turns' : ''}
+                </>
+              )}
+            </span>
+          )}
         </span>
       </label>
       {assignable && <AssignButton item={item} />}
+      <button
+        type="button"
+        class="iconbtn it-more"
+        aria-label={`Details: ${d.text}`}
+        onClick={() => {
+          itemSheet.value = item.id;
+        }}
+      >
+        <Icon name="next" size={16} />
+      </button>
     </li>
   );
 }
@@ -90,15 +135,30 @@ function AddItem({ list, placeholder }: { list: ListEntry; placeholder: string }
     const v = text.trim();
     if (!v) return;
     const first = itemsOf(list.id)[0];
+    // "Take out the bins every monday", "Renew passport by mar 1": a due date
+    // and repeat come from the words (only date and repeat phrases are taken out).
+    const parsed = parseQuickAdd(v, { today: today.value });
+    const taken = parsed.tokens.filter((t) => t.type === 'date' || t.type === 'repeat');
+    let name = v;
+    for (const t of [...taken].sort((a, b) => b.start - a.start)) {
+      name = name.slice(0, t.start) + name.slice(t.end);
+    }
+    name =
+      name
+        .replace(/\s+(by|on|due)\s*$/i, '')
+        .replace(/\s+/g, ' ')
+        .trim() || v;
+    const repeat = parsed.rrule;
     put(
       'item',
       {
         list_id: list.id,
-        text: v,
+        text: taken.length ? name : v,
         done: false,
         assignee: null,
-        due: null,
+        due: parsed.date ?? (repeat ? today.value : null),
         sort_key: keyBetween(null, first?.rec.data.sort_key ?? null),
+        ...(repeat ? { repeat } : {}),
       },
       { scope: list.scope, owner: list.owner },
     );

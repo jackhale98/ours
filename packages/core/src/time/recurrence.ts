@@ -211,3 +211,24 @@ export function daysTouched(o: Occurrence, tz: string): string[] {
   }
   return days;
 }
+
+/**
+ * The next date a repeating task is due after it is done (dates only,
+ * 'YYYY-MM-DD'). Counted from its current due date when that is still ahead
+ * (done early), otherwise from today, so an overdue task doesn't come back
+ * already overdue. Null if the rule has no further dates.
+ */
+export function nextDueDate(rrule: string, due: string | null, today: string): string | null {
+  if (!isValidRRule(rrule)) return null;
+  const anchor = due ?? today;
+  const after = due && due > today ? due : today;
+  const afterInstant = Date.parse(`${after}T00:00:00Z`) + 86_400_000;
+  const occ = expand(
+    { start: anchor, end: addDays(anchor, 1), all_day: true, tz: null, rrule },
+    afterInstant,
+    afterInstant + 2 * 366 * 86_400_000,
+    'UTC',
+  );
+  const first = occ.find((o) => o.localStart > after);
+  return first ? first.localStart.slice(0, 10) : null;
+}

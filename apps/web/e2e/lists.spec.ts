@@ -120,3 +120,32 @@ test('list kinds: a general list, date ideas and gift ideas', async ({ page }) =
   await expect(kinds.nth(0)).toHaveAttribute('aria-pressed', 'true');
   await expect(kinds.nth(0)).toContainText('List');
 });
+
+test('repeating tasks: typed, ticked, and set up in details', async ({ page }) => {
+  await page.goto('/#lists');
+  // The demo's Home list has one: ticking moves it on instead of finishing it.
+  await page.getByRole('button', { name: /^Home/ }).first().click();
+  const bins = page.locator('.it', { hasText: 'Take out the bins' });
+  await expect(bins).toContainText('Every Monday, taking turns');
+  await bins.getByRole('checkbox').check();
+  await expect(page.locator('.toast-host')).toContainText('Done. Next:');
+  await expect(bins).toBeVisible();
+  await expect(bins.getByRole('checkbox')).not.toBeChecked();
+
+  // Typing a repeat sets it up.
+  await page
+    .getByRole('textbox', { name: /Add to Home/ })
+    .fill('Change the bedsheets every sunday');
+  await page.getByRole('textbox', { name: /Add to Home/ }).press('Enter');
+  const sheets = page.locator('.it', { hasText: 'Change the bedsheets' });
+  await expect(sheets).toContainText('Every Sunday');
+  await expect(sheets).not.toContainText('every sunday'); // taken out of the name
+
+  // Details: repeat every 2 weeks, take turns.
+  await sheets.getByRole('button', { name: /^Details:/ }).click();
+  const dialog = page.getByRole('dialog', { name: 'Change the bedsheets' });
+  await dialog.getByRole('combobox', { name: 'Repeats' }).selectOption({ label: 'Every 2 weeks' });
+  await dialog.getByRole('switch', { name: 'Take turns' }).check();
+  await dialog.getByRole('button', { name: 'Save' }).click();
+  await expect(sheets).toContainText('Every other week, taking turns');
+});

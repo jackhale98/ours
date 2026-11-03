@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 import { describe, expect, it } from 'vitest';
 import { commonFree, dailyWindows, freeWithin, mergeIntervals } from './free';
-import { daysTouched, expand, isValidRRule, type Schedulable } from './recurrence';
+import { daysTouched, expand, isValidRRule, nextDueDate, type Schedulable } from './recurrence';
 import {
   addDays,
   addWallMinutes,
@@ -259,5 +259,28 @@ describe('hostile recurrence rules (review 0004)', () => {
       rrule: 'FREQ=DAILY;COUNT=10',
     };
     expect(expand(ten, utc('2026-01-05T00:00'), utc('2026-02-01T00:00'), 'UTC')).toHaveLength(6);
+  });
+});
+
+describe('next due date for repeating tasks', () => {
+  const TUE = '2026-11-03';
+  it('moves on from the due date when done on time or early', () => {
+    expect(nextDueDate('FREQ=WEEKLY', TUE, TUE)).toBe('2026-11-10');
+    expect(nextDueDate('FREQ=DAILY', '2026-11-05', TUE)).toBe('2026-11-06');
+    expect(nextDueDate('FREQ=MONTHLY', '2026-11-30', TUE)).toBe('2026-12-30');
+    expect(nextDueDate('FREQ=WEEKLY;INTERVAL=2', TUE, TUE)).toBe('2026-11-17');
+  });
+  it('moves on from today when overdue, keeping the rhythm', () => {
+    // Due Monday 26 Oct, done Tuesday 3 Nov: next Monday is 9 Nov.
+    expect(nextDueDate('FREQ=WEEKLY', '2026-10-26', TUE)).toBe('2026-11-09');
+    expect(nextDueDate('FREQ=WEEKLY;BYDAY=MO,TH', '2026-10-26', TUE)).toBe('2026-11-05');
+  });
+  it('starts from today when there is no due date', () => {
+    expect(nextDueDate('FREQ=WEEKLY;BYDAY=SA', null, TUE)).toBe('2026-11-07');
+    expect(nextDueDate('FREQ=DAILY', null, TUE)).toBe('2026-11-04');
+  });
+  it('refuses rules it cannot use', () => {
+    expect(nextDueDate('FREQ=DAILY;BYMONTH=2;BYMONTHDAY=30', TUE, TUE)).toBeNull();
+    expect(nextDueDate('nonsense', TUE, TUE)).toBeNull();
   });
 });

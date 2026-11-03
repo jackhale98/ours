@@ -6,6 +6,7 @@
  */
 import * as v from 'valibot';
 import { fromUtf8, utf8 } from '../crypto/bytes';
+import { isValidRRule } from '../time/recurrence';
 import { isSortKey } from './sortkey';
 
 const Text = (max: number) => v.pipe(v.string(), v.maxLength(max));
@@ -143,6 +144,15 @@ export const ItemData = v.strictObject({
   assignee: v.nullable(Owner),
   due: v.nullable(LocalDate),
   sort_key: v.custom<string>(isSortKey, 'Invalid sort key'),
+  /**
+   * A repeating task: ticking it moves `due` to the next date instead of
+   * finishing it (RRULE value, e.g. FREQ=WEEKLY;BYDAY=MO).
+   */
+  repeat: v.optional(v.nullable(v.pipe(Text(200), v.check(isValidRRule, 'Invalid repeat')))),
+  /** Take turns: each time it's done, it passes to the other person. */
+  rotate: v.optional(v.boolean()),
+  /** When a repeating task was last done. */
+  last_done: v.optional(v.nullable(LocalDate)),
 });
 
 export const CommentData = v.strictObject({

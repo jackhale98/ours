@@ -7,6 +7,7 @@ import { kvGet, kvSet } from '../account/db';
 import { account, consumeSignInLink, newKeysFrom, syncNow } from '../account/session';
 import { needsNewKeys, syncStatus } from '../account/sync';
 import { LogoMark } from '../Logo';
+import { ItemSheetHost } from './itemsheet';
 import { findEntry, mode, nameOf, names, partner, viewer } from './model';
 import { drawerOpen, type PlanMode, planHash, setPlanMode } from './planview';
 import { now } from './select';
@@ -271,6 +272,7 @@ export function App() {
         </button>
       )}
       <SheetHost />
+      <ItemSheetHost />
       <ToastHost />
     </>
   );

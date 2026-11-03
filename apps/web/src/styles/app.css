@@ -2378,3 +2378,18 @@ fieldset.reminders > legend {
   padding: 0;
   margin-bottom: 6px;
 }
+
+.it-sub.late {
+  color: var(--danger);
+  font-weight: 600;
+}
+.it-sub svg {
+  vertical-align: -2px;
+  margin-right: 2px;
+}
+.it-more {
+  flex: none;
+  width: var(--tap);
+  height: var(--tap);
+  color: var(--muted);
+}
