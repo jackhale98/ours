@@ -1,0 +1,59 @@
+/* SPDX-License-Identifier: AGPL-3.0-or-later */
+/*
+ * Design tokens: the single source of truth for colour, type and spacing.
+ * Every colour pair used for text meets WCAG 2.2 AA (4.5:1) in both themes.
+ * Person A and person B each get one hue; shared ("ours") is their mix.
+ */
+:root {
+  --font-display: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+  --font-body: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-6: 1.5rem;
+  --space-8: 2rem;
+  --radius: 0.75rem;
+  --tap: 44px;
+
+  --bg: #fbf8f4;
+  --surface: #ffffff;
+  --text: #1f1b17;
+  --text-muted: #5c544c;
+  --border: #ddd4c9;
+  --focus: #1d4ed8;
+
+  --person-a: #b4471f; /* terracotta, 5.3:1 on --bg */
+  --person-b: #22667a; /* teal, 6.2:1 on --bg */
+  --ours: #6a4a6e; /* plum mix, 7.6:1 on --bg */
+  --on-accent: #ffffff;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #171412;
+    --surface: #221e1b;
+    --text: #f3ede6;
+    --text-muted: #b9afa4;
+    --border: #3d3631;
+    --focus: #93b4ff;
+    --person-a: #f0956f;
+    --person-b: #73c3d8;
+    --ours: #c9a3cd;
+    --on-accent: #171412;
+  }
+}
+
+:root[data-theme="dark"] {
+  --bg: #171412;
+  --surface: #221e1b;
+  --text: #f3ede6;
+  --text-muted: #b9afa4;
+  --border: #3d3631;
+  --focus: #93b4ff;
+  --person-a: #f0956f;
+  --person-b: #73c3d8;
+  --ours: #c9a3cd;
+  --on-accent: #171412;
+}

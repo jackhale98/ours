@@ -1,0 +1,25 @@
+// Ours API Worker. See docs/SELF_HOSTING.md.
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "ours-api",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": { "enabled": true, "head_sampling_rate": 1 },
+  "vars": {
+    // Comma-separated origins of the web app allowed by CORS.
+    "ALLOWED_ORIGINS": "http://localhost:5173,http://localhost:4173",
+    // open | invite_only | closed
+    "ALLOW_SIGNUPS": "open"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "ours",
+      // Replace with your database id: `wrangler d1 create ours`
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "triggers": { "crons": ["* * * * *"] }
+}
