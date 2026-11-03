@@ -2,7 +2,7 @@
 
 A free, open-source, end-to-end encrypted planner for couples: a shared calendar, proposals, lists, and a weekly check-in.
 
-> **Status: release candidate.** Everything in the build plan is built and has been through independent security reviews ([docs/reviews](docs/reviews)): end-to-end encrypted accounts and sync, pairing with safety codes, recovery phrases, plans, proposals, lists, the weekly check-in, calendar import and an opt-in busy feed, encrypted notifications and reminders, export and import, and key rotation. The public site currently runs as a **local demo** with sample data, because the official API isn't deployed yet: **[try it](https://jackhale98.github.io/ours/)**. You can [run your own](docs/SELF_HOSTING.md) today.
+> **Status: release candidate.** Everything in the build plan is built and has been through independent security reviews ([docs/reviews](docs/reviews)): end-to-end encrypted accounts and sync, pairing with safety codes, recovery phrases, plans, proposals, lists, the weekly check-in, calendar import and an opt-in busy feed, encrypted notifications and reminders, and export and import. Key rotation is built and under review. The public site currently runs as a **local demo** with sample data, because the official API isn't deployed yet: **[try it](https://jackhale98.github.io/ours/)**. You can [run your own](docs/SELF_HOSTING.md) today.
 
 ## What is protected, and what is not
 
@@ -25,7 +25,7 @@ It also does **not** protect you against:
 
 If you lose all your devices **and** your 12-word recovery phrase, your data cannot be recovered by anyone, including the people running the server.
 
-Lost a phone? **Privacy → Secure your space** makes new keys so the lost device can't read anything new ([ADR 0013](docs/adr/0013-key-rotation.md)).
+Key rotation after losing a device ([ADR 0013](docs/adr/0013-key-rotation.md)) is built but switched off until its security review ([0005](docs/reviews/0005-key-rotation.md)) is resolved. Removing a device signs it out immediately.
 
 Full details: [docs/THREAT_MODEL.md](docs/THREAT_MODEL.md). If something goes wrong on a server: [docs/INCIDENT_RESPONSE.md](docs/INCIDENT_RESPONSE.md).
 

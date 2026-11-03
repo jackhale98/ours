@@ -7,6 +7,7 @@
   - subscription relay: `apps/api/src/routes/calendars.ts`, `subscribeCalendar`/`refreshCalendars`, `apps/web/src/app/calendars.ts`, parser `packages/core/src/ics/parse.ts` and `expand.ts` (and the `time/recurrence.ts` it calls)
   - export/import: `packages/core/src/crypto/export.ts`, `kdf.ts`, `apps/web/src/app/export.ts`, `views/DataCard.tsx`, `packages/core/src/ics/write.ts`
 - Verdict: **No sign-off yet.** Conditions: fix H1 and M1–M2; address or explicitly accept the Lows.
+- Re-review (commit c001131): **Sign-off with conditions.** H1, M2, L2, L5, L7 and the Info items are fixed; M1, L1, L3, L4 and L6 are fixed in part. Two conditions remain before public launch: (A) import must wait for a completed sync — **open**; (B) recurrence work must be bounded, not just impossible rules rejected — **open**. See the re-review section at the end.
 
 Findings were confirmed with throwaway probe tests (run against the repo from a scratch vitest config, then deleted) or by reading, as marked.
 
@@ -123,3 +124,52 @@ Findings were confirmed with throwaway probe tests (run against the repo from a 
 ## Sign-off
 
 No sign-off until H1, M1 and M2 are fixed with regression tests. L1–L7 are fixed or recorded as accepted risks in THREAT_MODEL. The Info items are at the owner's discretion.
+
+## Re-review (commit c001131)
+
+- Date: 2026-11-03
+- Scope: the fixes in c001131 for the findings above (key rotation in 6691236/4e863fd is reviewed separately and was not looked at here).
+- Method: read the diff; `pnpm test` (596 passed) and `pnpm test:api` (88 passed) at HEAD. The working tree held unrelated uncommitted changes from other work. New throwaway probe tests ran from a scratch config and were then deleted.
+
+| ID | Status | Verified by |
+|---|---|---|
+| H1 | **Fixed on a synced device; see condition A.** `planImport` gives every record a new id, remaps references, and skips any id the device has seen: the store, `removedAt`, and the engine's `knownIds()` (IDB envelopes including tombstones, plus the outbox). The server never purges tombstones, so on a fully synced device a plan made private, a downgraded calendar or a deleted record can't come back. | `export.test.ts` "never brings back…"; reading `sync.ts` `knownIds` and the API (no tombstone purge) |
+| M1 | **Partly fixed; see condition B.** `feasible()` rejects impossible month days, ordinal BYDAY with BYMONTHDAY, unsafe BYSETPOS and INTERVAL < 1. `FREQ=DAILY;BYMONTH=2;BYMONTHDAY=30` is now refused in 0 ms (was 16.8 s). | `time.test.ts` "hostile recurrence rules"; probe |
+| M2 | **Fixed for real files.** The export records `space_id`. Shared records restore only into the same space, and files without a `space_id` count as foreign. Busy stubs, settings and shared snapshots are never imported. The partner-scope check trusts the file's `scope` label, though (R3). | `export.test.ts` "moves only personal records…"; reading |
+| L1 | **Mostly fixed.** A preview is shown before anything is written. Items and comments take their parent's actual scope. Events go through `createEvent` (fresh busy marker). Calendars restore user-scoped with `fetched_at: null` and their shared copy is re-derived. Writes are wrapped in `bulk()`. File timestamps are no longer used. One fail-open case remains (R4). | `export.test.ts` "takes privacy from the records…"; reading; probe |
+| L2 | **Fixed.** Lookup comes first. Misses are limited per client network (`feed-miss:<net>`), hits per token. | `feed.test.ts` "random links do not add rate-limit rows per guess" |
+| L3 | **Mostly fixed.** Leaving a space deletes the leaver's `feed_busy` and revokes their link. `cleanup` purges tokens revoked more than a day ago. Still open: the **remaining** member's feed keeps the departed partner's busy times while that partner's consent flag stays in the shared settings, and sign-out still leaves the feed on with no notice. Accept or follow up. | `feed.test.ts` "leaving the space…"; reading `spaces.ts`, `app.ts` |
+| L4 | **Fixed in the app.** Partner busy times are included only if `feed_share_busy[partner]` and `feed_include[me]` are both set, and both live in synced settings, not per-device storage. Caveats (Info): the consent is a shared-settings field that either member's device can write (authorship isn't provable, see THREAT_MODEL), so it is cooperative, not enforced. Joint ("both") plans and calendars the partner imported as "both" still go in without consent, as ADR 0011 intends. THREAT_MODEL's `feed_busy` row still says "only if the user opts in"; mention partner-derived blocks and the consent switch. | Reading `feeds.ts`, `records.ts`, `Calendars.tsx` |
+| L5 | **Fixed.** `rule.between` over the window; a DAILY series starting in year 1000 now yields its 60 occurrences in the window (was 0). `Occurrence.index` is now the floating start in minutes and is only used for UI keys. | Probe; `time.test.ts`; grep for `.index` |
+| L6 | **Mostly fixed.** Only `USED_EVENT_PROPS` are kept, so a file of unknown properties no longer piles up. A file that repeats a *used* property (5 MB of `UID:1`) still keeps up to 5000 per event; measured heap growth was about 100 MB (noisy). Low: keep only the first occurrence of single-valued properties (all except EXDATE) and lower `MAX_EVENT_PROPS`. | Probe |
+| L7 | **Fixed.** `isCurrentPhrase` opens the account's server backup with the typed phrase before sealing, and fails closed when offline. | Reading `session.ts`, `DataCard.tsx` |
+| Info | **Fixed:** the feed keeps `private, max-age=900` (test); the relay has one 15 s deadline for the whole fetch, an invalid `Location` gives 502, and upstream status codes aren't echoed; `calendarExport` drops RRULEs that fail `isValidRRule`; the UI warns that the readable export contains calendar links. **Not changed (accepted):** `workers.dev` alias not in the own-host check; `normalizeFeedUrl` accepts `http://`, which the relay refuses. | `feed.test.ts`; reading |
+
+### New or remaining issues
+
+**A (condition; Medium, what remains of H1): import can run before the device knows its tombstones.**
+`known` is only as complete as this device's sync. After sign-in, `engine.start()` loads IDB, sets the account to `ready` and only then starts the first pull (`void this.sync()`, `session.ts`/`sync.ts`). `DataCard` and `planImport` don't check sync state. The main use of import is restoring a backup on a new or wiped device. If that happens before the first pull finishes, or while the pull is failing (offline, error), every shared record in the file counts as unknown. The stale shared copy of a plan the user has since made private is then written under a **new** id in space scope, and the partner can read it again. Every other shared record is also duplicated. The `known` set is also computed when the preview is made, not when it is applied. Probe: a backend whose `knownIds()` doesn't yet hold the tombstone imports the old shared plan into space scope. **Fix:** allow import only after a full pull has completed in this session (the cursor caught up with `more: false`, and no failed pull since), and say "Finish syncing first" otherwise. Recompute `importContext()` inside `apply()` and drop anything that became known. Add a test with a `knownIds()` that resolves only after a pull.
+
+**B (condition; Medium, what remains of M1): recurrence work is still unbounded for rules that are possible but never match, or that start far in the past.**
+`feasible()` covers impossible dates, but an INTERVAL can lock the rule onto days that never match. Also, `rule.between` still walks from DTSTART. Measured per event:
+
+| Rule | Time | Matches |
+|---|---|---|
+| `FREQ=DAILY;INTERVAL=7;BYDAY=TU`, DTSTART a Monday | ~2.2 s | none, ever |
+| `FREQ=DAILY` with DTSTART in year 1000 | ~2.5 s | normal |
+
+A calendar with 100 such events freezes the tab for about 4 minutes on each refresh. Partner-written events are still exposed the same way on every agenda render, because `LocalDateTime` allows any 4-digit year. **Fix:** bound the work itself, not the output:
+- For rules without COUNT, move DTSTART forward to the last aligned period before `from - pad` (whole INTERVALs of the FREQ) before calling rrule.
+- Reject DAILY rules with BYDAY when `INTERVAL % 7 == 0` and DTSTART's weekday isn't listed. More generally, reject DAILY/WEEKLY rules whose INTERVAL fixes the phase.
+- Run calendar parsing and expansion in a Web Worker with a time budget.
+- Add tests that hold these cases to under 50 ms.
+
+**R3 (Low): the cross-space check trusts the file's `scope` label.** `(shared && !sameSpace)` reads `item.scope` from the file, but the destination scope comes from the data: `createEvent` puts `privacy: 'full'` events in space scope, and a list goes to space scope unless it is `private`. A readable export edited to say `scope: 'user'` therefore moves a former partner's plans and lists into the new space (probe). Real exports never contain user-scoped full events or user-scoped shared lists, so this takes deliberate editing. Fix: compute "shared" from the destination (`event.privacy !== 'busy'`, `!list.private`, child follows parent) and use that for the space check.
+
+**R4 (Low): a child can fall back to space scope.** In `apply()`, `scopeOf()` returns `'space'` when the mapped parent isn't in the store. That happens when the parent was in the file but wasn't written, or comes later in the write order. The parent filter checks `importing`, which still includes records the filter itself drops later. Probe: a user-scoped comment whose parent comment was skipped is written to **space** scope with a dangling `parent_id`. Fix: fail closed. Skip a child whose parent wasn't written (check `ids.has(parent) || findEntry(parent)` at write time) and never default to `'space'`.
+
+**R5 (Info): feed consent and departed partners.** See L3 and L4 above: the consent is cooperative, and a departed partner's consent flag and busy markers stay in the space. Consider clearing `feed_share_busy[x]` when x leaves, and update THREAT_MODEL.
+
+### Re-review sign-off
+
+**Sign-off with conditions.** The original High and both Mediums are fixed for their stated cases, with regression tests. Before public launch: (A) gate import on a completed sync and re-check at apply; (B) bound recurrence work (move DTSTART forward and/or use a Worker budget) with tests for the two cases above. R3, R4 and the L3/L6 remainders are Low and can be fixed or accepted in THREAT_MODEL. R5 is at the owner's discretion.

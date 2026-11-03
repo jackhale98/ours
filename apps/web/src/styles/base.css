@@ -11,6 +11,18 @@
 html {
   -webkit-text-size-adjust: 100%;
   text-size-adjust: 100%;
+  /* App feel on touch screens: no double-tap zoom (pinch-zoom stays, WCAG 1.4.4),
+     no grey flash on tap (focus styles show the target instead). */
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Installed app: no rubber-band bounce or pull-to-refresh on the page itself. */
+@media (display-mode: standalone) {
+  html,
+  body {
+    overscroll-behavior: none;
+  }
 }
 
 body {
@@ -33,9 +45,26 @@ button {
 }
 
 input,
-textarea {
+textarea,
+select {
   font: inherit;
   color: inherit;
+}
+
+/* iPhones zoom into any field smaller than 16px when it gets focus. */
+input,
+textarea,
+select {
+  font-size: max(16px, 1em);
+}
+
+/* Controls aren't text to select: a long press on a button shouldn't highlight words. */
+button,
+.tabbar,
+.rail nav {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
 }
 
 :focus-visible {

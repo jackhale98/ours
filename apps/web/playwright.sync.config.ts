@@ -39,7 +39,7 @@ export default defineConfig({
     {
       command:
         'npx vite build --outDir dist-e2e && npx vite preview --outDir dist-e2e --port 4174 --strictPort',
-      env: { VITE_API_URL: API },
+      env: { VITE_API_URL: API, VITE_ROTATION: 'on' },
       url: WEB,
       reuseExistingServer: false,
       timeout: 120_000,

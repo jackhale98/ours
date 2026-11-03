@@ -1,6 +1,6 @@
 # 0013. Key rotation after losing a device or a partner leaving
 
-- Status: Accepted (phase 7; closes crypto review 0001 finding M1)
+- Status: Accepted, implementation under review (review 0005 did not sign off; the UI is switched off until it does)
 - Date: 2026-11-03
 
 ## Context

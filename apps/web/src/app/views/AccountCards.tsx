@@ -58,8 +58,8 @@ export function DevicesCard() {
         ))}
       </ul>
       <p class="d small">
-        Removing a device signs it out. It may still hold a copy of your keys: after removing one
-        you don’t trust, use “Secure your space” below.
+        Removing a device signs it out immediately. It may still hold a copy of the keys for what it
+        already downloaded.
       </p>
       {link ? (
         <div class="url">

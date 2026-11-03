@@ -1,0 +1,256 @@
+# Review 0005: key rotation (phase 7, ADR 0013)
+
+- Reviewer: independent agent that did not write the code (build plan §11)
+- Date: 2026-11-03
+- Scope: commits 6691236 (server and core part) and 4e863fd (client part), checked against ADR 0013, crypto review 0001 (M1, the M2 note on version allocation, I4) and THREAT_MODEL:
+  - core: `packages/core/src/crypto/pairing.ts` (`rekey` kind), `keys.ts`, `codec.ts`, `bundle.ts`
+  - server: `migrations/0007_key_rotation.sql`, `routes/spaces.ts` (`POST /:id/rotate`), `routes/sync.ts` (push floor), `routes/push.ts` (`requireCurrentKey`), `routes/invites.ts` (`rekey`), `routes/me.ts`
+  - client: `apps/web/src/account/session.ts` (`rotateKeys`, `keyUpdateLink`, `applyKeyLink`, `refresh`, `restartSync`), `account/sync.ts`, `app/mount.tsx`, `app/App.tsx` (banner), `app/views/AccountCards.tsx` (`SecureCard`)
+  - tests: `apps/api/test/rotation.test.ts`, `pairing.test.ts`, the end of `e2e-sync/pair.spec.ts`
+  - Uncommitted changes in the working tree (import, recurrence) were not reviewed.
+- Verdict: **No sign-off yet.** Conditions: fix H1 and H2, and M1–M6, with regression tests. Fix the Lows or record them as accepted risks in THREAT_MODEL.
+
+The reviewer ran the existing suites, all green: `pnpm test:api` (85 tests), `pnpm test` (596) and `e2e:sync` (1, including the rotation part). Seven probe tests ran against the Worker in vitest pool workers from a scratch config outside the repo, and were then deleted. They are referenced as P1–P7 below. Nothing in the repo changed apart from this file.
+
+## Summary
+
+The building blocks are sound. The `rekey` AAD kind is separate from partner and device links. Claiming a link is restricted correctly. The server refuses old-version writes. The +1 version rule serialises rotations on the server. The happy path works end to end: a stale partner's held change is re-sealed and synced, and both people see the same new safety code.
+
+The weak points are on the edges of the flow, and several fail silently and badly:
+
+- A rotation that fails offline leaves **orphan keys** on the device. The device then uses them, because the server accepts any version above the floor. The partner can no longer read that person's new writes, and a later real rotation collides with the orphan version. Key update links silently skip a conflicting version, so nothing repairs it (H1).
+- Rotation commits **before** the new recovery backup exists. If the person stops at the phrase step, or the page reloads, their backup holds none of the keys their data is now sealed under (H2).
+
+The rest is about completeness and delivery:
+
+- The rotate batch can half-apply (M1).
+- Re-encryption covers only what the rotating device has stored locally. Nothing checks that it finished, and nothing resumes an interrupted rotation (M2).
+- A key update link can't be issued again without a whole new rotation (M3).
+- Anyone holding a session in the space can mint a key update link that carries any keys. The client accepts them, so a removed device that signs in again can redirect the partner's new data to its own keys (M4).
+- The partner's edits made during the stale period can be overwritten when the keys arrive (M5).
+- The client's "decrypt-only" check rests entirely on values the server supplies (M6).
+
+**Answers to the questions in scope, in short.**
+
+- *Removed device:* it can't read new writes on the normal path. Exceptions:
+  - records never re-encrypted (M2);
+  - a write that races the rotation (L1);
+  - reminders and held notifications still queued under the old keys (L2);
+  - the feed link (L7);
+  - a device that signs in again and gets the partner to open its link (M4).
+- *Permanent "needs keys" or data loss:* yes, through H1, H2, M1, M3 and L3. A malicious server can also add a needs-keys banner, though that is denial of service only (M6).
+- *Rekey link:* it is claimable only by the other member, it is single-use, and it can't serve as a first invite or as a device link. It needs no rotation and its contents aren't checked (M4).
+- *`applyKeyLink`:* it refuses device links from another account, and `mergeFrom` refuses conflicting keys. The rekey path, however, *skips* conflicts silently and accepts versions above the server floor (H1, M4).
+- *Lying server:* yes in both directions (M6).
+- *Skipping the new phrase:* yes, this leads to data loss (H2). The partner's backup is never updated either (M3).
+- *Rotate route:* it is members-only and rate-limited (P6). It needs no recent sign-in and sends no notice (M4).
+
+| ID | Severity | Finding | Verified |
+|---|---|---|---|
+| H1 | High | An unconfirmed rotation leaves orphan keys that the device then writes under (the server accepts versions above the floor). They later collide with the real version, and the rekey link skips the conflict | Test (P3) + reading |
+| H2 | High | Rotation commits before the new recovery backup exists. Stopping at the phrase step loses everything re-encrypted if that device is lost | Reading |
+| M1 | Medium | `POST /rotate` batch is not all-or-nothing. On a race the loser gets 409, but its personal floor still moves, and the client discards its new keys | Test (P1b) |
+| M2 | Medium | Re-encryption covers only what is stored locally on the rotating device. It is never verified, and an interrupted rotation is never resumed | Reading |
+| M3 | Medium | Key delivery is one-shot. An expired or used link, the partner's other devices, or the partner's stale backup can only be fixed by another full rotation | Reading |
+| M4 | Medium | Key update links are unconstrained. Any member can mint one at any time with any keys, and the client adds any new version. A removed device that signs in again can take over the partner's new writes | Test (P4) + reading |
+| M5 | Medium | While stale, `resolve` overwrites the merge base with a record the device can't read. After the keys arrive, the partner's later edits are reverted | Reading |
+| M6 | Medium | The client's decrypt-only rule depends only on server-supplied `key_version`, `rotated_rev` and `rev`. Nothing is persisted, and there is no downgrade check | Reading |
+| L1 | Low | Push, notify and reminders read the floor before their write (TOCTOU). An old-version write can land after `rotated_rev`, and every client then hides it | Reading |
+| L2 | Low | Queued reminders and quiet-hours notifications under old keys survive rotation and are still sent | Test (P5) |
+| L3 | Low | A stale device can rotate, which leaves gaps in its ring. Records under a missing version are treated as deleted, and pending edits on them are dropped | Reading |
+| L4 | Low | The personal floor is per user, but the rotation point is per space. Multi-space accounts (the API allows 3) are left half-rotated | Reading |
+| L5 | Low | A conflict whose current version is under an unknown key makes `push()` spin until 429 | Reading |
+| L6 | Low | The banner sends the partner's *other* devices to the single-use link that is already used | Reading |
+| L7 | Low | Rotation does not replace the calendar feed link that a removed phone may be subscribed to | Reading |
+| I1–I6 | Info | See below | — |
+
+## Verified correct
+
+- **AAD separation:** the `rekey` kind is in the invite AAD (`invite | rekey | space_id`). Partner and rekey links fail to open as each other, or for another space (`pairing.test.ts`). Device links bind the user id.
+- **Claiming:** only the other current member can claim a `rekey` link. The creator and outsiders can't (`rotation.test.ts`). A former partner can't claim one after leaving (P7). The first fetch claims it, accepting erases the blob, and it can be used once. Accepting adds no membership, and `GET` requires membership, so a rekey link can't act as a first invite. `applyKeyLink` refuses anything other than `rekey` for this space or `device`. A device link from another account fails twice over: the server claim requires `created_by = uid`, and the AAD carries the user id. `mergeFrom` throws on a conflicting version and is applied to a copy, so nothing is saved if it fails.
+- **Server floors:** sync push, `/push/notify` and `/push/reminders` refuse versions below the floor with `stale_key`. The personal floor moves only for the rotating user. `/me` reports the floors.
+- **Version allocation (M2 note):** rotation must step exactly +1 from the caller's stated versions, and a second rotation from the same point gets 409 (`rotation.test.ts`). The core `KeyRing` still refuses to re-key an existing version (`setOnce`).
+- **Rotate route:** non-members get 404, and the route is limited to 10 per user per day (P6). A single member can rotate after the partner left, and no link is made then (P7).
+- **Client happy path (E2E):** the stale partner keeps their data and is shown the banner. A plan they make while stale is held. After they open the link, it is re-sealed and synced. The safety code changes, and both sides match (review 0001, I4).
+
+## Findings
+
+### H1 (High): orphan keys from an unconfirmed rotation are used and later collide
+
+- **Location:** `session.ts` `rotateKeys` l. 496–529 (keeps the new keys when `ApiError.status` is 0); `applyKeyLink` l. 573–575 (`if (!have.has(k.version))`); `routes/sync.ts` l. 105–106 and `routes/push.ts` l. 81 (only `version < floor` is refused).
+- **What happens:** `rotateKeys` saves a ring that already holds space key v+1 and personal key v+1, *before* it calls `POST /rotate`. If that call fails with a network error, the keys are kept "for a retry". If the person doesn't retry, the next app start loads that ring. `currentSpaceKey()` and `currentPersonalKey()` are then the unconfirmed v+1 keys, and every new record, notification and reminder is sealed under them. The server accepts this because it refuses only versions *below* the floor. P3 shows that `key_version: 99` is accepted by both `/sync/push` and `/push/notify`. Consequences:
+  - The partner's devices can't open any of these records. `unknownKey` sets the banner "Sam changed your shared keys. Open the key update link", but no link exists and the server floor never moved. This person's own device shows nothing wrong.
+  - Later the partner rotates and allocates the *real* v+1 under a different key. When this person opens the partner's link, `applyKeyLink` silently skips v+1 because the ring "already has" it. The toast says "New keys added". From then on, every record the partner re-encrypted fails to decrypt with the orphan key. `unknownKey` is false (the version is not newer than the latest), so `resolve` treats each record as gone: it is removed from the UI and its pending local edit is deleted. The reverse also holds: the partner can't read this person's writes. A device link can't repair the ring, because `mergeFrom` throws on the conflict.
+  - This is exactly the collision that review 0001 M2 deferred to "collision-safe key ids… in the rotation design". The server's +1 rule serialises *allocation*, but nothing binds a version to a particular key.
+  - A related note: the commit message says "a retry after a lost response reuses the keys". That holds only if the request never reached the server. If it landed, `/me` already reports v+1, and the retry rotates again to v+2. This is harmless, but the claim should be corrected.
+- **Impact:** an ordinary flaky-network failure on "Make new keys" can silently split the couple. Each side's new writes become unreadable to the other. After the next rotation, records disappear from the UI and pending edits are dropped. There is no recovery path in the app.
+- **Fix:**
+  1. The server refuses `key_version > floor` on push, notify and reminders: only the current version may be written.
+  2. Keep new keys in a separate *staged* slot that is never used for sealing until the server confirms the rotation. On any failure, either discard them, or keep them only for a retry from the same `from` versions. On the next start, drop staged keys that `/me` doesn't confirm.
+  3. Bind a key id into the version, e.g. `kid = H(label | space_id | version | key)`. Send it with `POST /rotate`, store it on the server, and return it from `/me`. A retry or a link can then tell whether *its* key won. Put the kid in the record AAD as review 0001 M2 intended.
+  4. `applyKeyLink` must refuse (not skip) a payload whose key for an existing version differs, and offer a way to drop unconfirmed versions.
+- Regression tests: the server refuses `floor + 1`; the client never seals under an unconfirmed version; a link with a conflicting version is refused.
+
+### H2 (High): rotation commits before the new recovery backup exists
+
+- **Location:** `rotateKeys` (server floors raised, everything re-encrypted, link made); `SecureCard` l. 308–420 (the new phrase is generated *after* rotation, and the stage lives only in component state); `saveBackup`.
+- **What happens:** after `POST /rotate` and `reencryptAll`, all live records are sealed under keys that exist only on this device. The server backup is still the old one (old phrase, old keys). The new phrase is shown afterwards, and saving it is a separate button. Several ordinary things leave the backup stale for good, with no reminder anywhere:
+  - closing the tab;
+  - navigating away;
+  - a reload;
+  - `saveBackup` failing (e.g. offline).
+
+  The `stage` and `words` are lost with the component. If this device is then lost or wiped (the person has just lost a phone, so it may be their last device), restoring from the old phrase gives only the old keys:
+  - **Every personal record is unrecoverable.** It is under personal v+1, and no other device or person has that key.
+  - **If there is no partner, or the partner hasn't opened the link yet, every space record is unrecoverable too.**
+
+  The restored device shows "ready" with an almost empty planner and a banner pointing to a device link from "another device".
+- **Impact:** permanent data loss after an interrupted, but otherwise successful, security action.
+- **Fix:** make the backup part of the commit, before the server moves:
+  1. Generate the new ring and the new phrase.
+  2. Show the phrase and require confirmation (e.g. re-enter two words).
+  3. `PUT /keys/backup` sealed with the new phrase over the *new* ring. That ring holds the old keys too, so it is safe even if step 4 never happens.
+  4. Only then call `POST /rotate`.
+
+  Also persist a "rotation incomplete" marker until backup, re-encryption and link are all done (see M2), and show a blocking banner while it is set. Test: abort after `/rotate`, then restore from the phrase; the data must open.
+
+### M1 (Medium): the rotate batch can half-apply
+
+- **Location:** `routes/spaces.ts` l. 53–71.
+- **What happens:** the pre-check and the two conditional `UPDATE`s are separate steps, and a D1 batch does not roll back an `UPDATE` that matched 0 rows. When the partner rotates between this request's pre-check and its batch, the space update changes nothing, but the caller's personal update succeeds. The response is still 409. P1b replays the batch exactly as the route runs it after Sam's rotation: `changes 0 1`, and Alex's `personal_key_version` is now 2. Alex's client sees 409 and restores the old ring (`err.status >= 400`), discarding personal v2. Alex's personal floor is now 2 with no key anywhere:
+  - every private change is held with `stale_key`;
+  - the banner says to link from "another of your devices", which also lack it;
+  - only rotating again (which needs a new phrase and relinking every device) recovers.
+
+  Two concurrent `Promise.all` rotations (P1) were serialised by miniflare and did not hit the window. On D1 the window is real.
+- **Fix:** make the batch atomic. For example, put both conditions in one guard that aborts the batch (`INSERT INTO quota_guard SELECT NULL WHERE NOT (…both versions match…)` first, as the quota check does). Or make the second `UPDATE` conditional on the first having happened, e.g. `WHERE … AND (SELECT key_version FROM spaces WHERE id=?) = ?from + 1`. Add a test that simulates the interleaving.
+
+### M2 (Medium): re-encryption is local, unverified, and not resumable
+
+- **Location:** `rotateKeys` l. 527–528; `SyncEngine.reencryptAll` l. 247; `start()` l. 195 (`void this.sync()`).
+- **What happens:**
+  - `reencryptAll` re-seals what is in *this device's* `envelopes` store when it runs. `restartSync` does not wait for the new engine's first pull, so records the device hasn't pulled yet are never re-encrypted. That covers a device that was asleep or offline, or the partner's writes from just before the rotation. Their later arrival creates nothing to re-seal.
+  - Records the device can't decode are skipped silently, for example a newer schema from the partner's newer app, or the L1 race. They stay under the old key indefinitely.
+  - No other device ever re-encrypts. The partner's devices re-seal only their outbox.
+  - Nothing counts what is left.
+  - If the app is closed, crashes or loses the response after `POST /rotate` but before `reencryptAll` and `keyUpdateLink`, nothing resumes. The person's device looks normal, every old record stays under the old key, and the partner never gets a link (see M3).
+- **Impact:** records written before the rotation stay readable by the removed device with a later database copy, which is the case ADR 0013 promises to close for "every live record". The partner can be left needing keys with no link in existence.
+- **Fix:**
+  1. Before rotating, run a complete pull (`await sync()` until `more` is false and the outbox is empty) and refuse to start on error.
+  2. After rotating, re-encrypt, pull again, and repeat until nothing below the current version remains.
+  3. Expose the count of live records below the floor (`GET /spaces/:id/rotation` → `{ space_below, mine_below }`), and keep a "finish securing" banner until it is 0.
+  4. Have *every* device that holds the current keys sweep its local envelopes below the latest version on start.
+  5. Persist rotation progress (`rotating: { from, stage }`) in IndexedDB and resume it on start.
+
+### M3 (Medium): key delivery is one-shot and can only be repeated by rotating again
+
+- **Location:** `keyUpdateLink` is called only from `rotateKeys` and from no UI; `SecureCard` keeps the link only in component state; invites expire after 24 h and are single-use.
+- **What happens:** the partner can't get the new space key, except by another full rotation, when:
+  - the link expires;
+  - the card is left before it is shared;
+  - the link is opened on one of the partner's devices, so it is used up and the others still need keys (L6);
+  - the partner later restores from their recovery phrase.
+
+  That last case matters most. `applyKeyLink` adds the new space key to the partner's ring, but the partner's server backup is sealed with *their* phrase, which no device holds, so the backup can never gain the new key. The UI only says "compare your safety code". The partner's phrase now silently fails to restore the shared space.
+- **Fix:**
+  - Offer "Send key update link" in Privacy whenever the partner hasn't confirmed the current version. The server can track the version each member last wrote under, or an explicit acknowledgement, and the link can be regenerated without rotating.
+  - After `applyKeyLink`, prompt the partner to make a new recovery phrase (with the same persistent banner as H2).
+  - Mention in the banner that a device which already has the keys can link this one (L6).
+
+### M4 (Medium): key update links are unconstrained, so a removed device that signs in again can redirect the partner's data
+
+- **Location:** `routes/invites.ts` l. 81–90 (any member, any time); `applyKeyLink` l. 573–575; `routes/spaces.ts` `rotate` (no recent-auth check, no notice); `routes/me.ts` `DELETE /devices/:id` (passkeys and email are untouched).
+- **What happens:** removing a device ends its sessions, but it can sign in again with a passkey stored on it or with the email app on it. With a session it can:
+  1. mint a `rekey` link with keys of its choice. No rotation or floor check is needed: in P4 Alex made one with nothing rotated, and Sam claimed it.
+  2. send the link to the partner from the stolen phone's own messaging apps ("the app asked me to send you this").
+
+  `applyKeyLink` adds any version the ring doesn't have, including versions above the server floor. The partner's device then seals everything new under the attacker's key (accepted, see H1), and the attacker pulls it with its session. The real owner's devices can't read those writes and show a banner.
+
+  Other things the regained session allows:
+  - It can call `POST /rotate` with no re-authentication, pushing every real device into "needs keys" (denial of service).
+  - If the owner's chats sync to the stolen device, it can claim the owner's new *device* link first.
+
+  A malicious server could deliver such a link by email, but it can't see the real link's secret. The safety-code comparison is the only check, and it happens after the device has started writing under the new key.
+- **Impact:** defeats the purpose of rotation (keeping the removed device out of new data) through a plausible social-engineering path.
+- **Fix:**
+  - The server accepts a `rekey` invite only from the member who made the latest rotation, only shortly after it, and only for the current version (store `rotated_by` and `rotated_at`). It refuses `key_version > floor` (H1).
+  - `applyKeyLink` accepts only when this device actually needs keys. The payload's newest version must equal the server floor, and every old version must match the ring. Show the new safety code *before* applying, with an explicit "I compared it with <name>" step.
+  - Require a recent sign-in for `/rotate` (as for adding a passkey) and email both members when keys change.
+  - Make "Secure your space" also list passkeys for removal and warn that a removed device that can still sign in (passkey or email on it) is not shut out.
+  - Document the residual risk in THREAT_MODEL.
+
+### M5 (Medium): edits made by the other side during the stale period are lost when the keys arrive
+
+- **Location:** `sync.ts` `resolve` l. 370–376 (`d.put('envelopes', remoteEnv)` before the unknown-key early return).
+- **What happens:** while the partner's device lacks the new key, each pulled record it can't read *replaces* the stored base envelope. The device keeps its old view and holds its own edits. After the keys arrive, its held edit conflicts. `resolve` then merges with `base = remote` (the latest server version), so `mergeFields` treats every field where the local copy still has the *old* value as a local change. The rotator's post-rotation edits to those fields are reverted. A shared list edited by both people during the stale period (possibly days) loses the rotator's changes silently.
+- **Fix:** don't overwrite the base when the remote can't be opened. Keep it (or store the unreadable remote separately) and re-pull from the old cursor once keys arrive, so that the three-way merge uses the true base. Test: Sam edits field A after rotation, stale Alex edits field B, then Alex applies the link; both edits survive.
+
+### M6 (Medium): the client's decrypt-only rule trusts the server completely
+
+- **Location:** `refresh` l. 145–153 (floor taken fresh from `/me`, not persisted); `SyncEngine.open` l. 112–120.
+- **What happens:** the check "old version and `rev > rotated_rev`" uses `key_version` and `rotated_rev` from `/me`, and `rev` from the same server. A server holding an old key (with a removed device's keys, or a database copy plus the old key) can still serve forged or rolled-back records under the old version:
+  - it can report `rotated_rev` as 0 or `key_version` as 1;
+  - it can simply give the forged record a `rev` at or below `rotated_rev`;
+  - it can replace a record this device already holds under v+1 with an older-version copy.
+
+  ADR 0013 says "clients additionally refuse old-version writes newer than their own last-seen rotation", but this is not implemented. In the other direction, a server can report a high floor to hide valid data or show a needs-keys banner, which is denial of service and can also be used for social engineering (M4).
+- **Fix:**
+  - Persist per space a monotonic `{ version, rotated_rev, cursor_at_learn }` and never accept a lower value from `/me`.
+  - Refuse a remote envelope whose `key_version` is lower than the one stored locally for the same id (a downgrade).
+  - Refuse old-version records whose rev is above the cursor at which this device first held the new version.
+  - Update the ADR and THREAT_MODEL to say what a fresh device can't check.
+
+### L1 (Low): floor checks are not atomic with the writes
+
+- **Location:** `routes/sync.ts` l. 84–90 vs l. 210; `routes/push.ts` `requireCurrentKey` (read, then insert).
+- **What happens:** a push that read `floor = 1` can commit after a rotation and get `rev > rotated_rev` under v1. Every client then refuses it: on the rotator, `resolve` removes the record and deletes any pending edit for it. On the writer, it disappears at the next restart. Nobody can re-encrypt it. Notifications and reminders have the same race (sent or stored under the old key). Probe P2 (20 pushes racing a rotation, eight times) did not interleave in miniflare.
+- **Fix:** enforce the floor inside the batch, e.g. `… WHERE excluded.key_version >= (SELECT key_version FROM spaces WHERE id = ?2)` (and the personal floor for user scope) on the upsert, plus a guard that aborts. Map an abort to `stale_key`.
+
+### L2 (Low): queued notifications under old keys survive rotation
+
+- **Location:** `routes/spaces.ts` rotate; `push/send.ts` `sendDue`; `notify.ts` `syncReminders` (`reminders-sig` is unchanged by rotation).
+- **What happens:** P5 shows that after rotation, the reminder stored under personal v1 (title, time, place) is still in `reminders`. It is re-sealed only when the person's planned reminders change, up to 8 days later. Quiet-hours notifications under the old space key also stay queued. `sendDue` doesn't check floors.
+- **Fix:** in the rotate batch, delete `reminders` rows of the caller's `kind = 'reminder'` (user scope) and the space's `deferred` rows below the new versions (or let `sendDue` skip them). Reset `reminders-sig` on the client after rotation so that the reminders are re-uploaded at once.
+
+### L3 (Low): a stale device can rotate, which leaves gaps in its ring
+
+- **Location:** `SecureCard` (shown even while `needsNewKeys`); `SyncEngine.unknownKey` (`version > latest`).
+- **What happens:** if Sam rotated to v2 and Alex presses "Make new keys" before opening Sam's link, Alex allocates v3 and holds {v1, v3}. Alex's `reencryptAll` can't re-encrypt Sam's v2 records. Alex's link lacks v2. On Alex's device, every v2 record counts as "not unknown" (2 < 3), so `resolve` removes it and deletes any pending edit for it. The same happens with any ring gap.
+- **Fix:** disable rotation while `needsNewKeys` (or require applying the pending link first). Define `unknownKey` as "the ring has no key for this version", and keep local data in that case.
+
+### L4 (Low): personal-key floor and rotation point don't match for multi-space accounts
+
+- **Location:** migration 0007 (`users.personal_key_version`, but `spaces.rotated_rev`); `reencryptAll` (this space only).
+- **What happens:** the API allows up to 3 spaces per user. Rotating one space raises the personal floor everywhere, but re-encrypts personal records only in this space and leaves the other spaces' keys unrotated. The client's personal floor check uses the *space's* `rotated_rev`, which also moves when the partner rotates. The client uses `spaces[0]` only, so this is latent today.
+- **Fix:** store `personal_rotated_rev` per user (or per user and space), and either rotate all of a user's spaces together or document single-space as an invariant enforced by the API.
+
+### L5 (Low): push loop spins on an unknown-key conflict
+
+- **Location:** `sync.ts` `push()` loop with `resolve` l. 371–375.
+- **What happens:** when a pushed record conflicts and the current version is under a version this device doesn't have, `resolve` returns without touching the outbox and without setting `stale`. The `for (;;)` loop then re-sends the same batch immediately until the rate limit returns 429. This is reachable through H1 (a version above the floor) or a lying server.
+- **Fix:** in the unknown-key branch, mark the item as held (as for `stale_key`) and leave the loop.
+
+### L6 (Low): misleading banner for the partner's other devices
+
+- **Location:** `App.tsx` `NewKeysBanner`; `newKeysFrom()`.
+- **What happens:** when the partner's phone has used the single-use link, their tablet still says "Open the key update link they sent you", which no longer works. The way that does work, a device link from the phone, isn't mentioned.
+- **Fix:** add "or link this device from your other device that already has the new keys". See also M3.
+
+### L7 (Low): rotation leaves the calendar feed link alone
+
+- **Location:** `SecureCard`; `routes/feed.ts`.
+- **What happens:** a removed phone whose calendar app subscribed to the busy feed keeps receiving busy times. These are plaintext by design and not key-protected. The "Secure your space" step does not offer "new feed link".
+- **Fix:** offer it in the flow, or replace the feed link automatically when it is on.
+
+### Info
+
+- **I1:** `applyKeyLink` fetches (and so claims) any pending link before checking its kind. A set-up user who opens someone else's first-invite link burns it. Check `kind` from a cheap metadata call, or claim only for `rekey`/`device`.
+- **I2:** an unused rekey blob stays on the server for up to 24 h. Someone who sees the link in synced chat history and has a database copy could open it. Recommend sharing in person (QR), and make sure expired invites are purged.
+- **I3:** the safety-code re-comparison (review 0001, I4) is prompted only by a toast. Keep a "not yet compared since keys changed" state in Privacy until confirmed.
+- **I4:** a new partner who joins after the old one left receives every old space key version. They can read history in D1 Time Travel copies. This is a design note for ADR 0013.
+- **I5:** `rotate` counts failed (409) attempts against its 10 per day (P6). A client retrying a conflict can lock the person out of rotating for a day. Count only successes, or allow a higher limit for 409s.
+- **I6:** tests don't cover the interleaved rotate batch, the floor TOCTOU, versions above the floor, the network-failure path in `rotateKeys`, re-encryption completeness, merges during the stale period, ring gaps, or rekey links with conflicting or higher versions.
+
+## Sign-off
+
+No sign-off until H1, H2 and M1–M6 are fixed with regression tests. Fix L1–L7 or record them as accepted risks in THREAT_MODEL, and correct ADR 0013's "last-seen rotation" claim to match the implementation. The Info items are at the owner's discretion. Crypto review 0001 M1 stays **open** until then.
