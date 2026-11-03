@@ -1,0 +1,27 @@
+{
+  "name": "@ours/core",
+  "version": "0.0.0",
+  "private": true,
+  "license": "AGPL-3.0-or-later",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    "./crypto": "./src/crypto/index.ts",
+    "./schema": "./src/schema/index.ts",
+    "./sync": "./src/sync/index.ts",
+    "./time": "./src/time/index.ts",
+    "./parse": "./src/parse/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@date-fns/tz": "1.5.0",
+    "@noble/ciphers": "2.4.0",
+    "@noble/hashes": "2.4.0",
+    "@scure/bip39": "2.4.0",
+    "date-fns": "4.4.0",
+    "rrule": "2.8.1",
+    "valibot": "1.5.0"
+  }
+}

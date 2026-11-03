@@ -1,0 +1,29 @@
+{
+  "name": "ours-monorepo",
+  "private": true,
+  "license": "AGPL-3.0-or-later",
+  "type": "module",
+  "engines": {
+    "node": ">=22.12"
+  },
+  "packageManager": "pnpm@10.28.0",
+  "scripts": {
+    "lint": "biome check .",
+    "format": "biome check --write .",
+    "typecheck": "pnpm -r --if-present typecheck",
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "test:api": "pnpm --filter @ours/api test",
+    "build": "pnpm --filter @ours/web build",
+    "e2e": "pnpm --filter @ours/web e2e",
+    "check:licenses": "node scripts/check-licenses.mjs",
+    "check:dco": "node scripts/check-dco.mjs",
+    "check:spdx": "node scripts/check-spdx.mjs"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.6.4",
+    "@vitest/coverage-v8": "4.1.12",
+    "typescript": "7.0.2",
+    "vitest": "4.1.12"
+  }
+}
