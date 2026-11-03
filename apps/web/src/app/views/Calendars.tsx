@@ -425,9 +425,29 @@ function FeedControls() {
           The feed is on. This device doesn’t have the link: make a new one to see it here.
         </p>
       )}
+      {url && (
+        <div class="btnrow">
+          {/* webcal:// opens Apple Calendar (and most desktop calendar apps) ready to subscribe. */}
+          <a class="btn sm" href={url.replace(/^https?:/, 'webcal:')}>
+            <Icon name="cal" size={15} />
+            Add to Apple Calendar
+          </a>
+          <a
+            class="btn sm"
+            href={`https://calendar.google.com/calendar/r?cid=${encodeURIComponent(url.replace(/^https?:/, 'webcal:'))}`}
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            <Icon name="cal" size={15} />
+            Add to Google Calendar
+          </a>
+        </div>
+      )}
       <p class="d small">
         Anyone with this link can see your busy times, so share it only with your own calendar apps.
-        Calendar apps check for changes every few hours.
+        It shows busy times only, never titles: the server can’t read them. It updates when one of
+        your devices has Ours open after a change, and calendar apps check for changes on their own
+        schedule (Google can take several hours).
       </p>
       <div class="btnrow">
         <button

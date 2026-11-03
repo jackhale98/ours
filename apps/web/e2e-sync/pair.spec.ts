@@ -317,6 +317,25 @@ test('sign up, pair, compare safety codes, and sync plans both ways', async ({ b
     }
   }
 
+  // The busy-time feed: Sam turns it on and a calendar app can read it.
+  await sam.goto('/#privacy');
+  await sam.getByRole('button', { name: 'Turn on the feed' }).click();
+  const feedUrl =
+    (await sam.locator('section[aria-labelledby="feed-h"] .url code').textContent()) ?? '';
+  expect(feedUrl).toMatch(/^http:\/\/localhost:8788\/feed\/[A-Za-z0-9_-]{43}\.ics$/);
+  await expect(sam.getByRole('link', { name: 'Add to Apple Calendar' })).toHaveAttribute(
+    'href',
+    feedUrl.replace(/^http/, 'webcal'),
+  );
+  let ics = '';
+  for (let i = 0; i < 50 && !ics.includes('BEGIN:VEVENT'); i++) {
+    ics = await (await sam.request.get(feedUrl)).text();
+    if (!ics.includes('BEGIN:VEVENT')) await sam.waitForTimeout(200);
+  }
+  expect(ics.startsWith('BEGIN:VCALENDAR\r\n')).toBe(true);
+  expect(ics).toContain('SUMMARY:Busy');
+  for (const secret of ['Dinner', 'Surprise', 'Vic']) expect(ics).not.toContain(secret);
+
   // Key rotation (ADR 0013): Sam secures the space after losing a device.
   const oldCode = await sam.evaluate(() => document.querySelector('.code')?.textContent ?? null);
   await sam.goto('/#privacy');

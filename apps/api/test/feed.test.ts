@@ -2,6 +2,7 @@
 
 import { env } from 'cloudflare:test';
 import { exports } from 'cloudflare:workers';
+import { parseIcs } from '@ours/core/ics';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { isFetchableCalendarUrl } from '../src/routes/calendars';
 import { call, couple, signIn, uniqueEmail } from './helpers';
@@ -79,6 +80,45 @@ describe('calendar feed', () => {
     expect(tooMany.status).toBe(422);
     expect((await getFeed(`https://x/feed/${'A'.repeat(43)}.ics`)).status).toBe(404);
     expect((await getFeed('https://x/feed/short.ics')).status).toBe(404);
+  });
+});
+
+describe('calendar feed format (what Google and Apple Calendar read)', () => {
+  it('is valid iCalendar: CRLF lines, required properties, parses back', async () => {
+    const u = await signIn(uniqueEmail());
+    const on = await call('/feed', { token: u.token, body: {} });
+    const now = Date.now();
+    const blocks = [
+      { start: now + 3_600_000, end: now + 7_200_000 },
+      { start: now + 2 * 86_400_000, end: now + 2 * 86_400_000 + 5_400_000 },
+    ];
+    await call('/feed/busy', { token: u.token, method: 'PUT', body: { blocks } });
+    const { text, type } = await getFeed(on.json.url);
+    expect(type).toBe('text/calendar; charset=utf-8');
+    expect(text.endsWith('\r\n')).toBe(true);
+    expect(text.replace(/\r\n/g, '').includes('\n')).toBe(false); // no bare LF
+    const lines = text.split('\r\n').filter(Boolean);
+    expect(lines[0]).toBe('BEGIN:VCALENDAR');
+    expect(lines.at(-1)).toBe('END:VCALENDAR');
+    expect(lines).toContain('VERSION:2.0');
+    expect(lines.some((l) => l.startsWith('PRODID:'))).toBe(true);
+    for (const l of lines) expect(new TextEncoder().encode(l).length).toBeLessThanOrEqual(75);
+    const events = text.split('BEGIN:VEVENT').slice(1);
+    expect(events).toHaveLength(2);
+    for (const ev of events) {
+      for (const prop of ['UID:', 'DTSTAMP:', 'DTSTART:', 'DTEND:', 'SUMMARY:Busy']) {
+        expect(ev).toContain(prop);
+      }
+      expect(ev).toMatch(/DTSTART:\d{8}T\d{6}Z/);
+    }
+    const parsed = parseIcs(text);
+    expect(parsed.events).toHaveLength(2);
+    expect(parsed.warnings).toEqual([]);
+    // Calendar apps sometimes probe with HEAD.
+    const head = await exports.default.fetch(
+      new Request(`https://api.example${new URL(on.json.url).pathname}`, { method: 'HEAD' }),
+    );
+    expect(head.status).toBe(200);
   });
 });
 
