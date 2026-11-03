@@ -3,7 +3,7 @@ import { CHECKIN_STEPS } from '@ours/core/schema';
 import { addDays } from '@ours/core/time';
 import { signal } from '@preact/signals';
 import type { ComponentChildren } from 'preact';
-import { choresList, ideasList, itemsOf } from '../lists';
+import { checkinLists, ideasList, itemsOf } from '../lists';
 import { byKind, createEvent, nameOf, partner, put, settings, viewer } from '../model';
 import { noticeProposal } from '../notices';
 import { withDefaultReminders } from '../reminders';
@@ -85,10 +85,11 @@ export function CheckinView() {
       e.rec.kind === 'event' && e.rec.data.status === 'proposed' && e.rec.data.proposed_by === p,
   ).length;
 
-  const chores = (() => {
-    const list = choresList(settings.value.chores_list);
-    return list ? itemsOf(list.id).filter((i) => !i.rec.data.done) : [];
-  })();
+  // Open items from every shared list that's part of the check-in, grouped by list.
+  const shareLists = checkinLists(settings.value.chores_list)
+    .map((l) => ({ list: l, items: itemsOf(l.id).filter((i) => !i.rec.data.done) }))
+    .filter((g) => g.items.length);
+  const chores = shareLists.flatMap((g) => g.items);
 
   const frees = freeEvenings(7);
   const date = d.date && frees.includes(d.date) ? d.date : (frees[0] ?? null);
@@ -178,20 +179,30 @@ export function CheckinView() {
             )}
           </p>
         </Step>
-        <Step i={1} title="Share out the chores">
+        <Step i={1} title="Share out what needs doing">
           {chores.length ? (
             <>
               <p class="lede small">
-                Tap a circle to give each one an owner. Unowned chores tend to wait.
+                Tap a circle to give each one an owner. Things nobody owns tend to wait.
               </p>
-              <ul class="items">
-                {chores.map((i) => (
-                  <ItemRow key={i.id} item={i} assignable />
-                ))}
-              </ul>
+              {shareLists.map((g) => (
+                <div key={g.list.id}>
+                  {shareLists.length > 1 && <p class="sublbl">{g.list.rec.data.name}</p>}
+                  <ul class="items">
+                    {g.items.map((i) => (
+                      <ItemRow key={i.id} item={i} assignable />
+                    ))}
+                  </ul>
+                </div>
+              ))}
             </>
+          ) : checkinLists(settings.value.chores_list).length ? (
+            <p class="nothing">Nothing open on your check-in lists. Nice.</p>
           ) : (
-            <p class="nothing">No open chores. Nice.</p>
+            <p class="nothing">
+              No lists are part of the check-in yet. Turn on “Part of the weekly check-in” on a
+              shared list in Lists.
+            </p>
           )}
         </Step>
         <Step i={2} title="Plan time together">

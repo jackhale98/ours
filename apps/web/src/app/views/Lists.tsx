@@ -8,17 +8,19 @@ import {
   createList,
   deleteList,
   type ItemEntry,
+  inCheckin,
   itemsOf,
   LIST_TYPES,
   type ListEntry,
   type PickerKind,
   pickerKind,
   renameList,
+  setListCheckin,
   setListKind,
   setListPrivacy,
   typeOf,
 } from '../lists';
-import { nameOf, partner, put, remove, type Slot, update, viewer } from '../model';
+import { nameOf, partner, put, remove, type Slot, settings, update, viewer } from '../model';
 import { nextFreeEvening, relDay } from '../select';
 import { openQuick } from '../sheets';
 import { CloseButton, colorVar, Icon, Sheet, Switch, toast } from '../ui';
@@ -288,11 +290,12 @@ function NewListSheet() {
   const [kind, setKind] = useState<NewKind>('todo');
   const [name, setName] = useState('');
   const [priv, setPriv] = useState(LIST_TYPES.todo.defaultPrivate);
+  const [checkin, setCheckin] = useState(false);
   const p = nameOf(partner.value);
   const submit = (e: Event) => {
     e.preventDefault();
     const finalName = name.trim() || LIST_TYPES[kind].example;
-    const id = createList(finalName, kind, priv);
+    const id = createList(finalName, kind, priv, checkin && kind === 'todo');
     currentList.value = id;
     picked.value = null;
     closeSheet();
@@ -334,6 +337,14 @@ function NewListSheet() {
           label="Just for me"
           hint={priv ? `${p} won’t see this list at all.` : `Shared with ${p}.`}
         />
+        {!priv && kind === 'todo' && (
+          <Switch
+            checked={checkin}
+            onChange={setCheckin}
+            label="Part of the weekly check-in"
+            hint="Its open items come up in the check-in, to share out who does what."
+          />
+        )}
         <button class="btn primary big" type="submit">
           Make list
         </button>
@@ -397,6 +408,20 @@ function EditListSheet({ id }: { id: string }) {
           label="Just for me"
           hint={list.rec.data.private ? 'Encrypted with your personal key.' : `Shared with ${p}.`}
         />
+        {!list.rec.data.private && pickerKind(list.rec.data.kind) === 'todo' && (
+          <Switch
+            checked={inCheckin(list, settings.value.chores_list)}
+            onChange={(v) => {
+              saveName();
+              setListCheckin(id, v);
+              toast(
+                v ? 'It will come up in the weekly check-in.' : 'Left out of the weekly check-in.',
+              );
+            }}
+            label="Part of the weekly check-in"
+            hint="Its open items come up in the check-in, to share out who does what."
+          />
+        )}
         <button class="btn primary big" type="submit">
           Done
         </button>
@@ -506,7 +531,9 @@ export function ListsView() {
           </div>
         </>
       ) : (
-        <p class="nothing">No lists yet. Make one for groceries, chores, date ideas or gifts.</p>
+        <p class="nothing">
+          No lists yet. Make one for groceries, chores, to-dos, date ideas or gifts.
+        </p>
       )}
       {s?.type === 'new' && <NewListSheet />}
       {s?.type === 'edit' && <EditListSheet key={s.id} id={s.id} />}

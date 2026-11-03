@@ -11,9 +11,7 @@ import {
   put,
   replaceAll,
   type Slot,
-  settings,
   setViewer,
-  store,
   update,
 } from './model';
 import { dow, today, zone } from './select';
@@ -129,7 +127,7 @@ function seedAll(): void {
   setViewer('a');
   const list = (
     name: string,
-    kind: 'todo' | 'chores' | 'gifts' | 'ideas',
+    kind: 'todo' | 'gifts' | 'ideas',
     items: [string, Slot | null, boolean?][],
     owner?: Slot,
   ) => {
@@ -154,7 +152,7 @@ function seedAll(): void {
     ['Bay leaves', null],
     ['Sourdough', null, true],
   ]);
-  const home = list('Home', 'chores', [
+  const home = list('Home', 'todo', [
     ['Book furnace service', 'a'],
     ['Return library books', 'b'],
     ['Fix the bathroom drawer', null],
@@ -180,8 +178,8 @@ function seedAll(): void {
     ['Cook a three-course dinner', null],
   ]);
 
-  // The weekly check-in shares out chores from the Home list.
-  setChoresList(home);
+  // The weekly check-in shares out what's open on the Home list.
+  update<'list'>(home, { checkin: true });
   setViewer('b');
   put('checkin', {
     // Most recent Sunday before today.
@@ -191,9 +189,4 @@ function seedAll(): void {
     note: 'Can we keep Sunday morning slow this week? I’ve been running on empty.',
   });
   setViewer('a');
-}
-
-function setChoresList(listId: string): void {
-  const entry = store.value.entries.find((e) => e.rec.kind === 'settings');
-  if (entry) update<'settings'>(entry.id, { ...settings.value, chores_list: listId });
 }

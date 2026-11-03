@@ -108,7 +108,8 @@ export const BusyStubData = v.pipe(
 /**
  * List types. The app offers one general type and three special ones:
  * - todo: the general list (groceries, to-dos, packing), tick-off with assignees
- * - chores: tick-off with assignees; used by the weekly check-in
+ * - chores: older name for a general list in the weekly check-in (now the
+ *   `checkin` flag, which any shared list can have)
  * - ideas: date ideas with "pick one for us" and "plan it"
  * - gifts: tick-off, private by default so surprises stay surprises
  * 'shopping' and 'check' are older names for the general list and still parse.
@@ -120,6 +121,8 @@ export const ListData = v.strictObject({
   name: NonEmpty(100),
   kind: v.picklist(LIST_KINDS),
   private: v.boolean(),
+  /** Its open items come up in the weekly check-in to share out (shared lists only). */
+  checkin: v.optional(v.boolean()),
 });
 
 export const ItemData = v.strictObject({

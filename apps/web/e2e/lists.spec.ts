@@ -69,12 +69,12 @@ test('edit: rename, change kind, make private, delete with undo', async ({ page 
   await dialog.getByRole('textbox', { name: 'Name' }).fill('Food shop');
   await dialog
     .getByRole('group', { name: 'Kind' })
-    .getByRole('button', { name: /^Chores/ })
+    .getByRole('button', { name: /^Gift ideas/ })
     .click();
   await dialog.getByRole('switch', { name: /Just for me/ }).check();
   await dialog.getByRole('button', { name: 'Done', exact: true }).click();
   await expect(page.getByRole('button', { name: /Private: Food shop/ })).toBeVisible();
-  await expect(page.locator('span.small.muted', { hasText: /^Chores$/ })).toBeVisible();
+  await expect(page.locator('span.small.muted', { hasText: /^Gift ideas$/ })).toBeVisible();
   await expect(page.getByText('Oat milk')).toBeVisible();
 
   await page.getByRole('button', { name: 'Edit list: Food shop' }).click();
@@ -86,21 +86,37 @@ test('edit: rename, change kind, make private, delete with undo', async ({ page 
   await expect(page.getByRole('button', { name: /Food shop/ })).toBeVisible();
 });
 
-test('the check-in uses the chores list', async ({ page }) => {
+test('any shared list can be part of the weekly check-in', async ({ page }) => {
+  // The demo's Home list is part of it.
   await page.goto('/#checkin');
   await expect(page.getByText('Book furnace service')).toBeVisible();
+  await expect(page.getByText('Oat milk')).toHaveCount(0);
+
+  // Turn it on for Groceries too: both lists come up, by name.
+  await page.goto('/#lists');
+  await page.getByRole('button', { name: 'Edit list: Groceries' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Edit list' });
+  await dialog.getByRole('switch', { name: 'Part of the weekly check-in' }).check();
+  await dialog.getByRole('button', { name: 'Done', exact: true }).click();
+  await page.goto('/#checkin');
+  await expect(page.getByText('Oat milk')).toBeVisible();
+  await expect(page.locator('.sublbl', { hasText: 'Groceries' })).toBeVisible();
+
+  // Private lists can't be (the check-in is shared).
+  await page.goto('/#lists');
+  await page.getByRole('button', { name: 'Edit list: Groceries' }).click();
+  await dialog.getByRole('switch', { name: /Just for me/ }).check();
+  await expect(dialog.getByRole('switch', { name: 'Part of the weekly check-in' })).toHaveCount(0);
 });
 
-test('one general kind and three special ones; old shopping lists are general lists', async ({
-  page,
-}) => {
+test('list kinds: a general list, date ideas and gift ideas', async ({ page }) => {
   await page.goto('/#lists');
   await page.getByRole('button', { name: 'New list' }).click();
   const kinds = page
     .getByRole('dialog', { name: 'New list' })
     .getByRole('group', { name: 'What kind of list?' })
     .getByRole('button');
-  await expect(kinds).toHaveCount(4);
+  await expect(kinds).toHaveCount(3);
   await expect(kinds.nth(0)).toHaveAttribute('aria-pressed', 'true');
   await expect(kinds.nth(0)).toContainText('List');
 });

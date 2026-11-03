@@ -47,3 +47,36 @@ test('quick add and a plan’s sheet have fields big enough not to zoom', async 
   await expect(page.getByRole('dialog')).toBeVisible();
   expect(await smallFields(page)).toEqual([]);
 });
+
+/** Two boxes overlap if their rectangles intersect. */
+const overlaps = (
+  a: { x: number; y: number; width: number; height: number },
+  b: { x: number; y: number; width: number; height: number },
+) => a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
+
+test('date and time fields never overlap', async ({ page }) => {
+  await page.goto('/#plan');
+  await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
+  await page.keyboard.press('n');
+  const quick = page.getByRole('dialog', { name: 'New plan' });
+  const date = await quick.locator('#qa-date').boundingBox();
+  const time = await quick.locator('#qa-time').boundingBox();
+  expect(date && time && !overlaps(date, time)).toBe(true);
+  for (const box of [date, time]) {
+    expect((box?.x ?? 0) + (box?.width ?? 0)).toBeLessThanOrEqual(page.viewportSize()?.width ?? 0);
+  }
+  await page.getByRole('textbox', { name: 'What’s the plan?' }).fill('Dinner tomorrow 7pm');
+  await quick.getByRole('button', { name: /More options/ }).click();
+  const form = page.getByRole('dialog', { name: /New plan/ });
+  const fields = ['Starts', 'Start time', 'Ends', 'End time'];
+  const boxes = [];
+  const ids = ['#pf-sd', '#pf-st', '#pf-ed', '#pf-et'];
+  for (const id of ids) boxes.push(await form.locator(id).boundingBox());
+  for (let i = 0; i < boxes.length; i++) {
+    for (let j = i + 1; j < boxes.length; j++) {
+      const a = boxes[i];
+      const b = boxes[j];
+      expect(a && b && !overlaps(a, b), `${fields[i]} / ${fields[j]}`).toBe(true);
+    }
+  }
+});

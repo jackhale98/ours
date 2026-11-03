@@ -237,7 +237,11 @@ test('check-in: finish after four steps', async ({ page }) => {
   await expect(page.getByText('Alex’s note')).toBeVisible();
   const finish = page.getByRole('button', { name: 'Finish check-in' });
   await expect(finish).toBeDisabled();
-  for (const step of ['Look at the week ahead', 'Share out the chores', 'Plan time together']) {
+  for (const step of [
+    'Look at the week ahead',
+    'Share out what needs doing',
+    'Plan time together',
+  ]) {
     await page.getByRole('button', { name: `Done: ${step}` }).click();
   }
   await page.getByRole('textbox', { name: 'Note for Alex' }).fill('Excited for Lisbon.');

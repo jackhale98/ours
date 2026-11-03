@@ -16,23 +16,17 @@ export interface ListType {
 }
 
 /**
- * One general type and three special ones, each with a behaviour the
- * others don't have. Older 'shopping' and 'check' lists are general lists.
+ * One general type and two special ones, each with a behaviour the others
+ * don't have. Older 'shopping', 'check' and 'chores' lists are general lists;
+ * whether a list comes up in the weekly check-in is its own switch.
  */
-export type PickerKind = 'todo' | 'chores' | 'ideas' | 'gifts';
+export type PickerKind = 'todo' | 'ideas' | 'gifts';
 
 export const LIST_TYPES: Record<PickerKind, ListType> = {
   todo: {
     label: 'List',
-    blurb: 'Groceries, to-dos, packing: anything to tick off, together or alone.',
+    blurb: 'Groceries, chores, to-dos, packing: anything to tick off, together or alone.',
     example: 'Groceries',
-    behaviour: 'check',
-    defaultPrivate: false,
-  },
-  chores: {
-    label: 'Chores',
-    blurb: 'Jobs around the home, each with an owner. They come up in the weekly check-in.',
-    example: 'Home',
     behaviour: 'check',
     defaultPrivate: false,
   },
@@ -54,7 +48,7 @@ export const LIST_TYPES: Record<PickerKind, ListType> = {
 
 /** The picker's kind for a stored kind (older shopping and generic lists are general lists). */
 export const pickerKind = (kind: ListKind): PickerKind =>
-  kind === 'shopping' || kind === 'check' ? 'todo' : kind;
+  kind === 'ideas' || kind === 'gifts' ? kind : 'todo';
 export const typeOf = (kind: ListKind): ListType => LIST_TYPES[pickerKind(kind)];
 
 export function allLists(): ListEntry[] {
@@ -72,8 +66,17 @@ function allItemsOf(listId: string): Entry[] {
   return store.value.entries.filter((e) => e.rec.kind === 'item' && e.rec.data.list_id === listId);
 }
 
-export function createList(name: string, kind: ListKind, isPrivate: boolean): string {
-  return put('list', { name, kind, private: isPrivate }, { scope: isPrivate ? 'user' : 'space' });
+export function createList(
+  name: string,
+  kind: ListKind,
+  isPrivate: boolean,
+  checkin = false,
+): string {
+  return put(
+    'list',
+    { name, kind, private: isPrivate, ...(isPrivate ? {} : { checkin }) },
+    { scope: isPrivate ? 'user' : 'space' },
+  );
 }
 
 export function renameList(id: string, name: string): void {
@@ -107,14 +110,22 @@ export function deleteList(id: string): () => void {
   return remove([id, ...allItemsOf(id).map((e) => e.id)]);
 }
 
-/** The list the weekly check-in uses for chores. */
-export function choresList(preferredId: string | null | undefined): ListEntry | undefined {
-  const lists = allLists().filter((l) => !l.rec.data.private);
-  return (
-    lists.find((l) => l.id === preferredId) ??
-    lists.find((l) => l.rec.data.kind === 'chores') ??
-    lists.find((l) => typeOf(l.rec.data.kind).behaviour === 'check')
-  );
+/**
+ * Whether a list's open items come up in the weekly check-in. Only shared
+ * lists can (the check-in is shared). Older lists: the chores kind, or the
+ * list the check-in used to point at.
+ */
+export function inCheckin(list: ListEntry, legacyId?: string | null): boolean {
+  if (list.rec.data.private) return false;
+  return list.rec.data.checkin ?? (list.rec.data.kind === 'chores' || list.id === legacyId);
+}
+
+export function checkinLists(legacyId?: string | null): ListEntry[] {
+  return allLists().filter((l) => inCheckin(l, legacyId));
+}
+
+export function setListCheckin(id: string, on: boolean): void {
+  update<'list'>(id, { checkin: on });
 }
 
 export function ideasList(): ListEntry | undefined {
