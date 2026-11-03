@@ -18,6 +18,8 @@ Web app (GitHub Pages, Preact PWA)            API (Cloudflare Worker, Hono)
 | `packages/core/sync` | Push/pull protocol schemas, write clock, merge | schema |
 | `packages/core/time` | Zones, recurrence expansion, free-time finder | rrule, @date-fns/tz |
 | `packages/core/parse` | Quick-add natural-language parser | — |
+| `packages/core/ics` | iCalendar (.ics) parser and occurrence expander for imported calendars (untrusted input, hardened) | time |
+| `packages/core/feed` | Which busy blocks go in a user's calendar feed (leaves out their own imported calendars) | time |
 | `apps/web` | PWA | all of core |
 | `apps/api` | Worker | `schema` and `sync` only — **never** crypto beyond encoding |
 

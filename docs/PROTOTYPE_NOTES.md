@@ -6,7 +6,7 @@
 
 - **Shell:** phone-first; bottom tab bar + floating "New plan" button under 880 px, left rail with a "New plan" button and `N` shortcut above it. Tabs: Plan, Lists, Check-in, Privacy.
 - **Plan (home):** "This week" header with date range and an *Encrypted* pill that links to Privacy; countdown strip; "needs your answer" cards for partner proposals (Yes, add it / Reply / Can't make it); 7-day agenda with "Show next week" (14 days); per-day "Both free this evening — Plan something".
-- **Ownership markers:** filled dot (one person), two overlapping dots (ours), hollow ring (tentative / proposed), hatched (busy-only). Colour is never the only signal, and rows carry a visually hidden owner label.
+- **Ownership markers:** filled (confirmed), outline (tentative / proposed), hatched (busy-only). Rows carry a visually hidden owner label.
 - **Quick add sheet:** one natural-language field with live chips (day, time, place), editable Day and Time, "Whose plan" (Mine / Ours / Partner's), "Ask *partner* first" for shared or partner plans, "Keep the details private" for your own.
 - **Event sheet:** owner + tentative label, when, place, repeat; accept/decline; privacy switch; notes thread; delete with "Tap again to confirm" and an undo toast.
 - **Lists:** pill tabs with counts; private lists with a lock and an explanation that they use your personal key; tap-to-cycle assignee circle (none → me → partner); show/clear done with undo; date ideas with "Pick one for us", "Plan it", "Another".
@@ -21,6 +21,7 @@
 | Google Fonts at runtime | Self-hosted Latin subsets of Figtree (body, preloaded) and Bricolage Grotesque (display), WOFF2, `font-display: swap` | Plan: no runtime third-party requests. |
 | `--faint` `#899497` / dark `#768386` used for text | `#626D70` / `#869294` | Prototype values are 2.9:1 and 4.2:1; WCAG AA text needs 4.5:1. Enforced by `pnpm check:contrast`. |
 | `--line-strong` used for input and checkbox borders (1.8:1) | New `--control` token (≥ 3:1); `--line-strong` only for decorative edges | WCAG 1.4.11 non-text contrast. |
+| Both people are dots that differ only by colour | Person A = circle, person B = **square**, ours = circle + square; a "What the marks mean" key under the agenda | Colour-blind users: under simulated deuteranopia the person-A colour and "ours" are nearly identical (ΔE ≈ 2), and under protanopia A vs B is weak (ΔE ≈ 13). Shape now carries ownership; CI simulates protanopia, deuteranopia and tritanopia. |
 | Fixed people "Sam"/"Alex", blue/rose | Slots `a`/`b` with chosen display names; colours from a small curated set with light/dark pairs (phase 3) | Custom colours must keep the contrast guarantees. |
 | Countdowns are a separate list | Events with `countdown: true` (all-day events like "Lisbon trip") | Plan's data model; one less record kind. |
 | Free-text repeat ("Every Saturday") | RRULE on the event, rendered as text | Plan's recurrence model (ADR 0007). |
@@ -40,3 +41,8 @@
 ## Data model additions from the prototype
 
 - `away: boolean` on `event` and `busy_stub` (schema 1; added before any data shipped). All-day "away" events (trips) block shared free evenings; ordinary all-day events (birthdays) do not. Busy stubs carry it so a partner's private trip still blocks "both free".
+
+## Added beyond the prototype
+
+- **Imported calendars** (owner request; ADR 0011): Privacy → "Calendars you already use". Add by subscription link (refreshes via the server, once accounts exist) or .ics file (stays on device). Choose whose calendar it is and whether the partner sees everything or just busy. Imported events appear on the agenda with a calendar label, open read-only, and events marked free don't block evenings.
+- **Calendar feed preview**: shows how many busy blocks the feed would contain and which imported calendars it leaves out (your own, to avoid duplicates), with an option to include the partner's busy times.

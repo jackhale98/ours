@@ -12,6 +12,8 @@ The owner supplied `docs/prototype.html` as the visual reference. The plan requi
 - Fonts: Figtree (body, preloaded, 20 KB) and Bricolage Grotesque (display, 41 KB), Latin subsets of the variable `wght` axis from Fontsource 5.3.0, vendored in `apps/web/src/fonts/` with their OFL-1.1 licence text. Bricolage's optical-size axis is dropped to save bytes.
 - Fonts are vendored rather than installed from npm so the build has no font dependency and the license allowlist (OFL for fonts only) applies to files we can see.
 
+- Colour-vision deficiency: ownership is carried by shape (person A circle, person B square, ours both), with a text key on the Plan screen. `check:contrast` also simulates protanopia, deuteranopia and tritanopia (Machado et al. 2009) and requires the two person colours to stay ≥ 10 ΔE apart as a secondary cue.
+
 ## Consequences
 - `--faint` text is close to `--muted`; hierarchy comes from size and weight more than colour.
 - Non-Latin text falls back to system fonts. Add more subsets (Latin Extended is ~+15 KB per face) if users need them.

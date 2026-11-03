@@ -10,7 +10,9 @@
     "./schema": "./src/schema/index.ts",
     "./sync": "./src/sync/index.ts",
     "./time": "./src/time/index.ts",
-    "./parse": "./src/parse/index.ts"
+    "./parse": "./src/parse/index.ts",
+    "./feed": "./src/feed/index.ts",
+    "./ics": "./src/ics/index.ts"
   },
   "scripts": {
     "typecheck": "tsc -p tsconfig.json"

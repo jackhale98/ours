@@ -2,7 +2,7 @@
 
 import { addDays } from '@ours/core/time';
 import { signal } from '@preact/signals';
-import { commentsFor, nameOf, partner, viewer } from '../model';
+import { commentsFor, nameOf, names, partner, viewer } from '../model';
 import {
   agenda,
   awaitingMe,
@@ -17,12 +17,12 @@ import {
   today,
   whenText,
 } from '../select';
-import { accept, decline, openEvent, openQuick } from '../sheets';
-import { Icon, Marker } from '../ui';
+import { accept, decline, openEvent, openImport, openQuick } from '../sheets';
+import { Icon, Marker, MarkerKey } from '../ui';
 
 const weeks = signal<1 | 2>(1);
 
-function EventRow({ row }: { row: Row }) {
+function EventRow({ row, date }: { row: Row; date: string }) {
   const me = viewer.value;
   const p = partner.value;
   const masked = row.type === 'busy';
@@ -31,8 +31,8 @@ function EventRow({ row }: { row: Row }) {
   return (
     <button
       type="button"
-      class={`ev${masked ? ' is-masked' : ''}`}
-      onClick={() => openEvent(row.id)}
+      class={`ev${masked ? ' is-masked' : ''}${row.free ? ' is-free' : ''}`}
+      onClick={() => (row.origin === 'import' ? openImport(row, date) : openEvent(row.id))}
     >
       <span class="ev-time">
         {row.allDay ? (
@@ -61,6 +61,13 @@ function EventRow({ row }: { row: Row }) {
               </span>
             )}
             {row.away && row.allDay && <span>Away</span>}
+            {row.origin === 'import' && (
+              <span>
+                <Icon name="cal" size={13} />
+                {row.source ?? 'Imported'}
+                {row.free ? ' · free' : ''}
+              </span>
+            )}
             {row.location && (
               <span>
                 <Icon name="pin" size={13} />
@@ -190,7 +197,7 @@ export function PlanView() {
               </div>
               <div class="dlist">
                 {day.rows.map((row) => (
-                  <EventRow key={row.key} row={row} />
+                  <EventRow key={row.key} row={row} date={day.date} />
                 ))}
                 {!day.rows.length && !day.bothFree && <p class="nothing">Nothing planned</p>}
                 {day.bothFree && (
@@ -225,6 +232,7 @@ export function PlanView() {
       >
         {weeks.value === 1 ? 'Show next week' : 'Show less'}
       </button>
+      <MarkerKey names={names.value} />
     </>
   );
 }

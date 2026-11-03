@@ -551,6 +551,10 @@ kbd {
   min-width: 0;
 }
 
+.is-free .ev-title {
+  font-weight: 500;
+}
+
 .is-masked .ev-title {
   color: var(--muted);
   font-weight: 500;
@@ -593,13 +597,18 @@ kbd {
   background: var(--c);
 }
 
-.mk-ours i.a {
+.mk i.a {
   --c: var(--person-a);
+}
+
+/* Person B is a square everywhere, so the two people differ by shape, not just colour. */
+.mk i.b {
+  --c: var(--person-b);
+  border-radius: 2px;
 }
 
 .mk-ours i.b {
   left: 9px;
-  --c: var(--person-b);
   opacity: 0.85;
 }
 
@@ -651,6 +660,40 @@ kbd {
 .more {
   align-self: flex-start;
   margin-top: 10px;
+}
+
+.key {
+  font-size: 0.8125rem;
+  color: var(--muted);
+}
+
+.key summary {
+  cursor: pointer;
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  text-decoration-color: var(--control);
+}
+
+.key ul {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.key li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.key .mk {
+  margin-top: 0;
 }
 
 /* ---------- lists ---------- */
@@ -1128,6 +1171,82 @@ textarea.txt {
   font-variant-numeric: tabular-nums;
 }
 
+.muted {
+  color: var(--muted);
+}
+
+.gap {
+  gap: 12px;
+}
+
+.cals {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.calrow {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 0;
+  border-top: 1px solid var(--line);
+}
+
+.calrow-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.calrow-head .mk {
+  margin-top: 0;
+}
+
+.calrow-head .stack {
+  flex: 1;
+  gap: 2px;
+}
+
+.addcal summary {
+  cursor: pointer;
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  font-weight: 600;
+}
+
+.addcal[open] summary {
+  margin-bottom: 8px;
+}
+
+.addcal summary::before,
+.key summary::before {
+  content: "+";
+  display: inline-grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  margin-right: 8px;
+  border: 1.5px solid var(--control);
+  border-radius: 6px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.addcal[open] summary::before,
+.key[open] summary::before {
+  content: "−";
+}
+
+.addcal summary::-webkit-details-marker,
+.key summary::-webkit-details-marker {
+  display: none;
+}
+
 /* ---------- segmented control and switch ---------- */
 
 .seg {
@@ -1541,4 +1660,8 @@ dialog.sheet::backdrop {
     opacity: 0;
     transform: translateY(8px);
   }
+}
+
+.stat .mk {
+  margin-top: 0;
 }

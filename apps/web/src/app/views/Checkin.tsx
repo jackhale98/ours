@@ -5,7 +5,7 @@ import { signal } from '@preact/signals';
 import type { ComponentChildren } from 'preact';
 import { byKind, createEvent, type Entry, nameOf, partner, put, settings, viewer } from '../model';
 import { agenda, dow, fmtLong, freeEvenings, relDay, today, zone } from '../select';
-import { Icon, toast } from '../ui';
+import { Icon, Marker, toast } from '../ui';
 import { ItemRow } from './Lists';
 
 interface Draft {
@@ -150,27 +150,21 @@ export function CheckinView() {
             <div class="stat">
               <b>{count(me)}</b>
               <span>
-                <i
-                  class="dot"
-                  style={{ '--c': me === 'a' ? 'var(--person-a)' : 'var(--person-b)' }}
-                />
+                <Marker owner={me} />
                 Your plans
               </span>
             </div>
             <div class="stat">
               <b>{count(p)}</b>
               <span>
-                <i
-                  class="dot"
-                  style={{ '--c': p === 'a' ? 'var(--person-a)' : 'var(--person-b)' }}
-                />
+                <Marker owner={p} />
                 {nameOf(p)}’s
               </span>
             </div>
             <div class="stat">
               <b>{count('both')}</b>
               <span>
-                <i class="dot" style={{ '--c': 'var(--ours)' }} />
+                <Marker owner="both" />
                 Together
               </span>
             </div>

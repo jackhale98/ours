@@ -134,9 +134,70 @@ export const SettingsData = v.strictObject({
   default_reminder_minutes: v.optional(v.nullable(v.pipe(v.number(), v.integer(), v.minValue(0)))),
   members: v.optional(v.strictObject({ a: v.optional(Member), b: v.optional(Member) })),
   theme: v.optional(v.picklist(['system', 'light', 'dark'])),
+  /** Personal: include the partner's busy times in this user's calendar feed. */
+  feed_include_partner: v.optional(v.boolean()),
   /** Which shared check list the weekly check-in uses for chores. */
   chores_list: v.optional(v.nullable(RefId)),
 });
+
+/**
+ * A calendar the user already has, imported by subscription link (or a
+ * one-time file). Always stored under the importer's personal key: the URL is
+ * a secret that grants read access to that calendar.
+ */
+export const CalendarData = v.strictObject({
+  name: NonEmpty(80),
+  /** https:// feed URL (webcal:// is normalised), or null for a one-time file import. */
+  url: v.nullable(v.pipe(v.string(), v.maxLength(2048), v.regex(/^https?:\/\//))),
+  /** Whose calendar this is. */
+  owner: Owner,
+  /** What the partner sees: everything, or only busy blocks. */
+  share: v.picklist(['full', 'busy']),
+  /** Last successful refresh (ms), or null. */
+  fetched_at: v.nullable(v.pipe(v.number(), v.integer(), v.minValue(0))),
+});
+
+/** One occurrence in a calendar snapshot (already expanded; no recurrence). */
+const SnapshotItem = v.strictObject({
+  start: v.union([LocalDate, LocalDateTime]),
+  end: v.union([LocalDate, LocalDateTime]),
+  all_day: v.boolean(),
+  tz: v.nullable(TimeZone),
+  /** Present only in full-detail snapshots. */
+  title: v.optional(Text(200)),
+  location: v.optional(v.nullable(Text(200))),
+  /** Marked free/transparent in the source calendar: shown, but not busy. */
+  free: v.optional(v.literal(true)),
+});
+
+export const MAX_SNAPSHOT_ITEMS = 400;
+
+/**
+ * The events of an imported calendar for a window (e.g. the next 60 days),
+ * written by the importer's device after each refresh. A 'busy' snapshot
+ * carries times only; the importer keeps a 'full' copy under their own key.
+ */
+export const CalSnapshotData = v.pipe(
+  v.strictObject({
+    calendar_id: RefId,
+    /** Who imported it (holds the URL). Their own feed leaves this calendar out. */
+    importer: Slot,
+    /** Calendar name; omitted from busy-only snapshots shared with the partner. */
+    name: v.optional(NonEmpty(80)),
+    owner: Owner,
+    detail: v.picklist(['full', 'busy']),
+    window_start: LocalDate,
+    window_end: LocalDate,
+    fetched_at: v.pipe(v.number(), v.integer(), v.minValue(0)),
+    items: v.pipe(v.array(SnapshotItem), v.maxLength(MAX_SNAPSHOT_ITEMS)),
+  }),
+  v.check(
+    (s) =>
+      s.detail === 'full' ||
+      (s.name === undefined && s.items.every((i) => i.title === undefined && i.location == null)),
+    'Busy-only snapshots must not carry names, titles or places',
+  ),
+);
 
 export const KIND_SCHEMAS = {
   event: EventData,
@@ -146,6 +207,8 @@ export const KIND_SCHEMAS = {
   comment: CommentData,
   checkin: CheckinData,
   settings: SettingsData,
+  calendar: CalendarData,
+  cal_snapshot: CalSnapshotData,
 } as const;
 
 export type Kind = keyof typeof KIND_SCHEMAS;
@@ -158,6 +221,8 @@ export type ItemData = KindData['item'];
 export type CommentData = KindData['comment'];
 export type CheckinData = KindData['checkin'];
 export type SettingsData = KindData['settings'];
+export type CalendarData = KindData['calendar'];
+export type CalSnapshotData = KindData['cal_snapshot'];
 
 /** Current schema version per kind. Bump together with a migration below. */
 export const CURRENT_SCHEMA: Record<Kind, number> = {
@@ -168,6 +233,8 @@ export const CURRENT_SCHEMA: Record<Kind, number> = {
   comment: 1,
   checkin: 1,
   settings: 1,
+  calendar: 1,
+  cal_snapshot: 1,
 };
 
 type Migration = (data: Record<string, unknown>) => Record<string, unknown>;

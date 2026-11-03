@@ -42,7 +42,7 @@
   gap: 12px;
 }
 
-.cards ul {
+.page .cards ul {
   margin: 0;
   padding-left: 1.1em;
   color: var(--muted);

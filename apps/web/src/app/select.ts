@@ -92,13 +92,39 @@ export function repeatText(rrule: string | null): string {
   return n > 1 ? `Every ${n} ${unit}s` : `Every ${unit}`;
 }
 
+/* ---------- imported calendars ---------- */
+
+export type SnapshotEntry = Entry & { rec: { kind: 'cal_snapshot' } };
+
+/**
+ * Snapshots to show: for each calendar, the private full copy if this device
+ * has it, otherwise the shared copy (which may be busy-only).
+ */
+export function visibleSnapshots(): SnapshotEntry[] {
+  const best = new Map<string, SnapshotEntry>();
+  for (const s of byKind('cal_snapshot') as SnapshotEntry[]) {
+    const id = s.rec.data.calendar_id;
+    const cur = best.get(id);
+    if (!cur || (s.scope === 'user' && cur.scope !== 'user')) best.set(id, s);
+  }
+  return [...best.values()];
+}
+
 /* ---------- agenda ---------- */
 
 export interface Row {
   key: string;
   id: string;
-  /** 'busy' rows are a partner's private plans: no details. */
-  type: 'event' | 'busy';
+  /** 'busy' rows are a partner's private plans: no details. 'import' rows come from an imported calendar. */
+  type: 'event' | 'busy' | 'import';
+  /** Where it came from: an Ours plan/stub, or an imported calendar. */
+  origin: 'plan' | 'import';
+  /** Imported calendar name, when known. */
+  source: string | null;
+  /** For imported rows: who imported the calendar (their own feed leaves it out). */
+  importer: Slot | null;
+  /** Marked free in its source calendar: shown, but doesn't block time. */
+  free: boolean;
   owner: Slot | 'both';
   title: string;
   allDay: boolean;
@@ -132,6 +158,10 @@ function rowsFor(entry: Entry, from: number, to: number): { day: string; row: Ro
   const occs: Occurrence[] = expand(d, from, to, zone);
   return occs.flatMap((o) => {
     const base: Row = {
+      origin: 'plan',
+      source: null,
+      importer: null,
+      free: false,
       key: `${entry.id}:${o.index}`,
       id: entry.id,
       type: r.kind === 'busy_stub' ? 'busy' : 'event',
@@ -156,6 +186,39 @@ function rowsFor(entry: Entry, from: number, to: number): { day: string; row: Ro
     };
     return daysTouched(o, zone).map((day) => ({ day, row: base }));
   });
+}
+
+function importRows(entry: SnapshotEntry, from: number, to: number): { day: string; row: Row }[] {
+  const d = entry.rec.data;
+  return d.items.flatMap((item, i) =>
+    expand({ ...item, rrule: null }, from, to, zone).flatMap((o) => {
+      const row: Row = {
+        origin: 'import',
+        importer: d.importer,
+        key: `${entry.id}:${i}`,
+        id: entry.id,
+        type: d.detail === 'busy' ? 'busy' : 'import',
+        owner: d.owner,
+        title: d.detail === 'busy' ? 'Busy' : item.title || 'Busy',
+        allDay: item.all_day,
+        away: false,
+        start: item.all_day ? '' : hhmm(o.start),
+        end: item.all_day ? '' : hhmm(o.end),
+        status: 'confirmed',
+        proposedBy: null,
+        location: d.detail === 'busy' ? null : (item.location ?? null),
+        repeat: '',
+        comments: 0,
+        privacy: 'full',
+        zoneNote: null,
+        occStart: o.start,
+        occEnd: o.end,
+        source: d.name ?? null,
+        free: !!item.free,
+      };
+      return daysTouched(o, zone).map((day) => ({ day, row }));
+    }),
+  );
 }
 
 const sortRows = (a: Row, b: Row) =>
@@ -185,14 +248,13 @@ function computeAgenda(days: number): Day[] {
   const from = toInstant(`${first}T00:00`, zone);
   const to = toInstant(`${addDays(first, days)}T00:00`, zone);
   const byDay = new Map<string, Row[]>();
-  const entries = [...byKind('event'), ...byKind('busy_stub')];
-  for (const e of entries) {
-    for (const { day, row } of rowsFor(e, from, to)) {
-      const list = byDay.get(day) ?? [];
-      list.push(row);
-      byDay.set(day, list);
-    }
-  }
+  const add = ({ day, row }: { day: string; row: Row }) => {
+    const list = byDay.get(day) ?? [];
+    list.push(row);
+    byDay.set(day, list);
+  };
+  for (const e of [...byKind('event'), ...byKind('busy_stub')]) rowsFor(e, from, to).forEach(add);
+  for (const s of visibleSnapshots()) importRows(s, from, to).forEach(add);
   return Array.from({ length: days }, (_, i) => {
     const date = addDays(first, i);
     const rows = (byDay.get(date) ?? []).sort(sortRows);

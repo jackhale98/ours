@@ -6,6 +6,7 @@ import { setTheme, type ThemePref, theme } from '../../theme';
 import { names, SPACE_ID, setViewer, spaceKey, store, viewer } from '../model';
 import { seedDemo } from '../seed';
 import { Avatar, Icon, toast } from '../ui';
+import { CalendarsCard } from './Calendars';
 
 const REPO = 'https://github.com/jackhale98/ours';
 const example = signal<string[] | null>(null);
@@ -93,20 +94,7 @@ export function PrivacyView() {
           </p>
         </section>
 
-        <section class="card" aria-labelledby="feed-h">
-          <h2 class="h3" id="feed-h">
-            Calendar feed
-          </h2>
-          <p class="d">
-            Subscribe in Google or Apple Calendar to see when you’re busy next to your work
-            calendar. The feed holds busy times only, because the server can’t read titles. It’s off
-            until you turn it on, and you can make a new link at any time.
-          </p>
-          <p class="note">
-            <Icon name="lock" size={15} />
-            <span>Available once you have an account.</span>
-          </p>
-        </section>
+        <CalendarsCard />
 
         <section class="card" aria-labelledby="rec-h">
           <h2 class="h3" id="rec-h">

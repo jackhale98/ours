@@ -17,7 +17,7 @@ import {
   update,
   viewer,
 } from './model';
-import { fmtTime, ownerLabel, relDay, repeatText, today, whenText, zone } from './select';
+import { fmtTime, ownerLabel, type Row, relDay, repeatText, today, whenText, zone } from './select';
 import { Avatar, CloseButton, Icon, Marker, Sheet, Switch, toast } from './ui';
 
 export interface QuickPreset {
@@ -31,6 +31,7 @@ export interface QuickPreset {
 export type SheetState =
   | { type: 'quick'; preset: QuickPreset }
   | { type: 'event'; id: string }
+  | { type: 'import'; row: Row; date: string }
   | null;
 export const sheet = signal<SheetState>(null);
 export const openQuick = (preset: QuickPreset = {}) => {
@@ -38,6 +39,9 @@ export const openQuick = (preset: QuickPreset = {}) => {
 };
 export const openEvent = (id: string) => {
   sheet.value = { type: 'event', id };
+};
+export const openImport = (row: Row, date: string) => {
+  sheet.value = { type: 'import', row, date };
 };
 const close = () => {
   sheet.value = null;
@@ -49,11 +53,9 @@ export const afterAdd = signal<(() => void) | null>(null);
 export function SheetHost() {
   const s = sheet.value;
   if (!s) return null;
-  return s.type === 'quick' ? (
-    <QuickAdd key="quick" preset={s.preset} />
-  ) : (
-    <EventSheet key={s.id} id={s.id} />
-  );
+  if (s.type === 'quick') return <QuickAdd key="quick" preset={s.preset} />;
+  if (s.type === 'import') return <ImportSheet key={s.row.key} row={s.row} date={s.date} />;
+  return <EventSheet key={s.id} id={s.id} />;
 }
 
 const capitalise = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
@@ -431,6 +433,42 @@ function EventSheet({ id }: { id: string }) {
           </button>
         </div>
       )}
+    </Sheet>
+  );
+}
+
+/* ---------- imported calendar event (read-only) ---------- */
+
+function ImportSheet({ row, date }: { row: Row; date: string }) {
+  const busy = row.type === 'busy';
+  const who = row.owner === 'both' ? null : row.owner;
+  return (
+    <Sheet labelledBy="sh-title" onClose={close}>
+      <div class="sh-head">
+        <span class="owner">
+          <Marker owner={row.owner} {...(busy ? { mode: 'busy' as const } : {})} />
+          {ownerLabel(row.owner, { a: nameOf('a'), b: nameOf('b') })}
+          {' · imported'}
+        </span>
+        <CloseButton onClose={close} />
+      </div>
+      <h2 id="sh-title">{row.title}</h2>
+      <p class="when">{whenText(date, row.allDay, row.start, row.end)}</p>
+      {row.location && (
+        <p class="loc">
+          <Icon name="pin" size={15} />
+          {row.location}
+        </p>
+      )}
+      <p class="note">
+        <Icon name="cal" size={15} />
+        <span>
+          {busy
+            ? `${who ? nameOf(who) : 'Your partner'} shares only busy times from this calendar.`
+            : `From ${row.source ?? 'an imported calendar'}. Read-only here: change it in the calendar app it came from.`}
+          {row.free ? ' Marked as free, so it doesn’t block your evenings.' : ''}
+        </span>
+      </p>
     </Sheet>
   );
 }

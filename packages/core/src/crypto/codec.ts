@@ -15,6 +15,7 @@ import type { KeyRing } from './keys';
  * Which scopes a record may live in.
  * - Busy-only events and private lists: personal key only (scope 'user').
  * - Busy stubs exist so the partner can see them: space key only.
+ * - Imported calendar sources (they contain the subscription URL): personal key only.
  * - Tombstones carry no content and may be in either scope.
  */
 export function scopeAllows(record: DecodedRecord, scope: Scope): boolean {
@@ -26,6 +27,13 @@ export function scopeAllows(record: DecodedRecord, scope: Scope): boolean {
       return record.data.private ? scope === 'user' : true;
     case 'busy_stub':
       return scope === 'space';
+    case 'calendar':
+      // The subscription URL is a secret: never under the shared key.
+      return scope === 'user';
+    case 'cal_snapshot':
+      // Full detail is shared only if the importer chose to share it; the
+      // schema already forbids titles in busy-only snapshots.
+      return true;
     default:
       return true;
   }

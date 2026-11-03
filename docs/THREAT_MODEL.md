@@ -51,6 +51,8 @@ Every stored field (keep in sync with `apps/api/migrations` and the privacy poli
 | feed_tokens | token_hash, user_id, created_at, revoked_at | Calendar feed |
 | feed_busy | user_id, start_utc, end_utc | **Plaintext** busy blocks, only if the user opts in to the calendar feed |
 
+**Imported calendars (opt-in):** when a user adds a calendar by subscription link, each refresh is relayed by the Worker, which sees the subscription URL and that calendar's contents **in transit** (not stored, not logged). The URL itself is stored only inside an encrypted record. File imports never reach the server. See ADR 0011.
+
 Also visible transiently, not stored in D1: IP addresses and user agents (Cloudflare edge), request timing, push timing. Worker logs contain route, method, status and latency only — never bodies or tokens.
 
 Third parties: Cloudflare (hosting, D1), the email provider (email address and magic-link timing), browser push services (encrypted payloads, timing).
@@ -61,6 +63,7 @@ See ADR 0003. Summary: XChaCha20-Poly1305 (random nonces), HKDF-SHA256 with per-
 
 ## Known limitations and follow-ups
 
+- Imported-calendar refreshes go through the server in plaintext (ADR 0011). Users who need full end-to-end protection for those calendars should use file import instead.
 - Partners cannot cryptographically prove authorship to each other (`author`, `device_id` are under the shared key). The server cannot forge them.
 - Key rotation on device removal is phase 7. Rotation must also retire old versions for new writes (review finding M1). Until then, a removed device that kept the space key can still decrypt anything it can obtain from the server, so removal also revokes its sessions.
 - Ciphertext size buckets are 64 bytes; very long notes are distinguishable from short ones.

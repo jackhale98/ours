@@ -50,7 +50,11 @@ export function Icon({ name, size = 18 }: { name: IconName; size?: number }) {
 
 export const colorVar = (slot: Slot) => (slot === 'a' ? 'var(--person-a)' : 'var(--person-b)');
 
-/** Ownership marker: filled (confirmed), ring (tentative), hatched (busy). Never colour alone. */
+/**
+ * Ownership marker. Shape carries the meaning so colour is never needed:
+ * person A = circle, person B = square, ours = both overlapping;
+ * filled = confirmed, outline = tentative, hatched = private ("busy").
+ */
 export function Marker({ owner, mode }: { owner: Slot | 'both'; mode?: 'dash' | 'busy' }) {
   const cls = `mk${owner === 'both' ? ' mk-ours' : ''}${mode ? ` ${mode}` : ''}`;
   return owner === 'both' ? (
@@ -60,8 +64,32 @@ export function Marker({ owner, mode }: { owner: Slot | 'both'; mode?: 'dash' | 
     </span>
   ) : (
     <span class={cls} aria-hidden="true">
-      <i style={{ '--c': colorVar(owner) }} />
+      <i class={owner === 'a' ? 'solo a' : 'solo b'} />
     </span>
+  );
+}
+
+/** Explains the markers in words; shown under the agenda. */
+export function MarkerKey({ names }: { names: Record<Slot, string> }) {
+  const items: [ComponentChildren, string][] = [
+    [<Marker owner="a" key="a" />, `${names.a}’s plan (circle)`],
+    [<Marker owner="b" key="b" />, `${names.b}’s plan (square)`],
+    [<Marker owner="both" key="both" />, 'Ours, together'],
+    [<Marker owner="both" mode="dash" key="dash" />, 'Tentative: waiting for a yes'],
+    [<Marker owner="b" mode="busy" key="busy" />, 'Private: details hidden'],
+  ];
+  return (
+    <details class="key">
+      <summary>What the marks mean</summary>
+      <ul>
+        {items.map(([mark, label]) => (
+          <li key={label}>
+            {mark}
+            {label}
+          </li>
+        ))}
+      </ul>
+    </details>
   );
 }
 
