@@ -30,6 +30,7 @@ import { put, settings, store } from '../app/model';
 import { HAS_API } from '../config';
 import { ApiError, api, setToken } from './api';
 import { kvGet, kvSet, wipe } from './db';
+import { startFeeds, stopFeeds } from './feeds';
 import { loadRing, saveRing } from './keystore';
 import { disablePush, startNotifications, stopNotifications } from './notify';
 import { SyncEngine } from './sync';
@@ -147,6 +148,7 @@ async function refresh(session: Session): Promise<void> {
       slot: space.role,
       synced: () => e.sync(),
     });
+    void startFeeds();
   }
   account.value = {
     status: 'ready',
@@ -250,6 +252,7 @@ export async function signOut(callServer = true): Promise<void> {
   // The push subscription belongs to this device's session: drop it first.
   if (callServer) await disablePush().catch(() => {});
   stopNotifications();
+  stopFeeds();
   if (callServer) await api('/auth/logout', { body: {} }).catch(() => {});
   engine?.stop();
   engine = null;

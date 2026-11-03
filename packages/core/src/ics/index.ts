@@ -8,3 +8,4 @@ export {
   parseIcs,
 } from './parse';
 export { WINDOWS_ZONES, windowsToIana } from './windows-zones';
+export { type IcsExportEvent, writeIcs } from './write';

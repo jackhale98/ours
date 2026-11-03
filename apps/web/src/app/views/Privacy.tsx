@@ -1,31 +1,20 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 import { generateRecoveryPhrase, safetyCode } from '@ours/core/crypto';
 import { signal } from '@preact/signals';
-import { useState } from 'preact/hooks';
 import { currentSafetyCode } from '../../account/session';
 import { setTheme, type ThemePref, theme } from '../../theme';
-import { mode, names, SPACE_ID, setViewer, spaceKey, store, viewer } from '../model';
-import { seedDemo } from '../seed';
+import { mode, names, SPACE_ID, setViewer, spaceKey, viewer } from '../model';
 import { Avatar, Icon, toast } from '../ui';
 import { AccountCard, DevicesCard, NotificationsCard, RecoveryCard } from './AccountCards';
 import { CalendarsCard } from './Calendars';
+import { DataCard } from './DataCard';
 
 const REPO = 'https://github.com/jackhale98/ours';
 const example = signal<string[] | null>(null);
 
-function download(name: string, type: string, text: string) {
-  const url = URL.createObjectURL(new Blob([text], { type }));
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = name;
-  a.click();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
-}
-
 export function PrivacyView() {
   const me = viewer.value;
   const n = names.value;
-  const [resetArmed, setResetArmed] = useState(false);
   const demo = mode.value === 'demo';
   const code = demo ? safetyCode(SPACE_ID, 1, spaceKey()) : currentSafetyCode();
   const themes: [ThemePref, string][] = [
@@ -190,51 +179,7 @@ export function PrivacyView() {
           </div>
         </section>
 
-        <section class="card" aria-labelledby="data-h">
-          <h2 class="h3" id="data-h">
-            Your data
-          </h2>
-          <p class="d">
-            Export everything as a JSON backup, decrypted on this device.{' '}
-            {demo
-              ? 'Demo data lives only in this browser and never leaves it.'
-              : 'Keep the file somewhere safe: it isn’t encrypted.'}
-          </p>
-          <div class="btnrow">
-            <button
-              type="button"
-              class="btn sm"
-              onClick={() => {
-                download(
-                  demo ? 'ours-demo-export.json' : 'ours-export.json',
-                  'application/json',
-                  JSON.stringify(store.value.entries, null, 2),
-                );
-                toast('Export downloaded.');
-              }}
-            >
-              <Icon name="download" size={15} />
-              Export
-            </button>
-            {demo && (
-              <button
-                type="button"
-                class="btn sm ghost"
-                onClick={() => {
-                  if (!resetArmed) {
-                    setResetArmed(true);
-                    return;
-                  }
-                  setResetArmed(false);
-                  seedDemo();
-                  toast('Demo data reset.');
-                }}
-              >
-                {resetArmed ? 'Tap again to reset' : 'Reset demo data'}
-              </button>
-            )}
-          </div>
-        </section>
+        <DataCard />
         {!demo && <AccountCard />}
         <p class="legal-links">
           <a href={`${import.meta.env.BASE_URL}legal/privacy/`}>Privacy policy</a>

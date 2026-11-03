@@ -78,7 +78,11 @@ test('declining a proposal hides it for me and shows the answer to my partner', 
   const row = page.locator('.ev.is-declined').first();
   await expect(row).toContainText('can’t make it');
   if (title) await expect(row).toContainText(title);
-  await row.click();
+  // WebKit can lose a tap that lands while the freshly switched view re-renders.
+  await expect(async () => {
+    if (!(await page.getByRole('dialog').isVisible())) await row.click();
+    await expect(page.getByRole('button', { name: 'Ask again' })).toBeVisible({ timeout: 1000 });
+  }).toPass({ timeout: 10_000 });
   await page.getByRole('button', { name: 'Ask again' }).click();
   await expect(page.locator('.toast-host')).toContainText('Asked Sam again');
 });

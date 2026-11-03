@@ -31,6 +31,13 @@ export {
   type Scope,
   sealRecord,
 } from './envelope';
+export {
+  type EncryptedExport,
+  EXPORT_FORMAT,
+  isEncryptedExport,
+  openExport,
+  sealExport,
+} from './export';
 export { generateKey, KeyRing, type VersionedKey } from './keys';
 export {
   CLOCK_SKEW_MS,

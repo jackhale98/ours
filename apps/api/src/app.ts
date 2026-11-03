@@ -6,6 +6,8 @@ import { devOutbox } from './lib/email';
 import { HttpError } from './lib/http';
 import { devPushes } from './push/send';
 import { auth } from './routes/auth';
+import { calendars } from './routes/calendars';
+import { feed } from './routes/feed';
 import { invites } from './routes/invites';
 import { keys } from './routes/keys';
 import { me } from './routes/me';
@@ -92,6 +94,8 @@ export function createApp() {
   app.route('/keys', keys);
   app.route('/sync', sync);
   app.route('/push', push);
+  app.route('/feed', feed);
+  app.route('/calendars', calendars);
 
   app.notFound((c) => c.json({ error: 'not_found' }, 404));
   app.onError((err, c) => {

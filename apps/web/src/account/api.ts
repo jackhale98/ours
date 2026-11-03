@@ -20,7 +20,7 @@ export const setToken = (t: string | null) => {
 
 export async function api<T = unknown>(
   path: string,
-  init: { method?: string; body?: unknown; auth?: boolean } = {},
+  init: { method?: string; body?: unknown; auth?: boolean; raw?: boolean } = {},
 ): Promise<T> {
   const headers: Record<string, string> = {};
   if (init.body !== undefined) headers['Content-Type'] = 'application/json';
@@ -37,6 +37,8 @@ export async function api<T = unknown>(
   } catch {
     throw new ApiError(0, 'offline', 'You seem to be offline.');
   }
+  // `raw`: the caller wants the body as text (e.g. a relayed calendar).
+  if (init.raw && res.ok) return (await res.text()) as T;
   const json = (await res.json().catch(() => null)) as { error?: string; message?: string } | null;
   if (!res.ok) {
     throw new ApiError(

@@ -133,6 +133,19 @@ export function importCalendar(text: string, opts: ImportOptions): ImportResult 
   return { calendarId, events: items.length, truncated, warnings: cal.warnings };
 }
 
+/** Replaces a subscribed calendar's events with a fresh copy of its .ics text. */
+export function refreshCalendar(id: string, text: string): ImportResult | null {
+  const cal = findEntry(id) as CalendarEntry | undefined;
+  if (cal?.rec.kind !== 'calendar') return null;
+  const parsed = parseIcs(text, { defaultTz: zone });
+  const { items, truncated } = snapshotItems(parsed);
+  const now = Date.now();
+  const d = cal.rec.data;
+  update<'calendar'>(id, { fetched_at: now });
+  writeSnapshots(id, { name: d.name, owner: d.owner, share: d.share, url: d.url }, items, now);
+  return { calendarId: id, events: items.length, truncated, warnings: parsed.warnings };
+}
+
 /** Changes whose calendar it is or what the partner sees, re-deriving the shared copy. */
 export function updateCalendar(
   id: string,

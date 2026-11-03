@@ -2,23 +2,32 @@
 /** Imported calendars and the calendar feed preview (ADR 0011). */
 import { type FeedOccurrence, feedBlocks } from '@ours/core/feed';
 import { normalizeFeedUrl } from '@ours/core/ics';
-import { signal } from '@preact/signals';
 import { useRef, useState } from 'preact/hooks';
+import {
+  feedOn,
+  feedUrl,
+  includePartner,
+  newFeedLink,
+  setIncludePartner,
+  subscribeCalendar,
+  turnFeedOff,
+  turnFeedOn,
+} from '../../account/feeds';
 import { HAS_API } from '../../config';
 import {
   type CalendarEntry,
   importCalendar,
   myCalendars,
   removeCalendar,
+  SNAPSHOT_DAYS,
   updateCalendar,
 } from '../calendars';
-import { nameOf, partner, type Slot, viewer } from '../model';
+import { mode, nameOf, partner, type Slot, viewer } from '../model';
 import { sampleWorkIcs } from '../sample-calendar';
 import { agenda, fmtLong, today, visibleSnapshots, zone } from '../select';
 import { Icon, Marker, toast } from '../ui';
 
 type Who = 'me' | 'ours' | 'partner';
-const includePartner = signal(false);
 
 function whoToOwner(who: Who): Slot | 'both' {
   return who === 'me' ? viewer.value : who === 'partner' ? partner.value : 'both';
@@ -130,6 +139,7 @@ function AddCalendar() {
   const [link, setLink] = useState('');
   const [who, setWho] = useState<Who>('me');
   const [share, setShare] = useState<'full' | 'busy'>('busy');
+  const [busy, setBusy] = useState(false);
   const file = useRef<HTMLInputElement>(null);
   const p = nameOf(partner.value);
 
@@ -202,10 +212,34 @@ function AddCalendar() {
             <button
               type="button"
               class="btn sm"
-              disabled={!normalizeFeedUrl(link)}
-              onClick={() => toast('Subscribing needs an account (coming soon).')}
+              disabled={busy || !normalizeFeedUrl(link)}
+              onClick={async () => {
+                if (mode.value === 'demo') {
+                  toast('Subscribing needs an account. In the demo, import a file instead.');
+                  return;
+                }
+                setBusy(true);
+                try {
+                  const r = await subscribeCalendar(link, {
+                    name: name.trim() || 'Calendar',
+                    owner: whoToOwner(who),
+                    share,
+                  });
+                  setLink('');
+                  setName('');
+                  toast(
+                    `Subscribed: ${r.events} event${r.events === 1 ? '' : 's'} in the next ${SNAPSHOT_DAYS} days.${r.truncated ? ' Some were left out (limit 400).' : ''}`,
+                  );
+                } catch (err) {
+                  toast(
+                    err instanceof Error ? err.message : 'Couldn’t subscribe to that calendar.',
+                  );
+                } finally {
+                  setBusy(false);
+                }
+              }}
             >
-              Subscribe
+              {busy ? 'Subscribing…' : 'Subscribe'}
             </button>
           )}
         </div>
@@ -304,9 +338,7 @@ function FeedPreview() {
           role="switch"
           checked={includePartner.value}
           aria-checked={includePartner.value}
-          onChange={(e) => {
-            includePartner.value = e.currentTarget.checked;
-          }}
+          onChange={(e) => setIncludePartner(e.currentTarget.checked)}
         />
         <span class="track" />
         <span class="sw-t">
@@ -314,6 +346,81 @@ function FeedPreview() {
           <small>Handy for planning around each other from your work calendar.</small>
         </span>
       </label>
+    </>
+  );
+}
+
+function FeedControls() {
+  const [busy, setBusy] = useState(false);
+  const run = async (fn: () => Promise<unknown>, ok: string) => {
+    setBusy(true);
+    try {
+      await fn();
+      toast(ok);
+    } catch (err) {
+      toast(err instanceof Error ? err.message : 'That didn’t work. Try again.');
+    } finally {
+      setBusy(false);
+    }
+  };
+  if (!feedOn.value) {
+    return (
+      <div class="btnrow">
+        <button
+          type="button"
+          class="btn sm"
+          disabled={busy}
+          onClick={() => void run(turnFeedOn, 'Feed on. Add the link to your calendar app.')}
+        >
+          Turn on the feed
+        </button>
+      </div>
+    );
+  }
+  const url = feedUrl.value;
+  return (
+    <>
+      {url ? (
+        <div class="url">
+          <code>{url}</code>
+          <button
+            type="button"
+            class="btn sm"
+            onClick={async () => {
+              await navigator.clipboard?.writeText(url).catch(() => {});
+              toast('Link copied. In your calendar app, add a calendar “from URL”.');
+            }}
+          >
+            Copy
+          </button>
+        </div>
+      ) : (
+        <p class="d small">
+          The feed is on. This device doesn’t have the link: make a new one to see it here.
+        </p>
+      )}
+      <p class="d small">
+        Anyone with this link can see your busy times, so share it only with your own calendar apps.
+        Calendar apps check for changes every few hours.
+      </p>
+      <div class="btnrow">
+        <button
+          type="button"
+          class="btn sm"
+          disabled={busy}
+          onClick={() => void run(newFeedLink, 'New link made. The old one has stopped working.')}
+        >
+          New link
+        </button>
+        <button
+          type="button"
+          class="btn sm ghost"
+          disabled={busy}
+          onClick={() => void run(turnFeedOff, 'Feed off. Your busy times were deleted.')}
+        >
+          Turn off
+        </button>
+      </div>
     </>
   );
 }
@@ -374,11 +481,13 @@ export function CalendarsCard() {
           you turn it on.
         </p>
         <FeedPreview />
-        {!HAS_API && (
+        {mode.value === 'demo' ? (
           <p class="note">
             <Icon name="lock" size={15} />
             <span>The feed link itself is available once you have an account.</span>
           </p>
+        ) : (
+          <FeedControls />
         )}
       </section>
     </>
