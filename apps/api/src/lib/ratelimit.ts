@@ -7,8 +7,15 @@
 import type { Env } from '../env';
 import { HttpError } from './http';
 
-/** Per-isolate fallback salt, used only if RATE_LIMIT_SALT isn't configured. */
-const isolateSalt = crypto.getRandomValues(new Uint8Array(16)).join('.');
+/**
+ * Per-isolate fallback salt, used only if RATE_LIMIT_SALT isn't configured.
+ * Created lazily: Workers forbid generating random values at global scope.
+ */
+let isolateSalt: string | null = null;
+const fallbackSalt = () => {
+  isolateSalt ??= crypto.getRandomValues(new Uint8Array(16)).join('.');
+  return isolateSalt;
+};
 
 /**
  * Keys are hashed with a secret salt before they touch the database, so no IP
@@ -16,7 +23,7 @@ const isolateSalt = crypto.getRandomValues(new Uint8Array(16)).join('.');
  * by the hourly cleanup after a day.
  */
 async function opaqueKey(env: Env, key: string): Promise<string> {
-  const data = new TextEncoder().encode(`${env.RATE_LIMIT_SALT ?? isolateSalt}|${key}`);
+  const data = new TextEncoder().encode(`${env.RATE_LIMIT_SALT ?? fallbackSalt()}|${key}`);
   const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', data));
   return [...digest.subarray(0, 16)].map((b) => b.toString(16).padStart(2, '0')).join('');
 }
