@@ -22,7 +22,7 @@ import {
 import { expand, toInstant, toWall } from '@ours/core/time';
 import { effect, signal } from '@preact/signals';
 import { byKind, nameOf, type Slot, store, viewer } from '../app/model';
-import { reminderLabel, remindersOf } from '../app/reminders';
+import { allDayParts, duration, remindersOf } from '../app/reminders';
 import { fmtTime, zone } from '../app/select';
 import { ApiError, api } from './api';
 import { kvGet, kvSet } from './db';
@@ -301,21 +301,26 @@ function reminderBody(
 ): string {
   let lead: string;
   if (allDay) {
+    const { daysBefore } = allDayParts(minutes);
     lead =
-      minutes === 0
+      daysBefore === 0
         ? 'Today'
-        : minutes <= 1440
+        : daysBefore === 1
           ? 'Tomorrow'
-          : minutes % 10080 === 0
-            ? minutes === 10080
+          : daysBefore % 7 === 0
+            ? daysBefore === 7
               ? 'In a week'
-              : `In ${minutes / 10080} weeks`
-            : `In ${Math.round(minutes / 1440)} days`;
+              : `In ${daysBefore / 7} weeks`
+            : `In ${daysBefore} days`;
   } else {
-    lead = minutes === 0 ? 'Starting now' : `In ${reminderLabel(minutes).replace(' before', '')}`;
+    lead = minutes === 0 ? 'Starting now' : `In ${duration(minutes)}`;
   }
-  return [lead, minutes === 0 && allDay ? null : when, place].filter(Boolean).join(' · ');
+  return [lead, daysOrNull(minutes, allDay, when), place].filter(Boolean).join(' · ');
 }
+
+/** All-day reminders on the day itself don't repeat the day's name. */
+const daysOrNull = (minutes: number, allDay: boolean, when: string) =>
+  allDay && allDayParts(minutes).daysBefore === 0 ? null : when;
 
 /** The reminders this person wants in the next 8 days, soonest first. */
 export function plannedReminders(now = Date.now()): Planned[] {

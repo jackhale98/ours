@@ -103,7 +103,7 @@ test('quick add parses natural language and adds a plan', async ({ page }) => {
   await expect(page.getByRole('button', { name: /Pottery/ })).toBeVisible();
 });
 
-test('reminders: several per plan, removable, and kept', async ({ page }) => {
+test('reminders: quick choices, a custom one, removable, and kept', async ({ page }) => {
   await openDemo(page);
   await page.keyboard.press('n');
   const dialog = page.getByRole('dialog', { name: 'New plan' });
@@ -115,14 +115,27 @@ test('reminders: several per plan, removable, and kept', async ({ page }) => {
     .first()
     .click();
   const sheet = page.getByRole('dialog', { name: 'Dentist' });
-  await sheet.getByRole('combobox', { name: 'Remind me' }).selectOption({ label: '1 hour before' });
-  await sheet
-    .getByRole('combobox', { name: 'Remind me' })
-    .selectOption({ label: '10 minutes before' });
-  const chips = sheet.getByRole('list', { name: 'Reminders' });
-  await expect(chips.getByRole('listitem')).toHaveText(['10 minutes before', '1 hour before']);
-  await expect(sheet.getByText('reminders are saved but not sent')).toBeVisible();
-  await chips.getByRole('button', { name: 'Remove reminder: 10 minutes before' }).click();
+  const group = sheet.getByRole('group', { name: 'Remind me' });
+  await group.getByRole('button', { name: 'Add a reminder' }).click();
+  await group
+    .getByRole('group', { name: 'Quick choices' })
+    .getByRole('button', { name: '1 hour before' })
+    .click();
+  // A custom one: 1 hour 30 minutes = 90 minutes.
+  const custom = group.getByRole('group', { name: 'Or your own' });
+  await custom.getByRole('spinbutton', { name: 'How long before' }).fill('90');
+  await custom.getByRole('combobox', { name: 'Unit' }).selectOption('minutes');
+  await expect(group.getByText('1 hour 30 minutes before').first()).toBeVisible(); // preview
+  await group.getByRole('button', { name: 'Add reminder' }).click();
+  // The same one again is refused, in words.
+  await group.getByRole('button', { name: 'Add reminder' }).click();
+  await expect(group.getByRole('alert')).toHaveText('You already have that reminder.');
+  const chips = group.getByRole('list', { name: 'Reminders' });
+  await expect(chips.getByRole('listitem')).toHaveText([
+    '1 hour before',
+    '1 hour 30 minutes before',
+  ]);
+  await chips.getByRole('button', { name: 'Remove reminder: 1 hour before' }).click();
   await page.keyboard.press('Escape');
   await page
     .getByRole('button', { name: /Dentist/ })
@@ -133,20 +146,30 @@ test('reminders: several per plan, removable, and kept', async ({ page }) => {
       .getByRole('dialog', { name: 'Dentist' })
       .getByRole('list', { name: 'Reminders' })
       .getByRole('listitem'),
-  ).toHaveText(['1 hour before']);
+  ).toHaveText(['1 hour 30 minutes before']);
 });
 
-test('default reminders apply to new plans; all-day plans have day-based choices', async ({
-  page,
-}) => {
+test('all-day plans: a reminder some days before, at a chosen time', async ({ page }) => {
+  await openDemo(page);
+  await page.getByRole('button', { name: 'Add a milestone' }).click();
+  const form = page.getByRole('dialog', { name: /New plan/ });
+  await form.getByRole('textbox', { name: 'What' }).fill('Concert');
+  const group = form.getByRole('group', { name: 'Remind me' });
+  await group.getByRole('button', { name: 'Add a reminder' }).click();
+  const custom = group.getByRole('group', { name: 'Or your own' });
+  await custom.getByRole('spinbutton', { name: /Days before/ }).fill('3');
+  await custom.getByLabel('Time').fill('20:00');
+  // Enter adds the reminder; it doesn't submit the plan.
+  await custom.getByLabel('Time').press('Enter');
+  await expect(group.getByRole('list', { name: 'Reminders' })).toContainText('3 days before at 8');
+  await expect(form).toBeVisible();
+});
+
+test('default reminders apply to new plans', async ({ page }) => {
   await openDemo(page, 'privacy');
-  const card = page.locator('section[aria-labelledby="rem-h"]');
-  await card
-    .getByRole('combobox', { name: 'Plans with a time' })
-    .selectOption({ label: '30 minutes before' });
-  await card
-    .getByRole('combobox', { name: 'All-day plans' })
-    .selectOption({ label: 'Evening before (6 PM)' });
+  const timed = page.getByRole('group', { name: 'Plans with a time' });
+  await timed.getByRole('button', { name: 'Add a reminder' }).click();
+  await timed.getByRole('button', { name: '30 minutes before' }).click();
   await nav(page, 'Plan');
   await page.keyboard.press('n');
   const dialog = page.getByRole('dialog', { name: 'New plan' });

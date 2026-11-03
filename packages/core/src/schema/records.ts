@@ -67,8 +67,19 @@ const whenEntries = {
 };
 const WHEN_MESSAGE = 'start/end must match all_day, end must not precede start';
 
-/** Reminder offsets: at the start, up to a week before. */
-const ReminderMinutes = v.pipe(v.number(), v.integer(), v.minValue(0), v.maxValue(7 * 24 * 60));
+/**
+ * Reminder offsets in minutes before the start, up to four weeks. All-day
+ * plans count from 9 AM on the day, so a negative offset (down to -899) is a
+ * time later that day, up to 11:59 PM.
+ */
+export const REMINDER_MIN = -899;
+export const REMINDER_MAX = 28 * 24 * 60 + 540;
+const ReminderMinutes = v.pipe(
+  v.number(),
+  v.integer(),
+  v.minValue(REMINDER_MIN),
+  v.maxValue(REMINDER_MAX),
+);
 export const MAX_REMINDERS_PER_PERSON = 3;
 const PersonReminders = v.nullable(
   v.union([
