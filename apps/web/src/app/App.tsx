@@ -8,7 +8,7 @@ import { account, consumeSignInLink, newKeysFrom, syncNow } from '../account/ses
 import { needsNewKeys, syncStatus } from '../account/sync';
 import { LogoMark } from '../Logo';
 import { findEntry, mode, nameOf, names, partner, viewer } from './model';
-import { type PlanMode, planHash, setPlanMode } from './planview';
+import { drawerOpen, type PlanMode, planHash, setPlanMode } from './planview';
 import { now } from './select';
 import { accept, afterAdd, openEvent, openQuick, SheetHost, sheet } from './sheets';
 import { Avatar, Icon, type IconName, ToastHost, toast } from './ui';
@@ -265,9 +265,11 @@ export function App() {
       <nav class="tabbar" aria-label="Main">
         <Nav variant="tabbar" />
       </nav>
-      <button type="button" class="fab" onClick={() => openQuick()} aria-label="New plan">
-        <Icon name="plus" size={26} />
-      </button>
+      {!drawerOpen.value && (
+        <button type="button" class="fab" onClick={() => openQuick()} aria-label="New plan">
+          <Icon name="plus" size={26} />
+        </button>
+      )}
       <SheetHost />
       <ToastHost />
     </>

@@ -6,9 +6,9 @@
  */
 import { addDays, toInstant } from '@ours/core/time';
 import { signal } from '@preact/signals';
-import { useEffect, useRef } from 'preact/hooks';
+import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
 import { nameOf, partner } from '../model';
-import { focusDate, type PlanMode, planMode, setPlanMode } from '../planview';
+import { drawerOpen, focusDate, type PlanMode, planMode, setPlanMode } from '../planview';
 import {
   agendaFrom,
   awaitingMe,
@@ -231,20 +231,186 @@ function useFollowFocus(container: { current: HTMLElement | null }, date: string
 
 /* ---------- month ---------- */
 
+/** Phones and small tablets: the grid fills the screen and the day lives in a drawer. */
+const compact = signal(
+  typeof matchMedia === 'function' && matchMedia('(max-width: 879.98px)').matches,
+);
+if (typeof matchMedia === 'function') {
+  matchMedia('(max-width: 879.98px)').addEventListener('change', (e) => {
+    compact.value = e.matches;
+    if (!e.matches) drawerOpen.value = false;
+  });
+}
+
+/** Always six weeks, so the grid never changes height between months. */
+const GRID_DAYS = 42;
+
+/** One line about the day, shown on the collapsed drawer. */
+function preview(day: Day): string {
+  const plans = day.rows.filter((r) => !r.free);
+  const first = plans[0];
+  if (!first)
+    return day.bothFree && day.date >= today.value
+      ? 'Nothing planned · both free this evening'
+      : 'Nothing planned';
+  const when = first.allDay ? 'All day' : fmtTime(first.start);
+  return `${when} ${first.title}${plans.length > 1 ? `, +${plans.length - 1} more` : ''}`;
+}
+
+/**
+ * The chosen day on phones (pattern from fasti's month view): a drawer above
+ * the tab bar. Collapsed it shows the day and a one-line preview; tap or drag
+ * the handle up for the full list, down or Escape to put it away.
+ */
+function DayDrawer({ day }: { day: Day }) {
+  const open = drawerOpen.value;
+  const ref = useRef<HTMLElement>(null);
+  const handle = useRef<HTMLButtonElement>(null);
+  const list = useRef<HTMLDivElement>(null);
+  const [dragY, setDragY] = useState<number | null>(null);
+  const drag = useRef<{ y: number; t: number; base: number; max: number; moved: boolean } | null>(
+    null,
+  );
+  const isToday = day.date === today.value;
+
+  useEffect(() => {
+    if (list.current) list.current.scrollTop = 0;
+  }, [day.date]);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape' || !drawerOpen.value || document.querySelector('dialog[open]')) return;
+      e.preventDefault();
+      drawerOpen.value = false;
+      if (ref.current?.contains(document.activeElement)) handle.current?.focus();
+    };
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('keydown', onKey);
+      drawerOpen.value = false;
+    };
+  }, []);
+
+  const collapsedH = () =>
+    Number.parseFloat(getComputedStyle(ref.current as Element).getPropertyValue('--col-h')) || 92;
+  const start = (e: PointerEvent) => {
+    if (!e.isPrimary || !ref.current) return;
+    const max = ref.current.offsetHeight - collapsedH();
+    drag.current = { y: e.clientY, t: e.timeStamp, base: open ? 0 : max, max, moved: false };
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+  };
+  const move = (e: PointerEvent) => {
+    const d = drag.current;
+    if (!d) return;
+    const dy = e.clientY - d.y;
+    if (!d.moved && Math.abs(dy) < 6) return;
+    d.moved = true;
+    setDragY(Math.min(d.max, Math.max(0, d.base + dy)));
+  };
+  const end = (e: PointerEvent) => {
+    const d = drag.current;
+    drag.current = null;
+    setDragY(null);
+    if (!d) return;
+    if (!d.moved) {
+      drawerOpen.value = !open; // a tap on the header toggles
+      return;
+    }
+    const dy = e.clientY - d.y;
+    const fast = Math.abs(dy) / Math.max(1, e.timeStamp - d.t) > 0.5;
+    if (open ? dy > (fast ? 12 : 60) : dy < -(fast ? 12 : 60)) drawerOpen.value = !open;
+  };
+
+  return (
+    <section
+      ref={ref}
+      class={`drawer${open ? ' open' : ''}${dragY !== null ? ' dragging' : ''}`}
+      style={dragY !== null ? { transform: `translateY(${dragY}px)` } : undefined}
+      aria-label="Chosen day"
+    >
+      <div
+        class="dhead"
+        onPointerDown={start}
+        onPointerMove={move}
+        onPointerUp={end}
+        onPointerCancel={() => {
+          drag.current = null;
+          setDragY(null);
+        }}
+      >
+        <button
+          type="button"
+          class="grab"
+          ref={handle}
+          aria-expanded={open}
+          aria-controls="day-list"
+          aria-label="Plans on this day"
+          onClick={(e) => {
+            // Keyboard and screen readers (taps are handled on the header).
+            if (e.detail === 0) drawerOpen.value = !open;
+          }}
+        >
+          <span class="bar" />
+        </button>
+        <h2 class="h3" id="day-h">
+          {isToday ? `Today, ${fmtLong(day.date)}` : fmtLong(day.date)}
+        </h2>
+        {!open && <p class="preview">{preview(day)}</p>}
+      </div>
+      <div
+        id="day-list"
+        class="dlist"
+        ref={list}
+        {...({ inert: !open } as Record<string, boolean>)}
+      >
+        {day.rows.map((row) => (
+          <EventRow key={row.key} row={row} date={day.date} />
+        ))}
+        {!day.rows.length && <p class="nothing">Nothing planned</p>}
+        <button
+          type="button"
+          class="btn sm"
+          onClick={() =>
+            openQuick({
+              date: day.date,
+              ...(day.bothFree && day.date >= today.value ? { time: '19:00', who: 'ours' } : {}),
+            })
+          }
+        >
+          <Icon name="plus" size={15} />
+          Add a plan on this day
+        </button>
+      </div>
+    </section>
+  );
+}
+
 export function MonthView() {
   const sel = selected();
   const first = `${monthOf(sel)}-01`;
   const gridStart = startOfWeek(first);
-  const [y, m] = ymd(first);
-  const inMonth = new Date(Date.UTC(y, m, 0)).getUTCDate();
-  const lead = Math.round((Date.parse(first) - Date.parse(gridStart)) / 86_400_000);
-  const weeks = Math.ceil((lead + inMonth) / 7);
-  const days = agendaFrom(gridStart, weeks * 7);
+  const days = agendaFrom(gridStart, GRID_DAYS);
   const t = today.value;
   const grid = useRef<HTMLTableElement>(null);
+  const stage = useRef<HTMLDivElement>(null);
   const remember = useFollowFocus(grid, sel);
   const ws = weekStartsOn.value;
   const selDay = days.find((d) => d.date === sel) ?? agendaFrom(sel, 1)[0];
+  const phone = compact.value;
+
+  // Phones: the six weeks share whatever height is left above the drawer.
+  const [top, setTop] = useState(0);
+  useLayoutEffect(() => {
+    if (!phone) return;
+    const measure = () => {
+      if (stage.current)
+        setTop(Math.round(stage.current.getBoundingClientRect().top + window.scrollY));
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    if (stage.current?.parentElement) ro.observe(stage.current.parentElement);
+    void document.fonts?.ready.then(measure);
+    return () => ro.disconnect();
+  }, [phone]);
 
   const onKey = (e: KeyboardEvent) => {
     const next = moveBy(e, sel, 'month');
@@ -253,6 +419,10 @@ export function MonthView() {
     remember();
     focusDate.value = next;
   };
+
+  // Swipe the grid (phones): sideways changes month, up opens the drawer.
+  const swipe = useRef<{ x: number; y: number; done: boolean } | null>(null);
+  const swallow = useRef(false);
 
   return (
     <>
@@ -268,74 +438,112 @@ export function MonthView() {
         />
       </div>
       <NeedsAnswer />
-      <div class="month-wrap">
-        {/* A calendar table: one tab stop (the chosen day); arrow keys, Page Up/Down and Home/End move. */}
-        <table
-          class={`month${wide.value ? ' wide' : ''}`}
-          aria-label={monthTitle(sel)}
-          ref={grid}
-          onKeyDown={onKey}
+      <div class={`month-wrap${phone ? ' phone' : ''}`}>
+        <div
+          class="mstage"
+          ref={stage}
+          style={phone ? ({ '--top': `${top}px` } as Record<string, string>) : undefined}
+          onPointerDown={(e) => {
+            swallow.current = false;
+            swipe.current =
+              phone && e.isPrimary ? { x: e.clientX, y: e.clientY, done: false } : null;
+          }}
+          onPointerMove={(e) => {
+            const sw = swipe.current;
+            if (!sw || sw.done) return;
+            const dx = e.clientX - sw.x;
+            const dy = e.clientY - sw.y;
+            if (Math.abs(dx) > 48 && Math.abs(dx) > 1.5 * Math.abs(dy)) {
+              sw.done = true;
+              swallow.current = true;
+              focusDate.value = addMonths(sel, dx < 0 ? 1 : -1);
+            } else if (dy < -48 && Math.abs(dy) > 1.5 * Math.abs(dx)) {
+              sw.done = true;
+              swallow.current = true;
+              drawerOpen.value = true;
+            }
+          }}
+          onPointerUp={() => {
+            swipe.current = null;
+          }}
+          onClickCapture={(e) => {
+            if (!swallow.current) return;
+            swallow.current = false;
+            e.stopPropagation();
+            e.preventDefault();
+          }}
         >
-          <thead>
-            <tr>
-              {Array.from({ length: 7 }, (_, i) => {
-                const d = (ws + i) % 7;
-                return (
-                  <th scope="col" key={d} class="mdow">
-                    <abbr title={DOW_LONG[d]}>{DOW_SHORT[d]}</abbr>
-                  </th>
-                );
-              })}
-            </tr>
-          </thead>
-          <tbody>
-            {Array.from({ length: weeks }, (_, w) => (
-              <tr key={days[w * 7]?.date}>
-                {days.slice(w * 7, w * 7 + 7).map((day) => {
-                  const out = monthOf(day.date) !== monthOf(sel);
-                  const isSel = day.date === sel;
-                  const plans = day.rows.filter((r) => !r.free);
-                  const away = plans.some((r) => r.away);
+          {/* A calendar table: one tab stop (the chosen day); arrow keys, Page Up/Down and Home/End move. */}
+          <table
+            class={`month${wide.value ? ' wide' : ''}`}
+            aria-label={monthTitle(sel)}
+            ref={grid}
+            onKeyDown={onKey}
+          >
+            <thead>
+              <tr>
+                {Array.from({ length: 7 }, (_, i) => {
+                  const d = (ws + i) % 7;
                   return (
-                    <td key={day.date}>
-                      <button
-                        type="button"
-                        aria-pressed={isSel}
-                        class={`mcell${out ? ' out' : ''}${day.date === t ? ' today' : ''}${isSel ? ' sel' : ''}`}
-                        data-date={day.date}
-                        tabIndex={isSel ? 0 : -1}
-                        aria-label={dayLabel(day, day.date === t)}
-                        aria-current={day.date === t ? 'date' : undefined}
-                        onClick={() => {
-                          focusDate.value = day.date;
-                        }}
-                      >
-                        <span class="mnum" aria-hidden="true">
-                          {dayNum(day.date)}
-                          {plans.some((r) => r.countdown) && <Icon name="flag" size={11} />}
-                        </span>
-                        {wide.value && (
-                          <span class="mtitles" aria-hidden="true">
-                            {plans.slice(0, 2).map((r) => (
-                              <span key={r.key}>{r.title}</span>
-                            ))}
-                          </span>
-                        )}
-                        <Markers rows={wide.value ? plans.slice(2) : plans} />
-                        {day.bothFree && !out && day.date >= t && (
-                          <span class="mfree" aria-hidden="true" />
-                        )}
-                        {away && <span class="maway" aria-hidden="true" />}
-                      </button>
-                    </td>
+                    <th scope="col" key={d} class="mdow">
+                      <abbr title={DOW_LONG[d]}>{DOW_SHORT[d]}</abbr>
+                    </th>
                   );
                 })}
               </tr>
-            ))}
-          </tbody>
-        </table>
-        {selDay && <DayPanel day={selDay} />}
+            </thead>
+            <tbody>
+              {Array.from({ length: GRID_DAYS / 7 }, (_, w) => (
+                <tr key={w}>
+                  {days.slice(w * 7, w * 7 + 7).map((day) => {
+                    const out = monthOf(day.date) !== monthOf(sel);
+                    const isSel = day.date === sel;
+                    const plans = day.rows.filter((r) => !r.free);
+                    const away = plans.some((r) => r.away);
+                    return (
+                      <td key={day.date}>
+                        <button
+                          type="button"
+                          class={`mcell${out ? ' out' : ''}${day.date === t ? ' today' : ''}${isSel ? ' sel' : ''}`}
+                          data-date={day.date}
+                          aria-pressed={isSel}
+                          tabIndex={isSel ? 0 : -1}
+                          aria-label={dayLabel(day, day.date === t)}
+                          aria-current={day.date === t ? 'date' : undefined}
+                          onClick={() => {
+                            // On phones a second tap on the chosen day opens its plans.
+                            if (isSel && phone) drawerOpen.value = true;
+                            focusDate.value = day.date;
+                          }}
+                        >
+                          <span class="mnum" aria-hidden="true">
+                            {dayNum(day.date)}
+                            {plans.some((r) => r.countdown) && <Icon name="flag" size={11} />}
+                          </span>
+                          {wide.value && (
+                            <span class="mtitles" aria-hidden="true">
+                              {plans.slice(0, 2).map((r) => (
+                                <span key={r.key}>{r.title}</span>
+                              ))}
+                            </span>
+                          )}
+                          <Markers rows={wide.value ? plans.slice(2) : plans} />
+                          {day.bothFree && !out && day.date >= t && (
+                            <span class="mfree" aria-hidden="true" />
+                          )}
+                          {away && <span class="maway" aria-hidden="true" />}
+                        </button>
+                      </td>
+                    );
+                  })}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        {selDay && !phone && <DayPanel day={selDay} />}
       </div>
+      {selDay && phone && <DayDrawer day={selDay} />}
     </>
   );
 }

@@ -18,6 +18,8 @@ function load(): PlanMode {
 export const planMode = signal<PlanMode>(load());
 /** The chosen day in week and month views; null means today. */
 export const focusDate = signal<string | null>(null);
+/** The month view's day drawer is pulled up (phones): the + button steps aside. */
+export const drawerOpen = signal(false);
 
 export function setPlanMode(mode: PlanMode, updateHash = true): void {
   planMode.value = mode;

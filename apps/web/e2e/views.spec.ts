@@ -41,16 +41,27 @@ test('switches between agenda, week and month, and the back button follows', asy
   await expect(page.getByRole('heading', { level: 1 })).toHaveText('Week');
 });
 
+/** The chosen day's plans: in the drawer on phones (opened if needed), below the grid otherwise. */
+async function dayList(page: Page) {
+  const drawer = page.locator('.drawer');
+  if (await drawer.count()) {
+    const grab = page.getByRole('button', { name: 'Plans on this day' });
+    if ((await grab.getAttribute('aria-expanded')) !== 'true') await grab.click();
+    await expect(grab).toHaveAttribute('aria-expanded', 'true');
+    return drawer;
+  }
+  return page.locator('.daypanel');
+}
+
 test('month: choose a day, see its plans, move months and come back to today', async ({ page }) => {
   await page.goto('/#plan/month');
   const title = page.locator('.ptitle');
   const thisMonth = await title.textContent();
-  // Today is chosen and its plans are listed below the grid.
   const todayCell = page.locator('.mcell.today');
   await expect(todayCell).toHaveAttribute('aria-pressed', 'true');
   await expect(todayCell).toHaveAttribute('aria-label', /^Today, /);
-  await expect(page.locator('.daypanel h2')).toContainText('Today');
-  // Choose another day that has plans.
+  await expect((await dayList(page)).locator('h2')).toContainText('Today');
+  await page.keyboard.press('Escape');
   const candidate = page
     .locator('.month .mcell:not(.out)')
     .and(page.getByRole('button', { name: /, \d+ plans?/ }))
@@ -59,11 +70,49 @@ test('month: choose a day, see its plans, move months and come back to today', a
   const withPlans = page.locator(`.mcell[data-date="${date}"]`);
   await withPlans.click();
   await expect(withPlans).toHaveAttribute('aria-pressed', 'true');
-  await expect(page.locator('.daypanel .ev').first()).toBeVisible();
+  await expect((await dayList(page)).locator('.ev').first()).toBeVisible();
+  await page.keyboard.press('Escape');
   await page.getByRole('button', { name: 'Next month' }).click();
   await expect(title).not.toHaveText(thisMonth ?? '');
   await page.getByRole('button', { name: 'Today' }).click();
   await expect(title).toHaveText(thisMonth ?? '');
+});
+
+test('month: the grid is always six weeks and keeps its size', async ({ page }) => {
+  await page.goto('/#plan/month');
+  const grid = page.locator('table.month');
+  await expect(grid.locator('tbody tr')).toHaveCount(6);
+  const h1 = (await grid.boundingBox())?.height;
+  for (let i = 0; i < 4; i++) {
+    await page.getByRole('button', { name: 'Next month' }).click();
+    await expect(grid.locator('tbody tr')).toHaveCount(6);
+    expect((await grid.boundingBox())?.height).toBe(h1);
+  }
+  // Choosing a day doesn't move anything either.
+  await page.locator('.mcell:not(.out)').nth(10).click();
+  expect((await grid.boundingBox())?.height).toBe(h1);
+});
+
+test('month on phones: the day slides up from a drawer and goes away again', async ({
+  page,
+}, info) => {
+  test.skip(!info.project.name.includes('mobile'), 'phones only');
+  await page.goto('/#plan/month');
+  const grab = page.getByRole('button', { name: 'Plans on this day' });
+  await expect(grab).toHaveAttribute('aria-expanded', 'false');
+  await expect(page.locator('.drawer .preview')).toBeVisible();
+  // Tapping the chosen day again opens it.
+  await page.locator('.mcell[aria-pressed="true"]').click();
+  await expect(grab).toHaveAttribute('aria-expanded', 'true');
+  await expect(page.getByRole('button', { name: 'New plan' })).toHaveCount(0); // + steps aside
+  await page.keyboard.press('Escape');
+  await expect(grab).toHaveAttribute('aria-expanded', 'false');
+  await expect(page.getByRole('button', { name: 'New plan' })).toBeVisible();
+  // Every week can be seen above the drawer (short phones scroll a little to get there).
+  await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+  const grid = await page.locator('table.month').boundingBox();
+  const drawer = await page.locator('.drawer').boundingBox();
+  expect((grid?.y ?? 0) + (grid?.height ?? 0)).toBeLessThanOrEqual((drawer?.y ?? 0) + 2);
 });
 
 test('month: arrow keys move the chosen day; a day can be added to', async ({ page }) => {
@@ -80,7 +129,7 @@ test('month: arrow keys move the chosen day; a day can be added to', async ({ pa
   await page.keyboard.press('ArrowDown');
   const week = await page.locator('.mcell[aria-pressed="true"]').getAttribute('data-date');
   expect(Date.parse(week ?? '') - Date.parse(after ?? '')).toBe(7 * 86_400_000);
-  await page.getByRole('button', { name: 'Add a plan on this day' }).click();
+  await (await dayList(page)).getByRole('button', { name: 'Add a plan on this day' }).click();
   await expect(page.getByRole('dialog', { name: 'New plan' })).toBeVisible();
 });
 

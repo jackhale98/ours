@@ -1849,7 +1849,8 @@ dialog.sheet::backdrop {
   align-items: flex-start;
   gap: 2px;
   width: 100%;
-  min-height: 52px;
+  /* Fixed height: months never change the grid's size (6 weeks, always). */
+  height: 64px;
   padding: 4px 4px 8px;
   border: 1px solid var(--line);
   border-radius: 10px;
@@ -1858,7 +1859,23 @@ dialog.sheet::backdrop {
   overflow: hidden;
 }
 .month.wide .mcell {
-  min-height: 92px;
+  height: 92px;
+}
+/* Phones: the six weeks share the height left between the header and the drawer. */
+.month-wrap.phone .mstage {
+  --grid-h: max(
+    300px,
+    calc(100dvh - var(--top, 300px) - 92px - 57px - env(safe-area-inset-bottom, 0px) - 8px)
+  );
+  height: var(--grid-h);
+  touch-action: pan-y;
+}
+.month-wrap.phone .mcell {
+  height: calc((var(--grid-h) - 30px) / 6 - 2px);
+  min-height: 42px;
+}
+.month-wrap.phone ~ details.key {
+  display: none;
 }
 .mcell.out {
   background: transparent;
@@ -1918,17 +1935,6 @@ dialog.sheet::backdrop {
   border-radius: 2px;
   background: repeating-linear-gradient(90deg, var(--ink) 0 4px, transparent 4px 7px);
   opacity: 0.6;
-}
-@media (min-width: 1080px) {
-  .month-wrap {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) 300px;
-    gap: 20px;
-    align-items: start;
-  }
-  .month-wrap .daypanel {
-    margin-top: 0;
-  }
 }
 
 /* Week: phones */
@@ -2144,4 +2150,111 @@ button.cd-item {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+}
+
+/* The chosen day on phones: a drawer above the tab bar (pattern from fasti). */
+.drawer {
+  --col-h: 92px;
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: calc(57px + env(safe-area-inset-bottom, 0px));
+  z-index: 19;
+  height: min(72dvh, 560px);
+  display: flex;
+  flex-direction: column;
+  max-width: 760px;
+  margin: 0 auto;
+  background: var(--surface);
+  border-top: 1px solid var(--line-strong);
+  border-radius: 18px 18px 0 0;
+  box-shadow: 0 -6px 24px var(--shadow);
+  transform: translateY(calc(100% - var(--col-h)));
+  transition: transform 200ms ease;
+  will-change: transform;
+}
+.drawer.open {
+  transform: none;
+}
+.drawer.dragging {
+  transition: none;
+}
+.dhead {
+  flex: none;
+  height: var(--col-h);
+  box-sizing: border-box;
+  /* clear of the + button, which floats over the drawer's right edge */
+  padding: 0 92px 0 max(16px, env(safe-area-inset-left, 0px));
+  touch-action: none;
+  cursor: grab;
+  user-select: none;
+}
+.drawer.open .dhead {
+  height: auto;
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-bottom: 8px;
+}
+.grab {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 28px;
+}
+.grab:focus-visible {
+  outline-offset: -2px;
+  border-radius: 10px;
+}
+.bar {
+  width: 40px;
+  height: 5px;
+  border-radius: 3px;
+  background: var(--control);
+}
+.dhead .h3 {
+  margin: 0;
+}
+.preview {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 0.875rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.dlist-drawer,
+.drawer .dlist {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 0 max(16px, env(safe-area-inset-right, 0px)) 24px
+    max(16px, env(safe-area-inset-left, 0px));
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.drawer .dlist .btn {
+  align-self: flex-start;
+}
+@media (prefers-reduced-motion: reduce) {
+  .drawer {
+    transition: none;
+  }
+}
+
+.vhead.compact {
+  align-items: center;
+}
+.vhead.compact .viewsw {
+  margin: 0;
+  flex: 1;
+}
+@media (max-width: 879.98px) {
+  .vhead.compact .enc-t {
+    display: none;
+  }
+  .vhead.compact .enc {
+    padding: 0 12px;
+    min-height: var(--tap);
+  }
 }

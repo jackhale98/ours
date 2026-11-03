@@ -153,21 +153,33 @@ export function PlanView() {
   const mode = planMode.value;
   const header = (
     <>
-      <header class="vhead">
-        <div>
-          {mode === 'agenda' && (
-            <p class="eyebrow">
-              {monDay(t)} – {monDay(addDays(t, 6))}
-            </p>
-          )}
-          <h1>{mode === 'agenda' ? 'This week' : mode === 'week' ? 'Week' : 'Month'}</h1>
-        </div>
-        <a class="enc" href="#privacy">
-          <Icon name="lock" size={14} />
-          Encrypted
-        </a>
-      </header>
-      <ViewSwitch />
+      {mode === 'agenda' ? (
+        <>
+          <header class="vhead">
+            <div>
+              <p class="eyebrow">
+                {monDay(t)} – {monDay(addDays(t, 6))}
+              </p>
+              <h1>This week</h1>
+            </div>
+            <a class="enc" href="#privacy">
+              <Icon name="lock" size={14} />
+              Encrypted
+            </a>
+          </header>
+          <ViewSwitch />
+        </>
+      ) : (
+        // Week and month need the height for the calendar: the switch says which view this is.
+        <header class="vhead compact">
+          <h1 class="sr">{mode === 'week' ? 'Week' : 'Month'}</h1>
+          <ViewSwitch />
+          <a class="enc" href="#privacy" aria-label="Encrypted">
+            <Icon name="lock" size={14} />
+            <span class="enc-t">Encrypted</span>
+          </a>
+        </header>
+      )}
     </>
   );
   if (mode !== 'agenda') {
