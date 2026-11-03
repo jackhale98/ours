@@ -2,8 +2,8 @@
 /** The signed-in account: profile, devices, spaces; device removal; account deletion. */
 import { Hono } from 'hono';
 import { type AppEnv, requireAuth } from '../auth/session';
+import { deleteAccount } from '../lib/accounts';
 import { HttpError } from '../lib/http';
-import { SPACE_BYTES_SQL } from '../lib/quota';
 
 export const me = new Hono<AppEnv>();
 
@@ -49,30 +49,6 @@ me.delete('/devices/:id', requireAuth, async (c) => {
  * stay with the partner; a space with no members left is deleted entirely.
  */
 me.delete('/me', requireAuth, async (c) => {
-  const uid = c.var.user.id;
-  const email = c.var.user.email;
-  const spaces = await c.env.DB.prepare('SELECT space_id FROM memberships WHERE user_id = ?')
-    .bind(uid)
-    .all<{ space_id: string }>();
-  const statements = [
-    c.env.DB.prepare('DELETE FROM records WHERE owner_user_id = ?').bind(uid),
-    // No trace of the id left behind on shared records or claimed invites.
-    c.env.DB.prepare("UPDATE records SET updated_by = 'deleted' WHERE updated_by = ?").bind(uid),
-    c.env.DB.prepare('UPDATE invites SET claimed_by = NULL WHERE claimed_by = ?').bind(uid),
-    c.env.DB.prepare('DELETE FROM email_tokens WHERE email = ?').bind(email),
-    c.env.DB.prepare('DELETE FROM users WHERE id = ?').bind(uid), // cascades sessions, devices, passkeys, memberships, backups, push, feed
-  ];
-  for (const { space_id } of spaces.results) {
-    statements.push(
-      c.env.DB.prepare(
-        'DELETE FROM spaces WHERE id = ? AND NOT EXISTS (SELECT 1 FROM memberships WHERE space_id = ?)',
-      ).bind(space_id, space_id),
-      c.env.DB.prepare(`UPDATE spaces SET bytes = ${SPACE_BYTES_SQL} WHERE id = ?`).bind(
-        space_id,
-        space_id,
-      ),
-    );
-  }
-  await c.env.DB.batch(statements);
+  await deleteAccount(c.env, c.var.user.id, c.var.user.email);
   return c.json({ ok: true });
 });

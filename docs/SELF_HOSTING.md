@@ -22,6 +22,7 @@ You need a GitHub account (for Pages) and a Cloudflare account (Workers + D1). B
 | `wrangler secret put` | `TURNSTILE_SECRET` | Cloudflare Turnstile secret; bot checks are skipped if unset. |
 | `wrangler secret put` | `RATE_LIMIT_SALT` | Random string used to hash rate-limit keys. |
 | `wrangler.jsonc` vars | `MAX_SPACES_PER_USER`, `MAX_DEVICES_PER_USER`, `MAX_SPACE_BYTES`, `MAX_PUSHES_PER_MINUTE`, `MAX_PUSHES_PER_HOUR` | Quotas (defaults 3, 10, 20 MB, 120 sync pushes a minute, 60 notifications an hour). |
+| `wrangler.jsonc` vars | `INACTIVE_WARN_DAYS`, `INACTIVE_GRACE_DAYS` | Inactive accounts get a warning email after this many days (default 365) and are deleted this many days later (default 30). Keep the privacy policy in step. |
 | `wrangler.jsonc` vars | `VAPID_PUBLIC_KEY`, `VAPID_SUBJECT` | Web Push public key and contact (`mailto:` or https; defaults to `APP_URL`). Empty key = notifications off. |
 | `wrangler secret put` | `VAPID_PRIVATE_KEY` | Web Push private key. See "Notifications" below. |
 | Repo secrets | `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID` | For `deploy-api.yml`. Set repo variable `CLOUDFLARE_DEPLOY=true` to enable it. |

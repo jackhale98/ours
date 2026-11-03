@@ -51,7 +51,7 @@ Every stored field (keep in sync with `apps/api/migrations` and the privacy poli
 | users (added) | quiet_start, quiet_end, quiet_tz | Quiet hours, only if set: reveals the user's time zone |
 | feed_tokens | token_hash, user_id, created_at, revoked_at | Calendar feed |
 | feed_busy | user_id, start_utc, end_utc | **Plaintext** busy blocks, only if the user opts in to the calendar feed |
-| users (added) | last_active | Inactive-account policy (warn at 12 months, delete at 13) |
+| users (added) | last_active, inactive_warned_at | Inactive-account policy (warn at 12 months, delete a month later) |
 | spaces (added) | bytes | Storage quota (total ciphertext size per space) |
 | invites (added) | claimed_by | The first account to fetch an invite claims it; blob erased on accept |
 | email_tokens | token_hash, email, created_at, expires_at, used_at | Magic links; deleted a day after expiry |

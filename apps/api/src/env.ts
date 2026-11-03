@@ -33,6 +33,9 @@ export interface Env {
   MAX_PUSHES_PER_MINUTE?: string;
   /** Notifications a user may send per hour (default 60). */
   MAX_PUSHES_PER_HOUR?: string;
+  /** Inactive accounts: warn after this many days without activity, delete this many days later. */
+  INACTIVE_WARN_DAYS?: string;
+  INACTIVE_GRACE_DAYS?: string;
   /** Web Push (VAPID, RFC 8292). Without both keys, notifications are off. */
   VAPID_PUBLIC_KEY?: string;
   /** Secret: `wrangler secret put VAPID_PRIVATE_KEY`. */
