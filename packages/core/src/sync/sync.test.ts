@@ -187,6 +187,68 @@ describe('mergeRecord', () => {
   });
 });
 
+describe('mergeRecord after review', () => {
+  const settings = (
+    data: Record<string, unknown>,
+    updated_at: number,
+    device_id: string,
+  ): DecodedRecord =>
+    ({ kind: 'settings', deleted: false, data, updated_at, device_id }) as DecodedRecord;
+  const member = (name: string, user_id: string) => ({ name, color: '#aa3300', user_id });
+
+  it('merges nested settings edits from both sides', () => {
+    const base = settings({ members: { a: member('Sam', 'u1'), b: member('Alex', 'u2') } }, 1, 'x');
+    const local = settings(
+      { members: { a: member('Sammy', 'u1'), b: member('Alex', 'u2') } },
+      3,
+      'me',
+    );
+    const remote = settings(
+      { members: { a: member('Sam', 'u1'), b: member('Lex', 'u2') } },
+      2,
+      'them',
+    );
+    const out = mergeRecord(base, local, remote, true, writer);
+    expect(out.action).toBe('merged');
+    expect(out.record.data).toEqual({
+      members: { a: member('Sammy', 'u1'), b: member('Lex', 'u2') },
+    });
+  });
+
+  it('ignores __proto__ keys and never pollutes prototypes', () => {
+    const base = item({}, 1, 'x');
+    const evil = JSON.parse('{"__proto__": {"polluted": true}, "done": true}');
+    const local = {
+      ...item({}, 3, 'me'),
+      data: { ...(item({}, 3, 'me').data as object), ...evil },
+    } as DecodedRecord;
+    const out = mergeRecord(base, local, item({ text: 'B' }, 2, 'them'), true, writer);
+    expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+    expect(Object.getPrototypeOf(out.record.data)).toBe(Object.prototype);
+    expect(Object.keys(out.record.data ?? {})).not.toContain('__proto__');
+  });
+
+  it('falls back to last-writer-wins when a merge would be invalid', () => {
+    const base = item({}, 1, 'x');
+    const local = {
+      ...item({}, 3, 'me'),
+      data: { ...(item({}, 3, 'me').data as object), extra: 1 },
+    } as unknown as DecodedRecord;
+    const remote = item({ text: 'B' }, 2, 'them');
+    expect(mergeRecord(base, local, remote, true, writer)).toEqual({
+      action: 'keep-local',
+      record: local,
+    });
+    const laterRemote = item({ text: 'B' }, 9, 'them');
+    expect(mergeRecord(base, local, laterRemote, true, writer).action).toBe('take-remote');
+  });
+
+  it('refuses non-finite clocks', () => {
+    expect(() => nextTimestamp(Number.NaN, undefined)).toThrow(RangeError);
+    expect(() => nextTimestamp(1, 1e300)).toThrow(RangeError);
+  });
+});
+
 describe('protocol schemas', () => {
   const envelope = {
     id: uuidv7(),
@@ -211,6 +273,7 @@ describe('protocol schemas', () => {
       }),
     ).toBe(false);
     expect(v.is(PushRequest, { space_id: 's1', items: [] })).toBe(false);
+    expect(v.is(PushRequest, { space_id: 's2', items: [{ envelope, base_rev: 0 }] })).toBe(false);
     const many = Array.from({ length: 101 }, () => ({
       envelope: { ...envelope, id: uuidv7() },
       base_rev: 0,

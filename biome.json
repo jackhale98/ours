@@ -24,7 +24,15 @@
         "useImportType": "error"
       },
       "suspicious": {
-        "noConsole": { "level": "error", "options": { "allow": ["warn", "error"] } }
+        "noConsole": {
+          "level": "error",
+          "options": {
+            "allow": ["warn", "error"]
+          }
+        }
+      },
+      "complexity": {
+        "noImportantStyles": "off"
       }
     }
   },

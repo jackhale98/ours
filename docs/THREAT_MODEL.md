@@ -23,9 +23,12 @@
 - **Swapping ciphertexts** between records, spaces, scopes, owners or key versions fails authentication (AAD binding).
 - **Cross-purpose substitution** (an invite blob served as a backup, a record as a notification) fails: every purpose uses its own HKDF label and AAD label.
 - **Replaying an old version** of a record: the device keeps the version with the newer authenticated timestamp and re-pushes it.
-- **Replaying a notification** older than 24 hours: dropped by the receiving service worker. Within 24 hours a replay can re-show a notification.
+- **Flipping a tombstone**: the `deleted` flag is bound into the AAD and must match the encrypted record, so the server cannot delete or resurrect a record on devices.
+- **Replaying a notification**: each payload carries a random id and an authenticated `not_before`/`expires_at` window (max 7 days, 5 min clock skew). The service worker drops early, expired and already-shown payloads.
+- **Private content under the shared key**: `sealDecodedRecord` refuses to seal busy-only events and private lists under the space key, and receivers flag such records.
 - **Tampered invite**: cannot be forged without the secret in the link. A link replaced in transit (e.g. an attacker's own invite) is caught by comparing safety codes in person.
-- **Rollback of the key backup** to an older version: possible (the server picks which backup to serve). The effect is losing newer key versions on a restored device, not disclosure. The client should warn if the restored backup version is lower than one it has seen.
+- **Leaked invite link**: the link secret plus the stored blob *is* the space key (or, for device links, the whole key ring). "Single use" is enforced by the server, not by cryptography, and the safety code does not detect an eavesdropper who saw the link. The server deletes the blob on first fetch (phase 2), links expire in 24 h, and the app strips the fragment from history. Moving to an ephemeral key exchange is tracked in `docs/reviews/0001-core-crypto.md` (M4).
+- **Rollback of the key backup** to an older version: possible (the server picks which backup to serve). The effect is losing newer key versions on a restored device, not disclosure. Devices merge the current backup into their ring before writing a new one (`KeyRing.mergeFrom`), so a stale ring never overwrites keys; key versions can never be silently replaced.
 - **Withholding data** (not syncing, deleting): possible; the server is trusted for availability, not secrecy.
 
 ## Metadata the server can see
@@ -58,6 +61,7 @@ See ADR 0003. Summary: XChaCha20-Poly1305 (random nonces), HKDF-SHA256 with per-
 
 ## Known limitations and follow-ups
 
-- Key rotation on device removal is phase 7. Until then, a removed device that kept the space key can still decrypt anything it can obtain from the server, so removal also revokes its sessions.
+- Partners cannot cryptographically prove authorship to each other (`author`, `device_id` are under the shared key). The server cannot forge them.
+- Key rotation on device removal is phase 7. Rotation must also retire old versions for new writes (review finding M1). Until then, a removed device that kept the space key can still decrypt anything it can obtain from the server, so removal also revokes its sessions.
 - Ciphertext size buckets are 64 bytes; very long notes are distinguishable from short ones.
 - The safety code is 9 digits (~30 bits). It is meant for an in-person comparison, not as protection against an attacker able to grind 2^30 invites per pairing attempt *and* replace the link.

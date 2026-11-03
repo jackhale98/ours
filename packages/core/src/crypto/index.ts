@@ -21,6 +21,7 @@ export {
   toBase64Url,
   utf8,
 } from './bytes';
+export { type OpenResult, openDecodedRecord, scopeAllows, sealDecodedRecord } from './codec';
 export {
   decryptRecord,
   encryptRecord,
@@ -32,8 +33,12 @@ export {
 } from './envelope';
 export { generateKey, KeyRing, type VersionedKey } from './keys';
 export {
-  NOTIFICATION_MAX_AGE_MS,
+  CLOCK_SKEW_MS,
+  DEFAULT_TTL_MS,
+  MAX_LIFETIME_MS,
   NotificationBody,
+  type NotificationInput,
+  type OpenedNotification,
   openNotification,
   sealNotification,
 } from './notify';

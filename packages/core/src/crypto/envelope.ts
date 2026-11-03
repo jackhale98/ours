@@ -3,9 +3,9 @@
  * Record envelope encryption.
  *
  * The associated data binds each ciphertext to where it lives:
- *   label | space_id | record_id | scope | owner_user_id | key_version
+ *   label | space_id | record_id | scope | owner_user_id | key_version | deleted
  * so the server cannot move a ciphertext to another record, space, scope,
- * owner or key version without decryption failing.
+ * owner or key version, or flip the tombstone flag, without decryption failing.
  *
  * The record's kind, schema version, timestamps and content live inside the
  * ciphertext (see schema/record.ts).
@@ -25,27 +25,33 @@ export interface RecordHeader {
   /** Required for scope 'user', must be null for scope 'space'. */
   owner_user_id: string | null;
   key_version: number;
+  /** Mirrors the server-visible tombstone flag; bound so the server cannot flip it. */
+  deleted: boolean;
 }
 
-function assertNonEmpty(value: unknown, what: string): void {
-  if (typeof value !== 'string' || value.length === 0 || value.length > 128) {
+/** Same alphabet as the wire schema: ASCII only, so AAD bytes are unambiguous. */
+const ID = /^[A-Za-z0-9_-]{1,64}$/;
+
+function assertId(value: unknown, what: string): void {
+  if (typeof value !== 'string' || !ID.test(value)) {
     throw new CryptoError('format', `Invalid ${what}`);
   }
 }
 
 export function recordAad(header: RecordHeader): Uint8Array {
-  assertNonEmpty(header.id, 'record id');
-  assertNonEmpty(header.space_id, 'space id');
+  assertId(header.id, 'record id');
+  assertId(header.space_id, 'space id');
   assertVersion(header.key_version);
   if (header.scope === 'space') {
     if (header.owner_user_id !== null) {
       throw new CryptoError('format', 'Space records have no owner');
     }
   } else if (header.scope === 'user') {
-    assertNonEmpty(header.owner_user_id, 'owner user id');
+    assertId(header.owner_user_id, 'owner user id');
   } else {
     throw new CryptoError('format', 'Invalid scope');
   }
+  if (typeof header.deleted !== 'boolean') throw new CryptoError('format', 'Invalid deleted flag');
   return buildAad([
     LABELS.record,
     header.space_id,
@@ -53,6 +59,7 @@ export function recordAad(header: RecordHeader): Uint8Array {
     header.scope,
     header.owner_user_id ?? '',
     header.key_version,
+    header.deleted ? 'deleted' : 'live',
   ]);
 }
 
@@ -85,7 +92,7 @@ export function decryptRecord(key: Uint8Array, header: RecordHeader, sealed: Sea
  */
 export function sealRecord(
   ring: KeyRing,
-  target: { id: string; space_id: string; scope: Scope },
+  target: { id: string; space_id: string; scope: Scope; deleted: boolean },
   plaintext: Uint8Array,
 ): { header: RecordHeader } & Sealed {
   const header: RecordHeader =

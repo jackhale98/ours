@@ -21,18 +21,24 @@ export const PushItem = v.strictObject({
 });
 export type PushItem = v.InferOutput<typeof PushItem>;
 
-export const PushRequest = v.strictObject({
-  space_id: Id,
-  items: v.pipe(
-    v.array(PushItem),
-    v.minLength(1),
-    v.maxLength(MAX_PUSH),
-    v.check(
-      (items) => new Set(items.map((i) => i.envelope.id)).size === items.length,
-      'Duplicate record ids in one push',
+export const PushRequest = v.pipe(
+  v.strictObject({
+    space_id: Id,
+    items: v.pipe(
+      v.array(PushItem),
+      v.minLength(1),
+      v.maxLength(MAX_PUSH),
+      v.check(
+        (items) => new Set(items.map((i) => i.envelope.id)).size === items.length,
+        'Duplicate record ids in one push',
+      ),
     ),
+  }),
+  v.check(
+    (req) => req.items.every((i) => i.envelope.space_id === req.space_id),
+    'Every envelope must belong to the request space',
   ),
-});
+);
 export type PushRequest = v.InferOutput<typeof PushRequest>;
 
 export const PushResult = v.variant('status', [

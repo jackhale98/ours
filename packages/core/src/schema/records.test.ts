@@ -9,6 +9,7 @@ import {
   encodeRecord,
   isTimeZone,
   MIGRATIONS,
+  RecordError,
 } from './records';
 
 const meta = { updated_at: 1000, device_id: 'dev1' };
@@ -147,6 +148,38 @@ describe('record encode/decode', () => {
       data: { x: 1 },
     });
     expect(decodeRecord(utf8(text))).toEqual({ ok: false, reason: 'newer-schema' });
+  });
+
+  it('rejects absurd timestamps that would freeze a record', () => {
+    expect(() => encodeRecord({ ...(samples[3] as DecodedRecord), updated_at: 1e300 })).toThrow(
+      RecordError,
+    );
+    const text = JSON.stringify({
+      kind: 'list',
+      schema: 1,
+      updated_at: 2 ** 49,
+      device_id: 'd',
+      deleted: false,
+      data: { name: 'x', kind: 'check', private: false },
+    });
+    expect(decodeRecord(utf8(text))).toEqual({ ok: false, reason: 'invalid' });
+  });
+
+  it('never puts plaintext in validation errors', () => {
+    try {
+      encodeRecord({
+        kind: 'list',
+        deleted: false,
+        data: { name: 'x', kind: 'SECRET' as never, private: false },
+        ...meta,
+      });
+      expect.unreachable();
+    } catch (e) {
+      expect(e).toBeInstanceOf(RecordError);
+      expect(String(e)).not.toContain('SECRET');
+      expect(JSON.stringify(e)).not.toContain('SECRET');
+      expect((e as RecordError).paths).toEqual(['kind']);
+    }
   });
 
   it('accepts all real IANA zones and rejects junk', () => {

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 import { KEY_LENGTH } from './aead';
-import { CryptoError, randomBytes } from './bytes';
+import { CryptoError, equalBytes, randomBytes } from './bytes';
 
 /** A symmetric key together with its version number (starts at 1). */
 export interface VersionedKey {
@@ -35,7 +35,7 @@ export class KeyRing {
   addPersonalKey({ version, key }: VersionedKey): void {
     assertVersion(version);
     if (key.length !== KEY_LENGTH) throw new CryptoError('key', 'Key must be 32 bytes');
-    this.personal.set(version, key);
+    setOnce(this.personal, version, key);
   }
 
   addSpaceKey(spaceId: string, { version, key }: VersionedKey): void {
@@ -46,7 +46,19 @@ export class KeyRing {
       versions = new Map();
       this.spaces.set(spaceId, versions);
     }
-    versions.set(version, key);
+    setOnce(versions, version, key);
+  }
+
+  /**
+   * Adds every key from `other` (same user). Used when restoring a backup or
+   * accepting a device link into a ring that already has keys, and before
+   * writing a backup, so a backup never loses keys the device holds.
+   * Throws if a version maps to a different key on each side.
+   */
+  mergeFrom(other: KeyRing): void {
+    if (other.userId !== this.userId) throw new CryptoError('key', 'Key ring user mismatch');
+    for (const k of other.personalKeys()) this.addPersonalKey(k);
+    for (const id of other.spaceIds()) for (const k of other.spaceKeys(id)) this.addSpaceKey(id, k);
   }
 
   removeSpace(spaceId: string): void {
@@ -84,6 +96,18 @@ export class KeyRing {
   personalKeys(): VersionedKey[] {
     return sorted(this.personal);
   }
+}
+
+/**
+ * A version, once known, always means the same key. Replacing it would make
+ * every record under the old key unreadable, so a conflict is an error.
+ */
+function setOnce(map: Map<number, Uint8Array>, version: number, key: Uint8Array): void {
+  const existing = map.get(version);
+  if (existing && !equalBytes(existing, key)) {
+    throw new CryptoError('key', 'Conflicting key for an existing version');
+  }
+  map.set(version, key);
 }
 
 function sorted(map: Map<number, Uint8Array>): VersionedKey[] {

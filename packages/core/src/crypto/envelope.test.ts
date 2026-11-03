@@ -27,6 +27,7 @@ const header: RecordHeader = {
   scope: 'space',
   owner_user_id: null,
   key_version: 1,
+  deleted: false,
 };
 
 describe('record envelope', () => {
@@ -34,13 +35,18 @@ describe('record envelope', () => {
     const sk = generateKey();
     const sam = ringFor('sam', sk);
     const alex = ringFor('alex', sk);
-    const sealed = sealRecord(sam, { id: 'r1', space_id: SPACE, scope: 'space' }, utf8('hello'));
+    const sealed = sealRecord(
+      sam,
+      { id: 'r1', space_id: SPACE, scope: 'space', deleted: false },
+      utf8('hello'),
+    );
     expect(sealed.header).toEqual({
       id: 'r1',
       space_id: SPACE,
       scope: 'space',
       owner_user_id: null,
       key_version: 1,
+      deleted: false,
     });
     expect(openRecord(alex, sealed.header, sealed)).toEqual(utf8('hello'));
   });
@@ -49,7 +55,11 @@ describe('record envelope', () => {
     const sk = generateKey();
     const sam = ringFor('sam', sk);
     const alex = ringFor('alex', sk);
-    const sealed = sealRecord(sam, { id: 'r2', space_id: SPACE, scope: 'user' }, utf8('private'));
+    const sealed = sealRecord(
+      sam,
+      { id: 'r2', space_id: SPACE, scope: 'user', deleted: false },
+      utf8('private'),
+    );
     expect(sealed.header.owner_user_id).toBe('sam');
     expect(openRecord(sam, sealed.header, sealed)).toEqual(utf8('private'));
     expect(() => openRecord(alex, sealed.header, sealed)).toThrow(
@@ -62,9 +72,17 @@ describe('record envelope', () => {
 
   it('uses the newest key version for writes and old versions for reads', () => {
     const ring = ringFor('sam');
-    const old = sealRecord(ring, { id: 'r3', space_id: SPACE, scope: 'space' }, utf8('v1'));
+    const old = sealRecord(
+      ring,
+      { id: 'r3', space_id: SPACE, scope: 'space', deleted: false },
+      utf8('v1'),
+    );
     ring.addSpaceKey(SPACE, { version: 2, key: generateKey() });
-    const fresh = sealRecord(ring, { id: 'r4', space_id: SPACE, scope: 'space' }, utf8('v2'));
+    const fresh = sealRecord(
+      ring,
+      { id: 'r4', space_id: SPACE, scope: 'space', deleted: false },
+      utf8('v2'),
+    );
     expect(fresh.header.key_version).toBe(2);
     expect(openRecord(ring, old.header, old)).toEqual(utf8('v1'));
     expect(openRecord(ring, fresh.header, fresh)).toEqual(utf8('v2'));

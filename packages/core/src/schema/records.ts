@@ -164,6 +164,23 @@ type Migration = (data: Record<string, unknown>) => Record<string, unknown>;
  */
 export const MIGRATIONS: Partial<Record<Kind, Record<number, Migration>>> = {};
 
+/** Upper bound for write timestamps (~ year 10889), so one bad write cannot freeze a record. */
+export const MAX_TIMESTAMP = 2 ** 48;
+
+/** Thrown for invalid record content. Never includes the offending values. */
+export class RecordError extends Error {
+  readonly paths: string[];
+  constructor(paths: string[]) {
+    super(`Invalid record${paths.length ? ` at ${paths.join(', ')}` : ''}`);
+    this.name = 'RecordError';
+    this.paths = paths;
+  }
+}
+
+function issuePaths(issues: readonly v.BaseIssue<unknown>[]): string[] {
+  return issues.map((i) => i.path?.map((p) => String(p.key)).join('.') ?? '').filter(Boolean);
+}
+
 /** Write metadata, authenticated because it sits inside the ciphertext. */
 export interface RecordMeta {
   /** Milliseconds; monotonic per record (see sync/clock.ts). */
@@ -178,7 +195,7 @@ export type DecodedRecord =
 const Meta = v.object({
   kind: v.picklist(KINDS),
   schema: v.pipe(v.number(), v.integer(), v.minValue(1)),
-  updated_at: v.pipe(v.number(), v.integer(), v.minValue(0)),
+  updated_at: v.pipe(v.number(), v.integer(), v.minValue(0), v.maxValue(MAX_TIMESTAMP)),
   device_id: v.pipe(v.string(), v.minLength(1), v.maxLength(64)),
   deleted: v.boolean(),
   data: v.unknown(),
@@ -188,9 +205,16 @@ export type DecodeResult =
   | { ok: true; record: DecodedRecord }
   | { ok: false; reason: 'newer-schema' | 'invalid' };
 
-/** Validates and serialises a record for encryption. Throws on invalid data. */
+/** Validates and serialises a record for encryption. Throws RecordError on invalid data. */
 export function encodeRecord(record: DecodedRecord): Uint8Array {
-  const data = record.deleted ? null : v.parse(KIND_SCHEMAS[record.kind], record.data);
+  const meta = v.safeParse(Meta, { ...record, schema: CURRENT_SCHEMA[record.kind] });
+  if (!meta.success) throw new RecordError(issuePaths(meta.issues));
+  let data: unknown = null;
+  if (!record.deleted) {
+    const parsed = v.safeParse(KIND_SCHEMAS[record.kind], record.data);
+    if (!parsed.success) throw new RecordError(issuePaths(parsed.issues));
+    data = parsed.output;
+  }
   return utf8(
     JSON.stringify({
       kind: record.kind,
@@ -201,6 +225,11 @@ export function encodeRecord(record: DecodedRecord): Uint8Array {
       data,
     }),
   );
+}
+
+/** Validates data for a kind without throwing; used after merges. */
+export function isValidData(kind: Kind, data: unknown): boolean {
+  return v.is(KIND_SCHEMAS[kind], data);
 }
 
 /**

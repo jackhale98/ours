@@ -8,6 +8,9 @@
  * it, even if this device's clock is behind.
  */
 export function nextTimestamp(now: number, previous: number | undefined): number {
+  if (!Number.isFinite(now) || (previous !== undefined && !Number.isSafeInteger(previous))) {
+    throw new RangeError('Invalid timestamp');
+  }
   const t = Math.floor(now);
   return previous === undefined ? t : Math.max(t, previous + 1);
 }

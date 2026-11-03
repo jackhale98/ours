@@ -12,7 +12,7 @@
  * Because the timestamps are inside the ciphertext, a server replaying an
  * old version of a record loses to the newer version the device holds.
  */
-import type { DecodedRecord, Kind } from '../schema/records';
+import { type DecodedRecord, isValidData, type Kind } from '../schema/records';
 import { compareWrites, nextTimestamp } from './clock';
 
 export const FIELD_MERGE_KINDS: ReadonlySet<Kind> = new Set<Kind>(['item', 'settings']);
@@ -24,6 +24,47 @@ export type MergeOutcome =
   | { action: 'keep-local'; record: DecodedRecord }
   /** A new record combining both sides. Store it and push it. */
   | { action: 'merged'; record: DecodedRecord };
+
+const UNSAFE_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+
+function isPlainObject(x: unknown): x is Record<string, unknown> {
+  return typeof x === 'object' && x !== null && !Array.isArray(x);
+}
+
+/**
+ * Three-way merge of object fields. Plain-object fields are merged
+ * recursively up to `depth` more levels (so editing settings.members.a and
+ * settings.members.b on different devices keeps both); anything else is
+ * taken from the side that changed it, or from the later writer if both did.
+ */
+function mergeFields(
+  b: Record<string, unknown>,
+  l: Record<string, unknown>,
+  r: Record<string, unknown>,
+  localWins: boolean,
+  depth: number,
+): Record<string, unknown> {
+  const out: Record<string, unknown> = Object.create(null);
+  for (const key of new Set([...Object.keys(b), ...Object.keys(l), ...Object.keys(r)])) {
+    if (UNSAFE_KEYS.has(key)) continue;
+    const bv = b[key];
+    const lv = l[key];
+    const rv = r[key];
+    const localChanged = !sameJson(lv, bv);
+    const remoteChanged = !sameJson(rv, bv);
+    let value: unknown;
+    if (localChanged && remoteChanged) {
+      value =
+        depth > 0 && isPlainObject(bv) && isPlainObject(lv) && isPlainObject(rv)
+          ? mergeFields(bv, lv, rv, localWins, depth - 1)
+          : localWins
+            ? lv
+            : rv;
+    } else value = localChanged ? lv : rv;
+    if (value !== undefined) out[key] = value;
+  }
+  return { ...out };
+}
 
 function sameJson(a: unknown, b: unknown): boolean {
   return JSON.stringify(a) === JSON.stringify(b);
@@ -70,22 +111,22 @@ export function mergeRecord(
       : { action: 'take-remote', record: remote };
   }
 
-  const b = base.data as Record<string, unknown>;
-  const l = local.data as Record<string, unknown>;
-  const r = remote.data as Record<string, unknown>;
   const localWins = order > 0;
-  const merged: Record<string, unknown> = {};
-  for (const key of new Set([...Object.keys(b), ...Object.keys(l), ...Object.keys(r)])) {
-    const localChanged = !sameJson(l[key], b[key]);
-    const remoteChanged = !sameJson(r[key], b[key]);
-    let value: unknown;
-    if (localChanged && remoteChanged) value = localWins ? l[key] : r[key];
-    else if (localChanged) value = l[key];
-    else value = r[key];
-    if (value !== undefined) merged[key] = value;
+  const merged = mergeFields(
+    base.data as Record<string, unknown>,
+    local.data as Record<string, unknown>,
+    remote.data as Record<string, unknown>,
+    localWins,
+    1,
+  );
+  // A merge must still be a valid record; otherwise fall back to LWW.
+  if (!isValidData(remote.kind, merged)) {
+    return localWins
+      ? { action: 'keep-local', record: local }
+      : { action: 'take-remote', record: remote };
   }
-  if (sameJson(merged, r)) return { action: 'take-remote', record: remote };
-  if (sameJson(merged, l)) return { action: 'keep-local', record: local };
+  if (sameJson(merged, remote.data)) return { action: 'take-remote', record: remote };
+  if (sameJson(merged, local.data)) return { action: 'keep-local', record: local };
   const record = {
     kind: remote.kind,
     deleted: false,
