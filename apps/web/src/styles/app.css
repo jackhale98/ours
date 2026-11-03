@@ -1709,3 +1709,20 @@ dialog.sheet::backdrop {
 .stat .mk {
   margin-top: 0;
 }
+
+.legal-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  font-size: 0.8125rem;
+  color: var(--muted);
+  padding: 0 4px;
+}
+
+.tag.no {
+  color: var(--muted);
+}
+.ev.is-declined .ev-title {
+  text-decoration: line-through;
+  color: var(--muted);
+}

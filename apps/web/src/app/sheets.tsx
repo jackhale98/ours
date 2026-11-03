@@ -258,9 +258,14 @@ export function accept(id: string): void {
   toast(`Added. ${nameOf(e.rec.data.proposed_by ?? partner.value)} will see your yes.`);
 }
 
+/** Says no to a proposal. It disappears for me; my partner sees the answer. */
 export function decline(id: string): void {
-  const undo = deleteEvent(id);
-  toast(`Declined. ${nameOf(partner.value)} will get a note.`, undo);
+  const e = findEntry(id);
+  if (e?.rec.kind !== 'event') return;
+  update<'event'>(id, { status: 'declined' });
+  toast(`Declined. ${nameOf(partner.value)} will see you can’t make it.`, () =>
+    update<'event'>(id, { status: 'proposed' }),
+  );
 }
 
 function EventSheet({ id }: { id: string }) {
@@ -373,6 +378,36 @@ function EventSheet({ id }: { id: string }) {
           <Icon name="clock" size={15} />
           <span>Waiting on {nameOf(p)}. It stays tentative until they say yes.</span>
         </p>
+      )}
+      {e.status === 'declined' && e.proposed_by === me && (
+        <>
+          <p class="note">
+            <Icon name="x" size={15} />
+            <span>{nameOf(p)} can’t make it. Ask again, or remove it from your plan.</span>
+          </p>
+          <div class="ask-actions">
+            <button
+              type="button"
+              class="btn"
+              onClick={() => {
+                update<'event'>(id, { status: 'proposed' });
+                toast(`Asked ${nameOf(p)} again.`);
+              }}
+            >
+              Ask again
+            </button>
+            <button
+              type="button"
+              class="btn ghost"
+              onClick={() => {
+                close();
+                toast('Removed.', deleteEvent(id));
+              }}
+            >
+              Remove
+            </button>
+          </div>
+        </>
       )}
       {e.owner === me && (
         <Switch

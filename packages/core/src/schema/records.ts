@@ -72,7 +72,8 @@ export const EventData = v.pipe(
     ...whenEntries,
     title: NonEmpty(200),
     owner: Owner,
-    status: v.picklist(['confirmed', 'proposed']),
+    /** `declined`: the partner can't make it; only the proposer still sees it. */
+    status: v.picklist(['confirmed', 'proposed', 'declined']),
     proposed_by: v.nullable(Slot),
     privacy: v.picklist(['full', 'busy']),
     location: v.nullable(Text(200)),

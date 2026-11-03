@@ -1,0 +1,44 @@
+/* SPDX-License-Identifier: AGPL-3.0-or-later */
+@import "./tokens.css";
+@import "./base.css";
+@import "./landing.css";
+
+.legal h2 {
+  margin-top: 8px;
+}
+.legal p,
+.legal li {
+  color: var(--ink);
+  line-height: 1.6;
+}
+.legal ul {
+  margin: 0;
+  padding-left: 1.2em;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.legal table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 0.875rem;
+}
+.legal th,
+.legal td {
+  text-align: left;
+  vertical-align: top;
+  padding: 8px 10px 8px 0;
+  border-bottom: 1px solid var(--line);
+}
+.legal .note {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 12px 14px;
+  background: var(--surface);
+}
+.legal nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  font-size: 0.875rem;
+}

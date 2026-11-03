@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta http-equiv="Content-Security-Policy" content="%OURS_CSP%" />
+    <meta name="referrer" content="no-referrer" />
+    <meta name="color-scheme" content="light dark" />
+    <link rel="icon" href="/icon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="stylesheet" href="/src/styles/legal.css" />
+    <meta name="theme-color" content="#f4f6f5" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#111719" media="(prefers-color-scheme: dark)" />
+    <title>Accessibility · Ours</title>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <main id="main" class="page legal">
+      <nav aria-label="Legal">
+        <a href="../../">Ours home</a>
+        <a href="../privacy/">Privacy</a>
+        <a href="../terms/">Terms</a>
+        <a href="../accessibility/">Accessibility</a>
+      </nav>
+      <h1>Accessibility</h1>
+      <p class="small">Last updated %OURS_LEGAL_DATE%. This instance is run by %OURS_OPERATOR%. Contact: %OURS_CONTACT%.</p>
+%OURS_DRAFT_NOTE%
+
+      <p>
+        Ours should work well for everyone, including people who use a screen reader, keyboard,
+        switch access, zoom, or who see colour differently.
+      </p>
+
+      <h2>What we aim for</h2>
+      <ul>
+        <li>WCAG 2.2 at level AA across the app, checked with automated tests on every change.</li>
+        <li>Colour is never the only signal. Each partner has a shape as well as a colour (a circle and a square), and our palette is tested against the common types of colour blindness.</li>
+        <li>Everything can be done with a keyboard, with visible focus and a skip link.</li>
+        <li>Text reflows down to 320 pixels wide and up to 200% zoom, and the app follows your system's text size, dark mode and reduced-motion settings.</li>
+        <li>Touch targets are at least 44 by 44 pixels.</li>
+      </ul>
+
+      <h2>Known limitations</h2>
+      <ul>
+        <li>The week view is a visual summary. The agenda list next to it carries the same information in a form that works better with screen readers.</li>
+        <li>Calendars imported from other services keep whatever titles those services provide.</li>
+      </ul>
+
+      <h2>Tell us</h2>
+      <p>
+        If something gets in your way, please tell us at the contact above or by opening an issue
+        on the source repository. Accessibility problems are treated as bugs.
+      </p>
+      <p class="foot">
+        Ours is free, open-source software (AGPL-3.0-or-later).
+        <a href="https://github.com/jackhale98/ours">Source code</a>
+      </p>
+    </main>
+  </body>
+</html>

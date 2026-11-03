@@ -59,6 +59,8 @@ Every stored field (keep in sync with `apps/api/migrations` and the privacy poli
 
 **Imported calendars (opt-in):** when a user adds a calendar by subscription link, each refresh is relayed by the Worker, which sees the subscription URL and that calendar's contents **in transit** (not stored, not logged). The URL itself is stored only inside an encrypted record. File imports never reach the server. See ADR 0011.
 
+The service worker precaches only the static build (HTML, JS, CSS, fonts, icons). It never caches API responses; user data lives only in the encrypted IndexedDB store.
+
 Cloudflare's own invocation logs are switched off (`observability.logs.invocation_logs: false`, enforced by `pnpm check:worker`), because they would record request URLs and client IP addresses.
 
 Also visible transiently, not stored in D1: IP addresses and user agents (Cloudflare edge), request timing, push timing. Worker logs contain route, method, status and latency only — never bodies or tokens.

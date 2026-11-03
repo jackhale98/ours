@@ -131,7 +131,7 @@ export interface Row {
   away: boolean;
   start: string; // HH:mm in the viewer's zone
   end: string;
-  status: 'confirmed' | 'proposed';
+  status: 'confirmed' | 'proposed' | 'declined';
   proposedBy: Slot | null;
   location: string | null;
   repeat: string;
@@ -154,6 +154,9 @@ function hhmm(instant: number): string {
 function rowsFor(entry: Entry, from: number, to: number): { day: string; row: Row }[] {
   const r = entry.rec;
   if (r.kind !== 'event' && r.kind !== 'busy_stub') return [];
+  // A declined proposal stays only with the person who asked, as an answer.
+  if (r.kind === 'event' && r.data.status === 'declined' && r.data.proposed_by !== viewer.value)
+    return [];
   const d = r.data;
   const occs: Occurrence[] = expand(d, from, to, zone);
   return occs.flatMap((o) => {
@@ -274,7 +277,7 @@ function isEveningFree(date: string, rows: Row[]): boolean {
     end: toInstant(`${date}T${EVENING.end}`, zone),
   };
   const busy = rows
-    .filter((r) => !r.allDay)
+    .filter((r) => !r.allDay && r.status !== 'declined')
     .map((r) => ({ start: r.occStart, end: Math.max(r.occEnd, r.occStart + 60_000) }));
   const free = freeWithin(window, busy);
   return free.length === 1 && free[0]?.start === window.start && free[0]?.end === window.end;

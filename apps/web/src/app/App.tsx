@@ -175,7 +175,7 @@ export function App() {
               <br />
               {demo ? `Viewing as ${n[me]}` : `Signed in as ${n[me]}`}
             </span>
-            <span class="demo" role="status">
+            <span class="demo" role={demo ? undefined : 'status'}>
               {demo ? 'Demo · sample data' : statusText}
             </span>
           </div>
@@ -186,7 +186,7 @@ export function App() {
               <LogoMark size={26} />
               ours
             </a>
-            <span class="demo" role="status">
+            <span class="demo" role={demo ? undefined : 'status'}>
               {statusText}
             </span>
             <span class="pair">

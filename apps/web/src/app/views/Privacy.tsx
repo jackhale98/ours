@@ -233,6 +233,12 @@ export function PrivacyView() {
           </div>
         </section>
         {!demo && <AccountCard />}
+        <p class="legal-links">
+          <a href={`${import.meta.env.BASE_URL}legal/privacy/`}>Privacy policy</a>
+          <a href={`${import.meta.env.BASE_URL}legal/terms/`}>Terms</a>
+          <a href={`${import.meta.env.BASE_URL}legal/accessibility/`}>Accessibility</a>
+          <a href={REPO}>Source code</a>
+        </p>
       </div>
     </>
   );

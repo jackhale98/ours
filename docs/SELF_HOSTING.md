@@ -10,6 +10,8 @@ You need a GitHub account (for Pages) and a Cloudflare account (Workers + D1). B
 |---|---|---|
 | Web build env / repo variable | `OURS_BASE` | Base path. `/<repo>/` for a Pages project site, `/` for a custom domain. |
 | Web build env / repo variable `API_URL` | `VITE_API_URL` | Origin of your Worker. Also added to the CSP `connect-src`. |
+| Web build env / repo variables | `OURS_OPERATOR`, `OURS_CONTACT` | Who runs your instance and a contact email, shown on the privacy, terms and accessibility pages. **Set these before opening accounts**: while `OURS_OPERATOR` is empty the pages say it is a preview instance. |
+| Web build env / repo variables | `OURS_GOVERNING_LAW`, `OURS_REGION`, `OURS_EMAIL_PROVIDER`, `OURS_LEGAL_DATE` | Fill the matching blanks in the legal pages (e.g. "the law of England and Wales", "data stored in the EU", "Resend"). Have the pages reviewed for your jurisdiction; they are a plain-language starting point, not legal advice. |
 | `apps/api/wrangler.jsonc` vars | `ALLOWED_ORIGINS` | Comma-separated web origins allowed by CORS (e.g. `https://you.github.io`). |
 | `apps/api/wrangler.jsonc` vars | `ALLOW_SIGNUPS` | `open`, `invite_only` or `closed`. Partners can always be invited. |
 | `apps/api/wrangler.jsonc` | `database_id` | From `wrangler d1 create ours` (choose a jurisdiction, see ADR 0006). |

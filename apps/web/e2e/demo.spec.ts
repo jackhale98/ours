@@ -62,6 +62,27 @@ test('accepting a proposal confirms it', async ({ page }) => {
   await expect(page.locator('.ask')).toHaveCount(0);
 });
 
+test('declining a proposal hides it for me and shows the answer to my partner', async ({
+  page,
+}) => {
+  await openDemo(page);
+  const card = page.locator('.ask').first();
+  const title = (await card.locator('h3, h2').first().textContent())?.trim() ?? '';
+  await card.getByRole('button', { name: 'Can’t make it' }).click();
+  await expect(page.locator('.toast-host')).toContainText('can’t make it');
+  await expect(page.locator('.ask')).toHaveCount(0);
+  // Switch to the partner who asked: the plan is still there, marked declined.
+  await nav(page, 'Privacy');
+  await page.getByRole('group', { name: 'View as' }).getByRole('button', { name: 'Alex' }).click();
+  await nav(page, 'Plan');
+  const row = page.locator('.ev.is-declined').first();
+  await expect(row).toContainText('can’t make it');
+  if (title) await expect(row).toContainText(title);
+  await row.click();
+  await page.getByRole('button', { name: 'Ask again' }).click();
+  await expect(page.locator('.toast-host')).toContainText('Asked Sam again');
+});
+
 test('quick add parses natural language and adds a plan', async ({ page }) => {
   await openDemo(page);
   await page.keyboard.press('n');

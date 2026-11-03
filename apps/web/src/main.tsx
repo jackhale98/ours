@@ -69,7 +69,9 @@ function Landing() {
           </section>
         </div>
         <p class="foot">
-          Early build: accounts and sync are not live yet.{' '}
+          {HAS_API ? 'Early build.' : 'Early build: accounts and sync are not live here yet.'}{' '}
+          <a href="legal/privacy/">Privacy</a> · <a href="legal/terms/">Terms</a> ·{' '}
+          <a href="legal/accessibility/">Accessibility</a> ·{' '}
           <a href="https://github.com/jackhale98/ours">Source code</a>
         </p>
       </main>
@@ -78,6 +80,17 @@ function Landing() {
 }
 
 applyTheme();
+
+// Offline support: register the service worker (production builds only).
+if ('serviceWorker' in navigator && import.meta.env.PROD) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker
+      .register(`${import.meta.env.BASE_URL}sw.js`, { scope: import.meta.env.BASE_URL })
+      .catch(() => {
+        // Offline support is an enhancement; the app works without it.
+      });
+  });
+}
 const root = document.getElementById('app');
 
 async function route() {

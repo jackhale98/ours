@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta http-equiv="Content-Security-Policy" content="%OURS_CSP%" />
+    <meta name="referrer" content="no-referrer" />
+    <meta name="color-scheme" content="light dark" />
+    <link rel="icon" href="/icon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="stylesheet" href="/src/styles/legal.css" />
+    <meta name="theme-color" content="#f4f6f5" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#111719" media="(prefers-color-scheme: dark)" />
+    <title>Privacy policy · Ours</title>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <main id="main" class="page legal">
+      <nav aria-label="Legal">
+        <a href="../../">Ours home</a>
+        <a href="../privacy/">Privacy</a>
+        <a href="../terms/">Terms</a>
+        <a href="../accessibility/">Accessibility</a>
+      </nav>
+      <h1>Privacy policy</h1>
+      <p class="small">Last updated %OURS_LEGAL_DATE%. This instance is run by %OURS_OPERATOR%. Contact: %OURS_CONTACT%.</p>
+%OURS_DRAFT_NOTE%
+
+      <p>
+        Ours is built so that the people running it cannot read what you and your partner plan.
+        Your plans, lists, comments and check-ins are encrypted on your devices before they leave
+        them, with keys only your devices hold. This page lists everything the server does see.
+      </p>
+
+      <h2>What we cannot see</h2>
+      <ul>
+        <li>The content of anything you write: titles, notes, places, times of plans, list items, comments, check-in answers, names you give each other.</li>
+        <li>Your encryption keys and your 12-word recovery phrase. We store your key backup only in a form sealed with that phrase.</li>
+        <li>The contents of calendars you import from a file.</li>
+      </ul>
+
+      <h2>What we store, and why</h2>
+      <table>
+        <thead><tr><th scope="col">Data</th><th scope="col">Why</th><th scope="col">How long</th></tr></thead>
+        <tbody>
+          <tr><td>Your email address</td><td>Sign-in links and important account notices</td><td>Until you delete your account</td></tr>
+          <tr><td>Passkey public keys</td><td>Passkey sign-in (no biometrics ever reach us)</td><td>Until you remove the passkey</td></tr>
+          <tr><td>Devices and sessions (a device name you choose, sign-in times; session tokens stored only as hashes)</td><td>Keeping you signed in, letting you see and remove devices</td><td>Sessions end after 90 days unused</td></tr>
+          <tr><td>Which accounts share a space</td><td>Syncing between you and your partner</td><td>Until you leave the space</td></tr>
+          <tr><td>Encrypted records</td><td>Sync and backup. We can see how many there are, roughly how big (rounded up to 64 bytes), when and by whom they changed, whether one is private, and whether it was deleted</td><td>Until deleted by you</td></tr>
+          <tr><td>Encrypted key backup</td><td>Restoring on a new device with your recovery phrase</td><td>Until you delete your account</td></tr>
+          <tr><td>Invite links (encrypted key material)</td><td>Pairing and linking devices</td><td>24 hours, erased once used</td></tr>
+          <tr><td>Rate-limit counters (salted hashes, never your IP or email)</td><td>Stopping abuse</td><td>One day</td></tr>
+          <tr><td>Last activity date</td><td>Removing abandoned accounts</td><td>We email you at 12 months of inactivity and delete the account at 13 months</td></tr>
+        </tbody>
+      </table>
+
+      <h2>Optional features that reveal more</h2>
+      <ul>
+        <li><strong>Calendar subscription links.</strong> If you subscribe to an outside calendar by link, our server fetches it for you, so it sees that link and that calendar's contents while passing them on. They are not stored or logged. Importing a file instead keeps everything on your device.</li>
+        <li><strong>Reminders and notifications.</strong> To send a reminder while your device is asleep, the server must know when it fires and which device to wake. The reminder text stays encrypted.</li>
+        <li><strong>Calendar feed for other apps.</strong> If you turn this on, your busy times (start and end only) are stored unencrypted so your calendar app can read them. Turning it off deletes them.</li>
+      </ul>
+
+      <h2>What we never do</h2>
+      <ul>
+        <li>No analytics, trackers, advertising or third-party scripts. Fonts and code are served from this site.</li>
+        <li>No selling or sharing of data. There are no investors to answer to; the software is free.</li>
+        <li>Request logs record only the route, status and timing, never IP addresses, request bodies or tokens. The hosting platform's own request logs are switched off.</li>
+      </ul>
+
+      <h2>Who else handles data</h2>
+      <ul>
+        <li><strong>Cloudflare</strong> hosts the server and database (%OURS_REGION%). Like any network, it sees IP addresses in transit.</li>
+        <li><strong>Our email provider</strong> (%OURS_EMAIL_PROVIDER%) sees your email address and when we send you a link.</li>
+        <li><strong>Your browser's push service</strong> (Apple, Google or Mozilla) carries encrypted notifications and sees when they are sent.</li>
+        <li><strong>GitHub Pages</strong> serves the app's files and sees the usual web request details.</li>
+      </ul>
+
+      <h2>Your choices and rights</h2>
+      <ul>
+        <li>Export everything you can see, at any time, from Privacy in the app.</li>
+        <li>Delete your account from Privacy in the app. It takes effect immediately: your account, devices, private records and key backup are deleted, and shared records you created stay with your partner, with your name removed. Backups of the database roll off within 30 days.</li>
+        <li>Ask us what we hold about you, or to correct or delete it, at the contact above. Because we cannot read your content, the table above is the complete answer.</li>
+        <li>If you are in the UK or EU you can complain to your data protection authority.</li>
+      </ul>
+
+      <h2>Age</h2>
+      <p>Ours is for people aged 16 and over.</p>
+
+      <h2>Changes</h2>
+      <p>We will tell you in the app before a change to this policy takes effect. Every version is kept in the public source history.</p>
+      <p class="foot">
+        Ours is free, open-source software (AGPL-3.0-or-later).
+        <a href="https://github.com/jackhale98/ours">Source code</a>
+      </p>
+    </main>
+  </body>
+</html>

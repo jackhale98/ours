@@ -19,7 +19,8 @@
     "idb": "8.0.4",
     "preact": "11.1.1",
     "workbox-core": "7.4.1",
-    "workbox-precaching": "7.4.1"
+    "workbox-precaching": "7.4.1",
+    "workbox-routing": "7.4.1"
   },
   "devDependencies": {
     "@axe-core/playwright": "4.14.0",

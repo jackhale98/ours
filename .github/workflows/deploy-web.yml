@@ -27,6 +27,12 @@ jobs:
           # Override with a repository variable for custom domains (use "/").
           OURS_BASE: ${{ vars.OURS_BASE || format('/{0}/', github.event.repository.name) }}
           VITE_API_URL: ${{ vars.API_URL }}
+          OURS_OPERATOR: ${{ vars.OURS_OPERATOR }}
+          OURS_CONTACT: ${{ vars.OURS_CONTACT }}
+          OURS_GOVERNING_LAW: ${{ vars.OURS_GOVERNING_LAW }}
+          OURS_REGION: ${{ vars.OURS_REGION }}
+          OURS_EMAIL_PROVIDER: ${{ vars.OURS_EMAIL_PROVIDER }}
+          OURS_LEGAL_DATE: ${{ vars.OURS_LEGAL_DATE }}
       - name: Record build hashes
         run: |
           cd apps/web/dist

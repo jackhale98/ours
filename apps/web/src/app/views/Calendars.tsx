@@ -261,20 +261,22 @@ function FeedPreview() {
   const me = viewer.value;
   const days = agenda(7);
   const occurrences: FeedOccurrence[] = days.flatMap((d) =>
-    d.rows.map((r) => ({
-      start: r.occStart,
-      end: r.occEnd,
-      busy: !r.free,
-      source:
-        r.origin === 'import'
-          ? {
-              kind: 'import' as const,
-              owner: r.owner,
-              importer: r.importer ?? partner.value,
-              calendarId: r.id,
-            }
-          : { kind: 'plan' as const, owner: r.owner, tentative: r.status === 'proposed' },
-    })),
+    d.rows
+      .filter((r) => r.status !== 'declined')
+      .map((r) => ({
+        start: r.occStart,
+        end: r.occEnd,
+        busy: !r.free,
+        source:
+          r.origin === 'import'
+            ? {
+                kind: 'import' as const,
+                owner: r.owner,
+                importer: r.importer ?? partner.value,
+                calendarId: r.id,
+              }
+            : { kind: 'plan' as const, owner: r.owner, tentative: r.status === 'proposed' },
+      })),
   );
   const from = Date.now();
   const to = from + 7 * 86_400_000;

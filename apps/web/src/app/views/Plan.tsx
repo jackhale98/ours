@@ -26,12 +26,12 @@ function EventRow({ row, date }: { row: Row; date: string }) {
   const me = viewer.value;
   const p = partner.value;
   const masked = row.type === 'busy';
-  const mode = masked ? 'busy' : row.status === 'proposed' ? 'dash' : undefined;
+  const mode = masked ? 'busy' : row.status !== 'confirmed' ? 'dash' : undefined;
   const labelNames = { a: nameOf('a'), b: nameOf('b') };
   return (
     <button
       type="button"
-      class={`ev${masked ? ' is-masked' : ''}${row.free ? ' is-free' : ''}`}
+      class={`ev${masked ? ' is-masked' : ''}${row.free ? ' is-free' : ''}${row.status === 'declined' ? ' is-declined' : ''}`}
       onClick={() => (row.origin === 'import' ? openImport(row, date) : openEvent(row.id))}
     >
       <span class="ev-time">
@@ -51,6 +51,7 @@ function EventRow({ row, date }: { row: Row; date: string }) {
             ? `${nameOf(row.owner === 'both' ? p : row.owner)}: `
             : `${ownerLabel(row.owner, labelNames)}: `}
           {row.status === 'proposed' && !masked ? 'tentative, ' : ''}
+          {row.status === 'declined' ? `${nameOf(p)} can’t make it, ` : ''}
         </span>
         <span class="ev-title">{row.title}</span>
         {!masked && (
@@ -58,6 +59,11 @@ function EventRow({ row, date }: { row: Row; date: string }) {
             {row.status === 'proposed' && (
               <span class="tag">
                 {row.proposedBy === me ? `Waiting on ${nameOf(p)}` : 'Needs your answer'}
+              </span>
+            )}
+            {row.status === 'declined' && (
+              <span class="tag no" aria-hidden="true">
+                {nameOf(p)} can’t make it
               </span>
             )}
             {row.away && row.allDay && <span>Away</span>}
