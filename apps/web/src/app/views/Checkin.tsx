@@ -3,7 +3,8 @@ import { CHECKIN_STEPS } from '@ours/core/schema';
 import { addDays } from '@ours/core/time';
 import { signal } from '@preact/signals';
 import type { ComponentChildren } from 'preact';
-import { byKind, createEvent, type Entry, nameOf, partner, put, settings, viewer } from '../model';
+import { choresList, ideasList, itemsOf } from '../lists';
+import { byKind, createEvent, nameOf, partner, put, settings, viewer } from '../model';
 import { agenda, dow, fmtLong, freeEvenings, relDay, today, zone } from '../select';
 import { Icon, Marker, toast } from '../ui';
 import { ItemRow } from './Lists';
@@ -33,8 +34,6 @@ function setDraft(patch: Partial<Draft>) {
     // ignore
   }
 }
-
-type ItemEntry = Entry & { rec: { kind: 'item' } };
 
 function toggleStep(i: number) {
   const done = [...draft.value.done];
@@ -84,22 +83,15 @@ export function CheckinView() {
       e.rec.kind === 'event' && e.rec.data.status === 'proposed' && e.rec.data.proposed_by === p,
   ).length;
 
-  const lists = byKind('list');
-  const choresList =
-    lists.find((l) => l.id === settings.value.chores_list) ??
-    lists.find((l) => l.rec.kind === 'list' && l.rec.data.kind === 'check' && !l.rec.data.private);
-  const chores = choresList
-    ? (byKind('item') as ItemEntry[])
-        .filter((i) => i.rec.data.list_id === choresList.id && !i.rec.data.done)
-        .sort((a, b) => (a.rec.data.sort_key < b.rec.data.sort_key ? -1 : 1))
-    : [];
+  const chores = (() => {
+    const list = choresList(settings.value.chores_list);
+    return list ? itemsOf(list.id).filter((i) => !i.rec.data.done) : [];
+  })();
 
   const frees = freeEvenings(7);
   const date = d.date && frees.includes(d.date) ? d.date : (frees[0] ?? null);
-  const ideasList = lists.find((l) => l.rec.kind === 'list' && l.rec.data.kind === 'ideas');
-  const ideas = ideasList
-    ? (byKind('item') as ItemEntry[]).filter((i) => i.rec.data.list_id === ideasList.id).slice(0, 6)
-    : [];
+  const ideaList = ideasList();
+  const ideas = ideaList ? itemsOf(ideaList.id).slice(0, 6) : [];
   const idea = ideas.find((i) => i.id === d.idea) ?? ideas[0];
 
   const checkins = byKind('checkin')

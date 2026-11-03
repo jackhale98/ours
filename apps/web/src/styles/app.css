@@ -918,6 +918,50 @@ textarea.txt {
   margin-top: 2px;
 }
 
+.who span.sq {
+  border-radius: 7px;
+}
+
+.listbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.typepick {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 8px;
+}
+
+.typepick button {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  text-align: left;
+  padding: 12px;
+  min-height: 44px;
+  border-radius: 14px;
+  border: 1px solid var(--control);
+  background: var(--surface);
+}
+
+.typepick button b {
+  font-weight: 700;
+}
+
+.typepick button span {
+  font-size: 0.78125rem;
+  color: var(--muted);
+}
+
+.typepick button[aria-pressed="true"] {
+  border: 2px solid var(--ink);
+  padding: 11px;
+  background: var(--sunk);
+}
+
 /* ---------- check-in ---------- */
 
 .prog {

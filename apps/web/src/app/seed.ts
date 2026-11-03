@@ -129,7 +129,7 @@ function seedAll(): void {
   setViewer('a');
   const list = (
     name: string,
-    kind: 'check' | 'ideas',
+    kind: 'shopping' | 'chores' | 'gifts' | 'ideas',
     items: [string, Slot | null, boolean?][],
     owner?: Slot,
   ) => {
@@ -146,7 +146,7 @@ function seedAll(): void {
     }
     return id;
   };
-  list('Groceries', 'check', [
+  list('Groceries', 'shopping', [
     ['Oat milk', null],
     ['Eggs, a dozen', null],
     ['Lemons', 'b'],
@@ -154,7 +154,7 @@ function seedAll(): void {
     ['Bay leaves', null],
     ['Sourdough', null, true],
   ]);
-  const home = list('Home', 'check', [
+  const home = list('Home', 'chores', [
     ['Book furnace service', 'a'],
     ['Return library books', 'b'],
     ['Fix the bathroom drawer', null],
@@ -163,7 +163,7 @@ function seedAll(): void {
   ]);
   list(
     'Gift ideas',
-    'check',
+    'gifts',
     [
       ['Alex: chalk bag for climbing', null],
       ['Alex: the ramen cookbook', null],

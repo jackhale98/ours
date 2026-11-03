@@ -150,6 +150,23 @@ export function ToastHost() {
  * Modal sheet on the native <dialog>: focus is trapped by the browser,
  * Escape closes it, and focus returns to the element that opened it.
  */
+/**
+ * The control a person last pressed. Safari does not focus buttons on click,
+ * so document.activeElement alone cannot tell us where to return focus.
+ */
+let lastPressed: HTMLElement | null = null;
+if (typeof document !== 'undefined') {
+  const remember = (e: Event) => {
+    const el = (e.target as Element | null)?.closest?.<HTMLElement>('button, a[href], [tabindex]');
+    if (el && !el.closest('dialog')) lastPressed = el;
+  };
+  document.addEventListener('pointerdown', remember, true);
+  document.addEventListener('keydown', remember, true);
+}
+
+const FOCUSABLE =
+  'button:not([disabled]), [href], input:not([disabled]), textarea, select, [tabindex]:not([tabindex="-1"])';
+
 export function Sheet({
   labelledBy,
   onClose,
@@ -162,16 +179,19 @@ export function Sheet({
   const ref = useRef<HTMLDialogElement>(null);
   useEffect(() => {
     const dialog = ref.current;
-    const opener = document.activeElement as HTMLElement | null;
+    const active = document.activeElement as HTMLElement | null;
+    const opener = active && active !== document.body ? active : lastPressed;
     if (dialog && !dialog.open) dialog.showModal();
-    const auto = dialog?.querySelector<HTMLElement>('[data-autofocus]');
-    auto?.focus();
+    // Always start focus inside the sheet: the marked field, else the first control.
+    const first =
+      dialog?.querySelector<HTMLElement>('[data-autofocus]') ??
+      dialog?.querySelector<HTMLElement>(FOCUSABLE);
+    first?.focus();
     return () => {
       if (opener?.isConnected) opener.focus({ preventScroll: true });
     };
   }, []);
   return (
-    // biome-ignore lint/a11y/useKeyWithClickEvents: backdrop click is a mouse shortcut; Escape (onCancel) and the Close button cover keyboard users
     <dialog
       ref={ref}
       class="sheet"
@@ -179,6 +199,13 @@ export function Sheet({
       onCancel={(e) => {
         e.preventDefault();
         onClose();
+      }}
+      onKeyDown={(e) => {
+        // Some engines don't fire 'cancel' reliably; handle Escape directly too.
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          onClose();
+        }
       }}
       onClick={(e) => {
         if (e.target === ref.current) onClose(); // backdrop click

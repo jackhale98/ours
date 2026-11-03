@@ -89,9 +89,19 @@ export const BusyStubData = v.pipe(
   v.check((e) => isValidWhen(e), WHEN_MESSAGE),
 );
 
+/**
+ * List types. Each sets behaviour in the app:
+ * - shopping, todo, check (legacy generic): tick-off lists with assignees
+ * - chores: tick-off with assignees; used by the weekly check-in
+ * - ideas: date ideas with "pick one for us" and "plan it"
+ * - gifts: tick-off, private by default so surprises stay surprises
+ */
+export const LIST_KINDS = ['shopping', 'chores', 'todo', 'ideas', 'gifts', 'check'] as const;
+export type ListKind = (typeof LIST_KINDS)[number];
+
 export const ListData = v.strictObject({
   name: NonEmpty(100),
-  kind: v.picklist(['check', 'ideas']),
+  kind: v.picklist(LIST_KINDS),
   private: v.boolean(),
 });
 
