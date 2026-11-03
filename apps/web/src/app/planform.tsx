@@ -19,6 +19,8 @@ import {
   viewer,
 } from './model';
 import { noticeProposal } from './notices';
+import { ReminderPicker } from './reminderpicker';
+import { defaultReminders, remindersOf, withReminders } from './reminders';
 import { repeatText, today, zone } from './select';
 import { afterAdd, sheet } from './sheets';
 import { CloseButton, Marker, Sheet, Switch, toast } from './ui';
@@ -76,6 +78,12 @@ export function PlanForm({ id, draft }: { id: string | null; draft?: Draft }) {
   const [countdown, setCountdown] = useState(base.countdown ?? false);
   const [priv, setPriv] = useState(base.privacy === 'busy');
   const [ask, setAsk] = useState(!editing);
+  // My reminders: what the plan has, or my defaults for a new plan.
+  const [reminders, setReminders] = useState<number[]>(() => {
+    if (editing) return remindersOf(base, me);
+    const defs = defaultReminders(me);
+    return allDay0 ? defs.all_day : defs.timed;
+  });
   const [error, setError] = useState<string | null>(null);
 
   const custom = !!repeat && !REPEAT_CHOICES.some(([v]) => v === repeat);
@@ -112,6 +120,7 @@ export function PlanForm({ id, draft }: { id: string | null; draft?: Draft }) {
       location: location.trim() ? location.trim().slice(0, 200) : null,
       notes: notes.trim() ? notes.trim().slice(0, 4000) : null,
       countdown,
+      remind: withReminders(base, me, reminders),
     };
     const isPrivate = who === 'me' && priv;
     try {
@@ -309,6 +318,10 @@ export function PlanForm({ id, draft }: { id: string | null; draft?: Draft }) {
             onInput={(e) => setNotes(e.currentTarget.value)}
           />
         </div>
+
+        {who !== 'partner' && (
+          <ReminderPicker value={reminders} allDay={allDay} onChange={setReminders} hint={false} />
+        )}
 
         <Switch
           checked={countdown}

@@ -103,7 +103,7 @@ test('quick add parses natural language and adds a plan', async ({ page }) => {
   await expect(page.getByRole('button', { name: /Pottery/ })).toBeVisible();
 });
 
-test('a reminder can be set on a plan and is kept', async ({ page }) => {
+test('reminders: several per plan, removable, and kept', async ({ page }) => {
   await openDemo(page);
   await page.keyboard.press('n');
   const dialog = page.getByRole('dialog', { name: 'New plan' });
@@ -116,15 +116,50 @@ test('a reminder can be set on a plan and is kept', async ({ page }) => {
     .click();
   const sheet = page.getByRole('dialog', { name: 'Dentist' });
   await sheet.getByRole('combobox', { name: 'Remind me' }).selectOption({ label: '1 hour before' });
+  await sheet
+    .getByRole('combobox', { name: 'Remind me' })
+    .selectOption({ label: '10 minutes before' });
+  const chips = sheet.getByRole('list', { name: 'Reminders' });
+  await expect(chips.getByRole('listitem')).toHaveText(['10 minutes before', '1 hour before']);
   await expect(sheet.getByText('reminders are saved but not sent')).toBeVisible();
+  await chips.getByRole('button', { name: 'Remove reminder: 10 minutes before' }).click();
   await page.keyboard.press('Escape');
   await page
     .getByRole('button', { name: /Dentist/ })
     .first()
     .click();
   await expect(
-    page.getByRole('dialog', { name: 'Dentist' }).getByRole('combobox', { name: 'Remind me' }),
-  ).toHaveValue('60');
+    page
+      .getByRole('dialog', { name: 'Dentist' })
+      .getByRole('list', { name: 'Reminders' })
+      .getByRole('listitem'),
+  ).toHaveText(['1 hour before']);
+});
+
+test('default reminders apply to new plans; all-day plans have day-based choices', async ({
+  page,
+}) => {
+  await openDemo(page, 'privacy');
+  const card = page.locator('section[aria-labelledby="rem-h"]');
+  await card
+    .getByRole('combobox', { name: 'Plans with a time' })
+    .selectOption({ label: '30 minutes before' });
+  await card
+    .getByRole('combobox', { name: 'All-day plans' })
+    .selectOption({ label: 'Evening before (6 PM)' });
+  await nav(page, 'Plan');
+  await page.keyboard.press('n');
+  const dialog = page.getByRole('dialog', { name: 'New plan' });
+  await page.getByRole('textbox', { name: 'What’s the plan?' }).fill('Haircut tomorrow 2pm');
+  await dialog.getByRole('button', { name: 'Mine' }).click();
+  await dialog.getByRole('button', { name: 'Add plan' }).click();
+  await page
+    .getByRole('button', { name: /Haircut/ })
+    .first()
+    .click();
+  await expect(
+    page.getByRole('dialog', { name: 'Haircut' }).getByRole('list', { name: 'Reminders' }),
+  ).toHaveText('30 minutes before');
 });
 
 test('a private plan is hidden from the partner but visible as Busy', async ({ page }) => {

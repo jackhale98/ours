@@ -95,3 +95,60 @@ describe('reminders', () => {
     ).toThrow();
   });
 });
+
+describe('several reminders per plan', () => {
+  it('plans one push per reminder, with all-day offsets counted from 9 AM', () => {
+    const now = Date.now();
+    const day = new Date(now + 3 * 86_400_000).toISOString().slice(0, 10);
+    createEvent({
+      title: 'Dinner',
+      start: `${day}T19:00`,
+      end: `${day}T21:00`,
+      all_day: false,
+      tz: 'UTC',
+      rrule: null,
+      away: false,
+      owner: 'both',
+      status: 'confirmed',
+      proposed_by: null,
+      privacy: 'full',
+      location: 'Vic’s',
+      notes: null,
+      countdown: false,
+      stub_id: null,
+      remind: { a: [15, 60, 1440], b: null },
+    });
+    createEvent({
+      title: 'Lisbon trip',
+      start: day,
+      end: new Date(Date.parse(day) + 86_400_000).toISOString().slice(0, 10),
+      all_day: true,
+      tz: null,
+      rrule: null,
+      away: true,
+      owner: 'both',
+      status: 'confirmed',
+      proposed_by: null,
+      privacy: 'full',
+      location: null,
+      notes: null,
+      countdown: true,
+      stub_id: null,
+      remind: { a: [900], b: null },
+    });
+    const planned = plannedReminders(now);
+    const dinner = planned.filter((p) => p.title === 'Dinner');
+    expect(dinner).toHaveLength(3);
+    expect(dinner.map((p) => p.body)).toEqual([
+      'In 1 day · 7 PM · Vic’s',
+      'In 1 hour · 7 PM · Vic’s',
+      'In 15 minutes · 7 PM · Vic’s',
+    ]);
+    const trip = planned.find((p) => p.title === 'Lisbon trip');
+    // 6 PM the evening before, in the viewer's zone.
+    expect(new Date(trip?.fire_at ?? 0).toISOString().slice(11, 16)).toBe(
+      new Date(Date.parse(`${day}T09:00:00`) - 15 * 3_600_000).toISOString().slice(11, 16),
+    );
+    expect(trip?.body).toMatch(/^Tomorrow · /);
+  });
+});

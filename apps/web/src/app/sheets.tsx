@@ -4,14 +4,13 @@ import { parseQuickAdd } from '@ours/core/parse';
 import { addDays, addWallMinutes } from '@ours/core/time';
 import { signal } from '@preact/signals';
 import { useState } from 'preact/hooks';
-import { pushState, reminderLabel } from '../account/notify';
 import {
   addComment,
   commentsFor,
   createEvent,
   deleteEvent,
+  type EventData,
   findEntry,
-  mode,
   nameOf,
   partner,
   type Slot,
@@ -21,6 +20,8 @@ import {
 } from './model';
 import { noticeAnswer, noticeNote, noticeProposal } from './notices';
 import { type Draft, PlanForm, REPEAT_CHOICES } from './planform';
+import { ReminderPicker } from './reminderpicker';
+import { remindersOf, withDefaultReminders, withReminders } from './reminders';
 import {
   fmtTime,
   ownerLabel,
@@ -118,7 +119,7 @@ function QuickAdd({ preset }: { preset: QuickPreset }) {
       if (end <= start) end = `${addDays(date, 1)}T${parsed.endTime}`;
     }
     try {
-      const id = createEvent({
+      const draft: EventData = {
         title,
         start,
         end,
@@ -134,7 +135,8 @@ function QuickAdd({ preset }: { preset: QuickPreset }) {
         notes: null,
         countdown: false,
         stub_id: null,
-      });
+      };
+      const id = createEvent(owner === p ? draft : withDefaultReminders(draft, me));
       if (proposing) noticeProposal(id);
     } catch {
       toast('That plan couldn’t be saved. Check the title and time.');
@@ -324,12 +326,13 @@ function QuickAdd({ preset }: { preset: QuickPreset }) {
 
 /* ---------- event details ---------- */
 
-const REMIND_OPTIONS = [0, 15, 60, 1440] as const;
-
 export function accept(id: string): void {
   const e = findEntry(id);
   if (e?.rec.kind !== 'event') return;
   update<'event'>(id, { status: 'confirmed' });
+  // Saying yes adds my default reminders, as for a plan I made.
+  const withMine = withDefaultReminders(e.rec.data, viewer.value);
+  if (withMine.remind !== e.rec.data.remind) update<'event'>(id, { remind: withMine.remind });
   noticeAnswer(id, true);
   toast(`Added. ${nameOf(e.rec.data.proposed_by ?? partner.value)} will see your yes.`);
 }
@@ -512,36 +515,11 @@ function EventSheet({ id }: { id: string }) {
       )}
       {e.status !== 'declined' &&
         (e.owner === me || e.owner === 'both' || e.proposed_by === me) && (
-          <div class="field">
-            <label for="remind">Remind me</label>
-            <select
-              id="remind"
-              class="txt"
-              value={String(e.remind?.[me] ?? 'none')}
-              onChange={(ev) => {
-                const v = ev.currentTarget.value;
-                const minutes = v === 'none' ? null : Number(v);
-                const prev = e.remind ?? { a: null, b: null };
-                update<'event'>(id, { remind: { ...prev, [me]: minutes } });
-              }}
-            >
-              <option value="none">No reminder</option>
-              {REMIND_OPTIONS.map((m) => (
-                <option key={m} value={String(m)}>
-                  {reminderLabel(m)}
-                </option>
-              ))}
-            </select>
-            {mode.value === 'demo' ? (
-              <p class="small muted">In the demo, reminders are saved but not sent.</p>
-            ) : (
-              pushState.value !== 'on' && (
-                <p class="small muted">
-                  Turn on notifications in Privacy to get reminders on this device.
-                </p>
-              )
-            )}
-          </div>
+          <ReminderPicker
+            value={remindersOf(e, me)}
+            allDay={e.all_day}
+            onChange={(next) => update<'event'>(id, { remind: withReminders(e, me, next) })}
+          />
         )}
       <div class="thread">
         <p class="eyebrow">Notes</p>

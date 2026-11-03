@@ -69,6 +69,13 @@ const WHEN_MESSAGE = 'start/end must match all_day, end must not precede start';
 
 /** Reminder offsets: at the start, up to a week before. */
 const ReminderMinutes = v.pipe(v.number(), v.integer(), v.minValue(0), v.maxValue(7 * 24 * 60));
+export const MAX_REMINDERS_PER_PERSON = 3;
+const PersonReminders = v.nullable(
+  v.union([
+    ReminderMinutes,
+    v.pipe(v.array(ReminderMinutes), v.maxLength(MAX_REMINDERS_PER_PERSON)),
+  ]),
+);
 
 export const EventData = v.pipe(
   v.strictObject({
@@ -84,10 +91,11 @@ export const EventData = v.pipe(
     countdown: v.boolean(),
     /** For privacy 'busy': id of the shared busy_stub that shadows this event. */
     stub_id: v.nullable(RefId),
-    /** Each person's own reminder: minutes before the start, or null for none. */
-    remind: v.optional(
-      v.strictObject({ a: v.nullable(ReminderMinutes), b: v.nullable(ReminderMinutes) }),
-    ),
+    /**
+     * Each person's own reminders: minutes before the start (all-day plans:
+     * before 9 AM on the day), up to three; a single number or null also parse.
+     */
+    remind: v.optional(v.strictObject({ a: PersonReminders, b: PersonReminders })),
   }),
   v.check((e) => isValidWhen(e), WHEN_MESSAGE),
 );
@@ -139,6 +147,11 @@ export const CheckinData = v.strictObject({
 
 const Member = v.strictObject({ name: NonEmpty(40), color: Color, user_id: RefId });
 
+const DefaultReminders = v.strictObject({
+  timed: v.pipe(v.array(ReminderMinutes), v.maxLength(MAX_REMINDERS_PER_PERSON)),
+  all_day: v.pipe(v.array(ReminderMinutes), v.maxLength(MAX_REMINDERS_PER_PERSON)),
+});
+
 /** Shared settings live in space scope; personal ones in user scope. All fields optional. */
 export const SettingsData = v.strictObject({
   week_start: v.optional(v.pipe(v.number(), v.integer(), v.minValue(0), v.maxValue(6))),
@@ -151,6 +164,13 @@ export const SettingsData = v.strictObject({
     }),
   ),
   default_reminder_minutes: v.optional(v.nullable(v.pipe(v.number(), v.integer(), v.minValue(0)))),
+  /** Each person's default reminders for new plans (timed and all-day), up to three each. */
+  default_reminders: v.optional(
+    v.strictObject({
+      a: v.optional(DefaultReminders),
+      b: v.optional(DefaultReminders),
+    }),
+  ),
   members: v.optional(v.strictObject({ a: v.optional(Member), b: v.optional(Member) })),
   theme: v.optional(v.picklist(['system', 'light', 'dark'])),
   /** Unused since review 0004 (L4); kept so older records still parse. */

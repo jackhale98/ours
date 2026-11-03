@@ -2258,3 +2258,26 @@ button.cd-item {
     min-height: var(--tap);
   }
 }
+
+.rchips {
+  list-style: none;
+  margin: 0 0 6px;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.rchips li {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding-left: 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  background: var(--surface);
+  font-size: 0.875rem;
+}
+.rchips .iconbtn {
+  width: var(--tap);
+  height: var(--tap);
+}

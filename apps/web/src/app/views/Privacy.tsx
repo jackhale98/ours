@@ -18,6 +18,7 @@ const ROTATION_ENABLED = import.meta.env.VITE_ROTATION === 'on';
 
 import { CalendarsCard } from './Calendars';
 import { DataCard } from './DataCard';
+import { RemindersCard } from './RemindersCard';
 
 const REPO = 'https://github.com/jackhale98/ours';
 const example = signal<string[] | null>(null);
@@ -191,6 +192,7 @@ export function PrivacyView() {
           </div>
         </section>
 
+        <RemindersCard />
         <DataCard />
         {!demo && <AccountCard />}
         <p class="legal-links">

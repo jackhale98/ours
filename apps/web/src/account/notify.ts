@@ -22,6 +22,7 @@ import {
 import { expand, toInstant, toWall } from '@ours/core/time';
 import { effect, signal } from '@preact/signals';
 import { byKind, nameOf, type Slot, store, viewer } from '../app/model';
+import { reminderLabel, remindersOf } from '../app/reminders';
 import { fmtTime, zone } from '../app/select';
 import { ApiError, api } from './api';
 import { kvGet, kvSet } from './db';
@@ -291,11 +292,29 @@ interface Planned {
   start: number;
 }
 
-export function reminderLabel(minutes: number): string {
-  if (minutes === 0) return 'At the start';
-  if (minutes < 60) return `${minutes} minutes before`;
-  if (minutes < 1440) return minutes === 60 ? '1 hour before' : `${minutes / 60} hours before`;
-  return minutes === 1440 ? '1 day before' : `${minutes / 1440} days before`;
+/** What a reminder says, e.g. "In 15 minutes · 7 PM · Vic’s" or "Tomorrow · Saturday". */
+function reminderBody(
+  minutes: number,
+  allDay: boolean,
+  when: string,
+  place: string | null,
+): string {
+  let lead: string;
+  if (allDay) {
+    lead =
+      minutes === 0
+        ? 'Today'
+        : minutes <= 1440
+          ? 'Tomorrow'
+          : minutes % 10080 === 0
+            ? minutes === 10080
+              ? 'In a week'
+              : `In ${minutes / 10080} weeks`
+            : `In ${Math.round(minutes / 1440)} days`;
+  } else {
+    lead = minutes === 0 ? 'Starting now' : `In ${reminderLabel(minutes).replace(' before', '')}`;
+  }
+  return [lead, minutes === 0 && allDay ? null : when, place].filter(Boolean).join(' · ');
 }
 
 /** The reminders this person wants in the next 8 days, soonest first. */
@@ -305,33 +324,27 @@ export function plannedReminders(now = Date.now()): Planned[] {
   for (const e of byKind('event')) {
     if (e.rec.kind !== 'event') continue;
     const d = e.rec.data;
-    const minutes = d.remind?.[me];
-    if (minutes === null || minutes === undefined || d.status === 'declined') continue;
-    const lead = minutes * 60_000;
-    const occurrences = expand(d, now, now + REMINDER_HORIZON_MS + lead + 86_400_000, zone);
+    const list = remindersOf(d, me);
+    if (!list.length || d.status === 'declined') continue;
+    const longest = Math.max(...list) * 60_000;
+    const occurrences = expand(d, now, now + REMINDER_HORIZON_MS + longest + 86_400_000, zone);
     for (const o of occurrences) {
       const day = toWall(o.start, zone).slice(0, 10);
       const anchor = d.all_day ? toInstant(`${day}T${ALL_DAY_TIME}`, zone) : o.start;
-      const fire = anchor - lead;
-      if (fire < now || fire > now + REMINDER_HORIZON_MS) continue;
       const when = d.all_day
         ? new Date(anchor).toLocaleDateString(undefined, { weekday: 'long', timeZone: zone })
         : fmtTime(toWall(o.start, zone).slice(11, 16));
-      const leadText =
-        minutes === 0
-          ? d.all_day
-            ? 'Today'
-            : 'Starting now'
-          : `In ${reminderLabel(minutes).replace(' before', '')}`;
-      out.push({
-        fire_at: fire,
-        start: o.start,
-        record_id: e.id,
-        title: d.title,
-        body: [leadText, minutes === 0 && d.all_day ? null : when, d.location]
-          .filter(Boolean)
-          .join(' · '),
-      });
+      for (const minutes of list) {
+        const fire = anchor - minutes * 60_000;
+        if (fire < now || fire > now + REMINDER_HORIZON_MS) continue;
+        out.push({
+          fire_at: fire,
+          start: o.start,
+          record_id: e.id,
+          title: d.title,
+          body: reminderBody(minutes, d.all_day, when, d.location),
+        });
+      }
     }
   }
   return out.sort((a, b) => a.fire_at - b.fire_at).slice(0, MAX_REMINDERS);
