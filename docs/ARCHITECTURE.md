@@ -62,7 +62,7 @@ Timed events store wall-clock `start`/`end` (`YYYY-MM-DDTHH:mm`) plus an IANA zo
 
 ## UX reference
 
-The plan refers to `docs/prototype.html`. It was not in the repository when phases 0–1 were built; add it before phase 3 UI work.
+`docs/prototype.html` is the interaction and visual reference; `docs/PROTOTYPE_NOTES.md` maps it to this architecture and lists deliberate differences (accessibility fixes to two colour tokens, self-hosted fonts, recovery-phrase handling, safety-code format). Design tokens live in `apps/web/src/styles/tokens.css`; `pnpm check:contrast` enforces WCAG ratios in both themes.
 
 ## Open questions for the owner
 
