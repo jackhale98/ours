@@ -57,6 +57,38 @@ export const store = signal<StoreData>(
   load() ?? { v: 2, viewer: 'a', space_key: toBase64Url(generateKey()), entries: [] },
 );
 
+/* ---------- backend ---------- */
+
+/**
+ * Where writes go. The demo keeps plaintext sample data in localStorage; a
+ * signed-in account encrypts each write into the outbox and syncs it
+ * (src/account/sync.ts).
+ */
+export interface Backend {
+  mode: 'demo' | 'account';
+  /** Authenticated write metadata: which device wrote it. */
+  deviceId(author: Slot): string;
+  /** Local changes to persist (and, for accounts, encrypt and sync). */
+  write(upserts: Entry[], removed: Entry[]): void;
+}
+
+const demoBackend: Backend = {
+  mode: 'demo',
+  deviceId: (author) => `demo-${author}`,
+  write: () => persist(),
+};
+
+let backend: Backend = demoBackend;
+export const mode = signal<'demo' | 'account'>('demo');
+
+export function setBackend(b: Backend | null): void {
+  backend = b ?? demoBackend;
+  mode.value = backend.mode;
+}
+
+/** Latest write time per removed id, so an undo outranks its own deletion. */
+const removedAt = new Map<string, number>();
+
 let persistPaused = false;
 
 /** Runs many writes as one: a single re-render and a single save. */
@@ -71,7 +103,7 @@ export function bulk(fn: () => void): void {
 }
 
 export function persist(): void {
-  if (persistPaused) return;
+  if (persistPaused || backend.mode !== 'demo') return;
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(store.value));
   } catch {
@@ -129,8 +161,8 @@ export function put<K extends keyof KindData>(
     kind,
     deleted: false,
     data,
-    updated_at: nextTimestamp(Date.now(), prev?.rec.updated_at),
-    device_id: `demo-${author}`,
+    updated_at: nextTimestamp(Date.now(), prev?.rec.updated_at ?? removedAt.get(id)),
+    device_id: backend.deviceId(author),
   } as LiveRecord;
   // Same checks as a real encrypted write: schema validation and the
   // private-content scope policy (sealDecodedRecord runs these, then encrypts).
@@ -141,7 +173,7 @@ export function put<K extends keyof KindData>(
     ? store.value.entries.map((e) => (e.id === id ? entry : e))
     : [...store.value.entries, entry];
   store.value = { ...store.value, entries };
-  persist();
+  backend.write([entry], []);
   return id;
 }
 
@@ -154,19 +186,46 @@ export function update<K extends keyof KindData>(id: string, patch: Partial<Data
 /** Removes records and returns a function that restores them (for undo). */
 export function remove(ids: string[]): () => void {
   const gone = store.value.entries.filter((e) => ids.includes(e.id));
+  for (const e of gone) removedAt.set(e.id, nextTimestamp(Date.now(), e.rec.updated_at));
   store.value = { ...store.value, entries: store.value.entries.filter((e) => !ids.includes(e.id)) };
-  persist();
+  backend.write([], gone);
   return () => {
     const have = new Set(store.value.entries.map((e) => e.id));
-    store.value = {
-      ...store.value,
-      entries: [...store.value.entries, ...gone.filter((e) => !have.has(e.id))],
-    };
-    persist();
+    // Restoring is a new write, stamped after the deletion so it wins everywhere.
+    const back = gone
+      .filter((e) => !have.has(e.id))
+      .map((e) => ({
+        ...e,
+        rec: {
+          ...e.rec,
+          updated_at: nextTimestamp(Date.now(), removedAt.get(e.id)),
+          device_id: backend.deviceId(store.value.viewer),
+        },
+      }));
+    store.value = { ...store.value, entries: [...store.value.entries, ...back] };
+    backend.write(back, []);
   };
 }
 
+/**
+ * Applies changes that arrived from sync. Does not write back.
+ * `upserts` replace entries with the same id; `removedIds` disappear.
+ */
+export function applyRemote(upserts: Entry[], removedIds: string[] = []): void {
+  if (!upserts.length && !removedIds.length) return;
+  const byId = new Map(store.value.entries.map((e) => [e.id, e]));
+  for (const id of removedIds) byId.delete(id);
+  for (const e of upserts) byId.set(e.id, e);
+  store.value = { ...store.value, entries: [...byId.values()] };
+}
+
+/** Replaces the whole store (account load, demo reset). */
+export function loadEntries(viewerSlot: Slot, entries: Entry[]): void {
+  store.value = { v: 2, viewer: viewerSlot, space_key: store.value.space_key, entries };
+}
+
 export function setViewer(slot: Slot): void {
+  if (backend.mode !== 'demo') return; // a real device is always its owner
   store.value = { ...store.value, viewer: slot };
   persist();
 }

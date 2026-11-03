@@ -11,3 +11,5 @@ test-results/
 .lighthouseci/
 *.log
 .DS_Store
+dist-e2e/
+playwright-report-sync/

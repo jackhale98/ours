@@ -2,12 +2,13 @@
 import { render } from 'preact';
 import './styles/base.css';
 import './styles/landing.css';
-import { APP_NAME } from './config';
+import { APP_NAME, HAS_API } from './config';
 import { LogoMark } from './Logo';
 import { applyTheme } from './theme';
 
-const APP_ROUTES = new Set(['plan', 'lists', 'checkin', 'privacy']);
-const isAppRoute = () => APP_ROUTES.has(location.hash.slice(1));
+const APP_ROUTES = new Set(['plan', 'lists', 'checkin', 'privacy', 'start']);
+const isAppRoute = () =>
+  APP_ROUTES.has(location.hash.slice(1)) || location.hash.startsWith('#signin=');
 
 function Landing() {
   return (
@@ -30,7 +31,12 @@ function Landing() {
             weekly check-in. Everything is encrypted on your devices before it syncs.
           </p>
           <div class="cta">
-            <a class="btn primary" href="#plan">
+            {HAS_API && (
+              <a class="btn primary" href="#start">
+                Get started
+              </a>
+            )}
+            <a class={HAS_API ? 'btn' : 'btn primary'} href="#plan">
               Try the demo
             </a>
             <span class="lede small">No account. Sample data stays in this browser.</span>

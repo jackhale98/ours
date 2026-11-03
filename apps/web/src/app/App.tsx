@@ -3,16 +3,22 @@
 import { signal } from '@preact/signals';
 import { lazy, Suspense } from 'preact/compat';
 import { useEffect } from 'preact/hooks';
+import { account, consumeSignInLink } from '../account/session';
+import { syncStatus } from '../account/sync';
 import { LogoMark } from '../Logo';
-import { names, partner, viewer } from './model';
+import { mode, names, partner, viewer } from './model';
 import { now } from './select';
 import { afterAdd, openQuick, SheetHost, sheet } from './sheets';
-import { Avatar, Icon, type IconName, ToastHost } from './ui';
+import { Avatar, Icon, type IconName, ToastHost, toast } from './ui';
 import { PlanView } from './views/Plan';
 
 const ListsView = lazy(() => import('./views/Lists').then((m) => ({ default: m.ListsView })));
 const CheckinView = lazy(() => import('./views/Checkin').then((m) => ({ default: m.CheckinView })));
 const PrivacyView = lazy(() => import('./views/Privacy').then((m) => ({ default: m.PrivacyView })));
+const StartView = lazy(() => import('./views/Start').then((m) => ({ default: m.StartView })));
+
+/** Show onboarding (sign-in, setup) instead of the tabs. */
+export const startRequested = signal(location.hash === '#start');
 
 export type Tab = 'plan' | 'lists' | 'checkin' | 'privacy';
 const TABS: [Tab, string, IconName][] = [
@@ -26,7 +32,11 @@ export const isTab = (h: string): h is Tab => TABS.some(([t]) => t === h);
 export const tab = signal<Tab>('plan');
 function syncFromHash() {
   const h = location.hash.slice(1);
-  if (isTab(h)) tab.value = h;
+  if (h === 'start') startRequested.value = true;
+  if (isTab(h)) {
+    tab.value = h;
+    startRequested.value = false;
+  }
 }
 
 export function go(t: Tab) {
@@ -63,7 +73,17 @@ export function App() {
   useEffect(() => {
     syncFromHash();
     afterAdd.value = () => go('plan');
-    const onHash = () => syncFromHash();
+    const onHash = () => {
+      if (location.hash.startsWith('#signin=')) {
+        // A magic link opened in this already-running tab.
+        void consumeSignInLink().then((r) => {
+          if (r === 'failed') toast('That sign-in link has expired or was already used.');
+          startRequested.value = true;
+        });
+        return;
+      }
+      syncFromHash();
+    };
     const onKey = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement;
       if (sheet.value || e.metaKey || e.ctrlKey || e.altKey) return;
@@ -94,9 +114,35 @@ export function App() {
   const me = viewer.value;
   const p = partner.value;
   const n = names.value;
+  const acct = account.value.status;
+  // Signed in but not set up yet (no space, or no keys on this device): onboarding only.
+  const onboarding = startRequested.value || acct === 'needs-profile' || acct === 'needs-keys';
   const View = { plan: PlanView, lists: ListsView, checkin: CheckinView, privacy: PrivacyView }[
     tab.value
   ];
+  // Render the element directly (not a new component each render) so the
+  // onboarding state, like a generated recovery phrase, survives re-renders.
+  const content = onboarding ? (
+    <StartView
+      onFinished={() => {
+        startRequested.value = false;
+        go('plan');
+      }}
+    />
+  ) : (
+    <View />
+  );
+  const demo = mode.value === 'demo';
+  const status = syncStatus.value;
+  const statusText = demo
+    ? 'Demo'
+    : status === 'synced'
+      ? 'Synced'
+      : status === 'syncing'
+        ? 'Syncing'
+        : status === 'offline'
+          ? 'Offline'
+          : 'Sync problem';
 
   return (
     <>
@@ -127,9 +173,11 @@ export function App() {
                 {n[me]} &amp; {n[p]}
               </b>
               <br />
-              Viewing as {n[me]}
+              {demo ? `Viewing as ${n[me]}` : `Signed in as ${n[me]}`}
             </span>
-            <span class="demo">Demo · sample data</span>
+            <span class="demo" role="status">
+              {demo ? 'Demo · sample data' : statusText}
+            </span>
           </div>
         </nav>
         <main id="main" tabIndex={-1}>
@@ -138,15 +186,15 @@ export function App() {
               <LogoMark size={26} />
               ours
             </a>
-            <span class="demo">Demo</span>
+            <span class="demo" role="status">
+              {statusText}
+            </span>
             <span class="pair">
               <Avatar slot={me} />
               <Avatar slot={p} />
             </span>
           </div>
-          <Suspense fallback={<p class="nothing">Loading…</p>}>
-            <View />
-          </Suspense>
+          <Suspense fallback={<p class="nothing">Loading…</p>}>{content}</Suspense>
         </main>
       </div>
       <nav class="tabbar" aria-label="Main">

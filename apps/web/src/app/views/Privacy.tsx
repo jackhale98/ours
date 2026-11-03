@@ -2,10 +2,12 @@
 import { generateRecoveryPhrase, safetyCode } from '@ours/core/crypto';
 import { signal } from '@preact/signals';
 import { useState } from 'preact/hooks';
+import { currentSafetyCode } from '../../account/session';
 import { setTheme, type ThemePref, theme } from '../../theme';
-import { names, SPACE_ID, setViewer, spaceKey, store, viewer } from '../model';
+import { mode, names, SPACE_ID, setViewer, spaceKey, store, viewer } from '../model';
 import { seedDemo } from '../seed';
 import { Avatar, Icon, toast } from '../ui';
+import { AccountCard, DevicesCard, RecoveryCard } from './AccountCards';
 import { CalendarsCard } from './Calendars';
 
 const REPO = 'https://github.com/jackhale98/ours';
@@ -24,7 +26,8 @@ export function PrivacyView() {
   const me = viewer.value;
   const n = names.value;
   const [resetArmed, setResetArmed] = useState(false);
-  const code = safetyCode(SPACE_ID, 1, spaceKey());
+  const demo = mode.value === 'demo';
+  const code = demo ? safetyCode(SPACE_ID, 1, spaceKey()) : currentSafetyCode();
   const themes: [ThemePref, string][] = [
     ['system', 'System'],
     ['light', 'Light'],
@@ -68,92 +71,102 @@ export function PrivacyView() {
           </div>
         </section>
 
-        <section class="card" aria-labelledby="dev-h">
-          <h2 class="h3" id="dev-h">
-            Devices with the key
-          </h2>
-          <ul class="devs">
-            <li>
-              <Icon name="phone" />
-              <span>{n[me]}’s phone</span>
-              <span class="when">This device</span>
-            </li>
-            <li>
-              <Icon name="laptop" />
-              <span>{n[me]}’s laptop</span>
-              <span class="when">2 hours ago</span>
-            </li>
-            <li>
-              <Icon name="phone" />
-              <span>{n[me === 'a' ? 'b' : 'a']}’s phone</span>
-              <span class="when">Active now</span>
-            </li>
-          </ul>
-          <p class="d small">
-            Sample devices. With an account you can see and remove your real ones here.
-          </p>
-        </section>
+        {demo ? (
+          <section class="card" aria-labelledby="dev-h">
+            <h2 class="h3" id="dev-h">
+              Devices with the key
+            </h2>
+            <ul class="devs">
+              <li>
+                <Icon name="phone" />
+                <span>{n[me]}’s phone</span>
+                <span class="when">This device</span>
+              </li>
+              <li>
+                <Icon name="laptop" />
+                <span>{n[me]}’s laptop</span>
+                <span class="when">2 hours ago</span>
+              </li>
+              <li>
+                <Icon name="phone" />
+                <span>{n[me === 'a' ? 'b' : 'a']}’s phone</span>
+                <span class="when">Active now</span>
+              </li>
+            </ul>
+            <p class="d small">
+              Sample devices. With an account you can see and remove your real ones here.
+            </p>
+          </section>
+        ) : (
+          <DevicesCard />
+        )}
 
         <CalendarsCard />
 
-        <section class="card" aria-labelledby="rec-h">
-          <h2 class="h3" id="rec-h">
-            Recovery phrase
-          </h2>
-          <p class="d">
-            When you set up, you write down 12 words. If you lose all your devices, they’re the only
-            way back to your private plans and lists. {n[me === 'a' ? 'b' : 'a']} can always
-            re-invite you to shared plans. We never store the words, so we can’t show them again,
-            but you can make a new phrase from any of your devices.
-          </p>
-          {example.value && (
-            <ol class="words" aria-label="Example recovery phrase">
-              {example.value.map((w, i) => (
-                <li key={`${i}-${w}`}>{w}</li>
-              ))}
-            </ol>
-          )}
-          <div class="btnrow">
-            <button
-              type="button"
-              class="btn sm"
-              onClick={() => {
-                example.value = example.value ? null : generateRecoveryPhrase();
-              }}
-            >
-              <Icon name="eye" size={15} />
-              {example.value ? 'Hide example' : 'Show an example phrase'}
-            </button>
-          </div>
-        </section>
-
-        <section class="card" aria-labelledby="as-h">
-          <h2 class="h3" id="as-h">
-            See it as {n[me === 'a' ? 'b' : 'a']}
-          </h2>
-          <p class="d">
-            Switch sides to check what your partner sees. Private plans turn into “Busy” and
-            personal lists disappear. (In the demo you can switch fully; on a real device this is a
-            preview of your own data.)
-          </p>
-          {/* biome-ignore lint/a11y/useSemanticElements: toggle-button group (aria-pressed), labelled; fieldset/legend breaks the segmented layout */}
-          <div class="seg two" role="group" aria-label="View as">
-            {(['a', 'b'] as const).map((slot) => (
+        {demo ? (
+          <section class="card" aria-labelledby="rec-h">
+            <h2 class="h3" id="rec-h">
+              Recovery phrase
+            </h2>
+            <p class="d">
+              When you set up, you write down 12 words. If you lose all your devices, they’re the
+              only way back to your private plans and lists. {n[me === 'a' ? 'b' : 'a']} can always
+              re-invite you to shared plans. We never store the words, so we can’t show them again,
+              but you can make a new phrase from any of your devices.
+            </p>
+            {example.value && (
+              <ol class="words" aria-label="Example recovery phrase">
+                {example.value.map((w, i) => (
+                  <li key={`${i}-${w}`}>{w}</li>
+                ))}
+              </ol>
+            )}
+            <div class="btnrow">
               <button
                 type="button"
-                key={slot}
-                aria-pressed={slot === me}
+                class="btn sm"
                 onClick={() => {
-                  setViewer(slot);
-                  toast(`Now viewing as ${n[slot]}.`);
+                  example.value = example.value ? null : generateRecoveryPhrase();
                 }}
               >
-                <Avatar slot={slot} small />
-                {n[slot]}
+                <Icon name="eye" size={15} />
+                {example.value ? 'Hide example' : 'Show an example phrase'}
               </button>
-            ))}
-          </div>
-        </section>
+            </div>
+          </section>
+        ) : (
+          <RecoveryCard />
+        )}
+
+        {demo && (
+          <section class="card" aria-labelledby="as-h">
+            <h2 class="h3" id="as-h">
+              See it as {n[me === 'a' ? 'b' : 'a']}
+            </h2>
+            <p class="d">
+              Switch sides to check what your partner sees. Private plans turn into “Busy” and
+              personal lists disappear. (In the demo you can switch fully; on a real device this is
+              a preview of your own data.)
+            </p>
+            {/* biome-ignore lint/a11y/useSemanticElements: toggle-button group (aria-pressed), labelled; fieldset/legend breaks the segmented layout */}
+            <div class="seg two" role="group" aria-label="View as">
+              {(['a', 'b'] as const).map((slot) => (
+                <button
+                  type="button"
+                  key={slot}
+                  aria-pressed={slot === me}
+                  onClick={() => {
+                    setViewer(slot);
+                    toast(`Now viewing as ${n[slot]}.`);
+                  }}
+                >
+                  <Avatar slot={slot} small />
+                  {n[slot]}
+                </button>
+              ))}
+            </div>
+          </section>
+        )}
 
         <section class="card" aria-labelledby="theme-h">
           <h2 class="h3" id="theme-h">
@@ -179,8 +192,10 @@ export function PrivacyView() {
             Your data
           </h2>
           <p class="d">
-            Export everything as a JSON backup, decrypted on this device. Demo data lives only in
-            this browser and never leaves it.
+            Export everything as a JSON backup, decrypted on this device.{' '}
+            {demo
+              ? 'Demo data lives only in this browser and never leaves it.'
+              : 'Keep the file somewhere safe: it isn’t encrypted.'}
           </p>
           <div class="btnrow">
             <button
@@ -188,7 +203,7 @@ export function PrivacyView() {
               class="btn sm"
               onClick={() => {
                 download(
-                  'ours-demo-export.json',
+                  demo ? 'ours-demo-export.json' : 'ours-export.json',
                   'application/json',
                   JSON.stringify(store.value.entries, null, 2),
                 );
@@ -198,23 +213,26 @@ export function PrivacyView() {
               <Icon name="download" size={15} />
               Export
             </button>
-            <button
-              type="button"
-              class="btn sm ghost"
-              onClick={() => {
-                if (!resetArmed) {
-                  setResetArmed(true);
-                  return;
-                }
-                setResetArmed(false);
-                seedDemo();
-                toast('Demo data reset.');
-              }}
-            >
-              {resetArmed ? 'Tap again to reset' : 'Reset demo data'}
-            </button>
+            {demo && (
+              <button
+                type="button"
+                class="btn sm ghost"
+                onClick={() => {
+                  if (!resetArmed) {
+                    setResetArmed(true);
+                    return;
+                  }
+                  setResetArmed(false);
+                  seedDemo();
+                  toast('Demo data reset.');
+                }}
+              >
+                {resetArmed ? 'Tap again to reset' : 'Reset demo data'}
+              </button>
+            )}
           </div>
         </section>
+        {!demo && <AccountCard />}
       </div>
     </>
   );

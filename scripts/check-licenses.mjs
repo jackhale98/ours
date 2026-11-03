@@ -10,21 +10,25 @@ const policy = JSON.parse(readFileSync(new URL('./license-policy.json', import.m
 const list = (args) =>
   JSON.parse(execFileSync('pnpm', ['licenses', 'list', '--json', ...args], { encoding: 'utf8' }));
 
+/** An SPDX "A OR B" expression is acceptable if any alternative is allowed. */
+const allowed = (license) =>
+  policy.allow.includes(license) ||
+  license
+    .replace(/[()]/g, '')
+    .split(/\s+OR\s+/)
+    .some((l) => policy.allow.includes(l.trim()));
+
 const prod = list(['--prod']);
 const all = list([]);
 const problems = [];
 
 for (const [license, pkgs] of Object.entries(prod)) {
-  if (!policy.allow.includes(license)) {
+  if (!allowed(license)) {
     problems.push(`production: ${license} — ${pkgs.map((p) => p.name).join(', ')}`);
   }
 }
 for (const [license, pkgs] of Object.entries(all)) {
-  if (
-    !policy.allow.includes(license) &&
-    !(license in policy.devOnlyExceptions) &&
-    !(license in prod)
-  ) {
+  if (!allowed(license) && !(license in policy.devOnlyExceptions) && !(license in prod)) {
     problems.push(`dev: ${license} — ${pkgs.map((p) => p.name).join(', ')}`);
   }
 }

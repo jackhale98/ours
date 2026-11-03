@@ -69,7 +69,11 @@ export function createApp() {
   app.get('/health', (c) => c.json({ ok: true }));
   // Local end-to-end tests only (see lib/email.ts). 404 unless explicitly enabled.
   app.get('/dev/outbox', (c) => {
-    if (c.env.EMAIL_PROVIDER !== 'dev-outbox') return c.json({ error: 'not_found' }, 404);
+    // Belt and braces: even if the provider were misconfigured on a deployed
+    // Worker, only requests to a local host are answered.
+    const host = new URL(c.req.url).hostname;
+    const local = host === 'localhost' || host === '127.0.0.1' || host === '[::1]';
+    if (c.env.EMAIL_PROVIDER !== 'dev-outbox' || !local) return c.json({ error: 'not_found' }, 404);
     const to = c.req.query('to');
     return c.json(devOutbox.filter((m) => !to || m.to === to.toLowerCase()));
   });

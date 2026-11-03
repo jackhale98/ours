@@ -5,7 +5,7 @@ import { num } from '../env';
 import { newId } from '../lib/crypto';
 import { HttpError } from '../lib/http';
 import { requireMember } from '../lib/members';
-import { SPACE_BYTES_SQL } from '../lib/quota';
+import { isQuotaAbort, SPACE_BYTES_SQL } from '../lib/quota';
 
 export const spaces = new Hono<AppEnv>();
 spaces.use('*', requireAuth);
@@ -28,8 +28,9 @@ spaces.post('/', async (c) => {
         "INSERT INTO memberships (space_id, user_id, role, joined_at) VALUES (?, ?, 'a', ?)",
       ).bind(id, uid, now),
     ]);
-  } catch {
-    throw new HttpError(409, 'too_many_spaces');
+  } catch (err) {
+    if (isQuotaAbort(err)) throw new HttpError(409, 'too_many_spaces');
+    throw err;
   }
   return c.json({ id, role: 'a' }, 201);
 });
