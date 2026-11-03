@@ -18,7 +18,7 @@ import {
   today,
   whenText,
 } from '../select';
-import { accept, decline, openEvent, openImport, openQuick } from '../sheets';
+import { accept, decline, openEvent, openImport, openPlanForm, openQuick } from '../sheets';
 import { Icon, Marker, MarkerKey } from '../ui';
 import { MonthView, ViewSwitch, WeekView } from './Calendar';
 
@@ -184,23 +184,45 @@ export function PlanView() {
   return (
     <>
       {header}
-      {cds.length > 0 && (
-        // biome-ignore lint/a11y/noNoninteractiveTabindex: a horizontally scrolling region must be keyboard-focusable (WCAG 2.1.1, axe scrollable-region-focusable)
-        <section class="cd-wrap" aria-label="Countdowns" tabIndex={0}>
-          <ul class="cd">
-            {cds.map((c) => (
-              <li class="cd-item" key={c.id}>
+      {/* biome-ignore lint/a11y/noNoninteractiveTabindex: a horizontally scrolling region must be keyboard-focusable (WCAG 2.1.1, axe scrollable-region-focusable) */}
+      <section class="cd-wrap" aria-label="Countdowns" tabIndex={0}>
+        <ul class="cd">
+          {cds.map((c) => (
+            <li key={c.id}>
+              <button type="button" class="cd-item" onClick={() => openEvent(c.id)}>
                 <span class="cd-n">{c.days}</span>
                 <span class="cd-l">
                   {c.days === 1 ? 'day' : 'days'} to
                   <br />
                   <b>{c.title}</b>
                 </span>
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
+              </button>
+            </li>
+          ))}
+          <li>
+            <button
+              type="button"
+              class="cd-item cd-add"
+              onClick={() =>
+                openPlanForm(null, {
+                  owner: 'both',
+                  all_day: true,
+                  start: addDays(t, 30),
+                  end: addDays(t, 31),
+                  countdown: true,
+                })
+              }
+            >
+              <Icon name="plus" size={18} />
+              <span class="cd-l">
+                {cds.length
+                  ? 'Add a milestone'
+                  : 'Count down to something: a trip, a birthday, a big day'}
+              </span>
+            </button>
+          </li>
+        </ul>
+      </section>
       {awaitingMe.value.map((e) => (
         <AskCard key={e.id} id={e.id} />
       ))}

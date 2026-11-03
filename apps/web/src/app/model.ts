@@ -281,6 +281,30 @@ export function createEvent(data: EventData): string {
   return id;
 }
 
+/**
+ * Changes a plan. A private plan's shared busy marker is kept in step (times,
+ * repeat, away, whose), so the partner's "Busy" moves with it.
+ */
+export function updateEvent(id: string, patch: Partial<EventData>): void {
+  const e = findEntry(id);
+  if (e?.rec.kind !== 'event') return;
+  bulk(() => {
+    update<'event'>(id, patch);
+    const d = { ...e.rec.data, ...patch } as EventData;
+    if (d.privacy === 'busy' && d.stub_id && findEntry(d.stub_id)) {
+      update<'busy_stub'>(d.stub_id, {
+        start: d.start,
+        end: d.end,
+        all_day: d.all_day,
+        tz: d.tz,
+        rrule: d.rrule,
+        away: d.away,
+        owner: d.owner === 'b' ? 'b' : 'a',
+      });
+    }
+  });
+}
+
 /** Deletes an event with its stub and comments. Returns undo. */
 export function deleteEvent(id: string): () => void {
   const e = findEntry(id);

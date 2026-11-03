@@ -20,7 +20,18 @@ import {
   viewer,
 } from './model';
 import { noticeAnswer, noticeNote, noticeProposal } from './notices';
-import { fmtTime, ownerLabel, type Row, relDay, repeatText, today, whenText, zone } from './select';
+import { type Draft, PlanForm } from './planform';
+import {
+  fmtTime,
+  ownerLabel,
+  planWhen,
+  type Row,
+  relDay,
+  repeatText,
+  today,
+  whenText,
+  zone,
+} from './select';
 import { Avatar, CloseButton, Icon, Marker, Sheet, Switch, toast } from './ui';
 
 export interface QuickPreset {
@@ -34,6 +45,7 @@ export interface QuickPreset {
 export type SheetState =
   | { type: 'quick'; preset: QuickPreset }
   | { type: 'event'; id: string }
+  | { type: 'edit'; id: string | null; draft?: Draft }
   | { type: 'import'; row: Row; date: string }
   | null;
 export const sheet = signal<SheetState>(null);
@@ -42,6 +54,10 @@ export const openQuick = (preset: QuickPreset = {}) => {
 };
 export const openEvent = (id: string) => {
   sheet.value = { type: 'event', id };
+};
+/** The full form: edit a plan, or make one with every option. */
+export const openPlanForm = (id: string | null, draft?: Draft) => {
+  sheet.value = { type: 'edit', id, ...(draft ? { draft } : {}) };
 };
 export const openImport = (row: Row, date: string) => {
   sheet.value = { type: 'import', row, date };
@@ -58,6 +74,8 @@ export function SheetHost() {
   if (!s) return null;
   if (s.type === 'quick') return <QuickAdd key="quick" preset={s.preset} />;
   if (s.type === 'import') return <ImportSheet key={s.row.key} row={s.row} date={s.date} />;
+  if (s.type === 'edit')
+    return <PlanForm key={s.id ?? 'new'} id={s.id} {...(s.draft ? { draft: s.draft } : {})} />;
   return <EventSheet key={s.id} id={s.id} />;
 }
 
@@ -248,6 +266,29 @@ function QuickAdd({ preset }: { preset: QuickPreset }) {
         <button class="btn primary big" type="submit" disabled={!title}>
           {proposing ? `Send to ${nameOf(p)}` : 'Add plan'}
         </button>
+        <button
+          type="button"
+          class="linkbtn"
+          onClick={() => {
+            const owner: Slot | 'both' = who === 'me' ? me : who === 'partner' ? p : 'both';
+            const start = time ? `${date}T${time}` : date;
+            openPlanForm(null, {
+              title,
+              owner,
+              all_day: !time,
+              start,
+              end: time
+                ? parsed.endTime && !timeOverride
+                  ? `${date}T${parsed.endTime}`
+                  : addWallMinutes(start, 60)
+                : addDays(date, 1),
+              location: parsed.place,
+              privacy: isPrivate ? 'busy' : 'full',
+            });
+          }}
+        >
+          More options: repeat, several days, notes, countdown
+        </button>
       </form>
     </Sheet>
   );
@@ -284,8 +325,7 @@ function EventSheet({ id }: { id: string }) {
   const p = partner.value;
   if (!entry || (entry.rec.kind !== 'event' && entry.rec.kind !== 'busy_stub')) return null;
   const r = entry.rec;
-  const date = r.data.start.slice(0, 10);
-  const when = whenText(date, r.data.all_day, r.data.start.slice(11), r.data.end.slice(11));
+  const when = planWhen(r.data);
 
   if (r.kind === 'busy_stub') {
     return (
@@ -357,6 +397,15 @@ function EventSheet({ id }: { id: string }) {
           {repeatText(e.rrule)}
         </p>
       )}
+      {(e.countdown || e.away) && (
+        <p class="loc">
+          <Icon name="flag" size={15} />
+          {[e.countdown ? 'Counting down on the Plan screen' : '', e.away ? 'Away' : '']
+            .filter(Boolean)
+            .join(' · ')}
+        </p>
+      )}
+      {e.notes && <p class="notes">{e.notes}</p>}
       {proposed && e.proposed_by !== me && (
         <div class="ask-actions">
           <button
@@ -502,6 +551,9 @@ function EventSheet({ id }: { id: string }) {
       </div>
       {canDelete && (
         <div class="sh-foot">
+          <button type="button" class="btn sm" onClick={() => openPlanForm(id)}>
+            Edit
+          </button>
           <button type="button" class="linkbtn danger" onClick={del}>
             {armed
               ? 'Tap again to confirm'

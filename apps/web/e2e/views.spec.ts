@@ -74,7 +74,9 @@ test('month: arrow keys move the chosen day; a day can be added to', async ({ pa
   const after = await page.locator('.mcell[aria-pressed="true"]').getAttribute('data-date');
   expect(after).not.toBe(before);
   // Focus followed the chosen day.
-  expect(await page.evaluate(() => document.activeElement?.getAttribute('data-date'))).toBe(after);
+  await expect
+    .poll(() => page.evaluate(() => document.activeElement?.getAttribute('data-date')))
+    .toBe(after);
   await page.keyboard.press('ArrowDown');
   const week = await page.locator('.mcell[aria-pressed="true"]').getAttribute('data-date');
   expect(Date.parse(week ?? '') - Date.parse(after ?? '')).toBe(7 * 86_400_000);

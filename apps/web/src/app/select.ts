@@ -71,6 +71,21 @@ export function fmtTime(hhmm: string): string {
   return `${h % 12 || 12}${m ? `:${String(m).padStart(2, '0')}` : ''} ${ap}`;
 }
 
+/** When a plan happens, including plans over several days. */
+export function planWhen(d: { start: string; end: string; all_day: boolean }): string {
+  const first = d.start.slice(0, 10);
+  if (d.all_day) {
+    const last = addDays(d.end.slice(0, 10), -1);
+    if (last > first) return `${fmtLong(first)} – ${fmtLong(last)} · All day`;
+    return whenText(first, true);
+  }
+  const lastDay = d.end.slice(0, 10);
+  if (lastDay > first) {
+    return `${fmtLong(first)}, ${fmtTime(d.start.slice(11))} – ${fmtLong(lastDay)}, ${fmtTime(d.end.slice(11))}`;
+  }
+  return whenText(first, false, d.start.slice(11), d.end.slice(11));
+}
+
 export function whenText(date: string, allDay: boolean, start?: string, end?: string): string {
   const n = daysFrom(today.value, date);
   const day = relDay(date) + (n > 1 && n < 7 ? `, ${monDay(date)}` : '');

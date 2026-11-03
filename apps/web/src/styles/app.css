@@ -2108,3 +2108,40 @@ dialog.sheet::backdrop {
   top: 2px;
   right: 2px;
 }
+
+/* Countdown tiles are buttons now (open the plan); the last one adds a milestone. */
+.cd > li {
+  display: flex;
+}
+button.cd-item {
+  min-height: var(--tap);
+  text-align: left;
+}
+.cd-add {
+  border-style: dashed;
+  color: var(--muted);
+  max-width: 220px;
+}
+
+/* Full plan form */
+.planform .row2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+.formerr {
+  color: var(--danger);
+  font-weight: 600;
+  margin: 0;
+}
+.notes {
+  white-space: pre-wrap;
+  margin: 4px 0 0;
+  color: var(--ink);
+}
+.sh-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
