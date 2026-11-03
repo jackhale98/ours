@@ -20,6 +20,18 @@
   font-size: clamp(2rem, 7vw, 2.75rem);
 }
 
+.cta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+  margin-top: 6px;
+}
+
+.small {
+  font-size: 0.84375rem;
+}
+
 .page.top {
   padding-bottom: 0;
 }

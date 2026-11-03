@@ -1,0 +1,199 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+/** Shared UI pieces: icons, ownership markers, avatars, toast, sheet. */
+import { signal } from '@preact/signals';
+import type { ComponentChildren } from 'preact';
+import { useEffect, useRef } from 'preact/hooks';
+import { nameOf, type Slot } from './model';
+
+const PATHS = {
+  lock: '<rect x="5" y="11" width="14" height="9.5" rx="2.2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>',
+  plus: '<path d="M12 5v14M5 12h14"/>',
+  cal: '<rect x="3.5" y="5" width="17" height="15.5" rx="2.5"/><path d="M3.5 10h17M8.5 3v4M15.5 3v4"/>',
+  list: '<path d="M9.5 6.5h10.5M9.5 12h10.5M9.5 17.5h10.5"/><path d="M4 6.5l1.2 1.2L7.2 5.5M4 12l1.2 1.2L7.2 11"/><circle cx="5.5" cy="17.5" r="1.2"/>',
+  rings: '<circle cx="9" cy="12" r="6"/><circle cx="15" cy="12" r="6"/>',
+  shield:
+    '<path d="M12 3l7.5 3v5.5c0 4.6-3.1 7.9-7.5 9.5-4.4-1.6-7.5-4.9-7.5-9.5V6z"/><path d="M9 12l2 2 4-4"/>',
+  chat: '<path d="M4.5 5.5h15v10h-9.5l-5.5 4z"/>',
+  pin: '<path d="M12 21s-6.5-5.6-6.5-11a6.5 6.5 0 0 1 13 0c0 5.4-6.5 11-6.5 11z"/><circle cx="12" cy="10" r="2.2"/>',
+  repeat:
+    '<path d="M17 3l3 3-3 3"/><path d="M4 12v-1.5A4.5 4.5 0 0 1 8.5 6H20"/><path d="M7 21l-3-3 3-3"/><path d="M20 12v1.5a4.5 4.5 0 0 1-4.5 4.5H4"/>',
+  shuffle:
+    '<path d="M3 7h3.5c4.5 0 6 10 10.5 10H21"/><path d="M18 14l3 3-3 3"/><path d="M3 17h3.5c1.4 0 2.5-1 3.4-2.4"/><path d="M13.6 9.4C14.6 8 15.6 7 17 7h4"/><path d="M18 4l3 3-3 3"/>',
+  check: '<path d="M5 12.5l4.5 4.5L19 7.5"/>',
+  x: '<path d="M6 6l12 12M18 6L6 18"/>',
+  send: '<path d="M5 12h12M12 6l6 6-6 6"/>',
+  eye: '<path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="2.8"/>',
+  phone: '<rect x="7" y="2.5" width="10" height="19" rx="2.5"/><path d="M11 18.5h2"/>',
+  laptop: '<rect x="4.5" y="5" width="15" height="10.5" rx="1.5"/><path d="M2.5 19h19"/>',
+  clock: '<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>',
+  download: '<path d="M12 4v11M7 10l5 5 5-5M5 20h14"/>',
+} as const;
+export type IconName = keyof typeof PATHS;
+
+export function Icon({ name, size = 18 }: { name: IconName; size?: number }) {
+  return (
+    <svg
+      class="ic"
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      stroke-width="1.8"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+      aria-hidden="true"
+      dangerouslySetInnerHTML={{ __html: PATHS[name] }}
+    />
+  );
+}
+
+export const colorVar = (slot: Slot) => (slot === 'a' ? 'var(--person-a)' : 'var(--person-b)');
+
+/** Ownership marker: filled (confirmed), ring (tentative), hatched (busy). Never colour alone. */
+export function Marker({ owner, mode }: { owner: Slot | 'both'; mode?: 'dash' | 'busy' }) {
+  const cls = `mk${owner === 'both' ? ' mk-ours' : ''}${mode ? ` ${mode}` : ''}`;
+  return owner === 'both' ? (
+    <span class={cls} aria-hidden="true">
+      <i class="a" />
+      <i class="b" />
+    </span>
+  ) : (
+    <span class={cls} aria-hidden="true">
+      <i style={{ '--c': colorVar(owner) }} />
+    </span>
+  );
+}
+
+export function Avatar({ slot, small }: { slot: Slot; small?: boolean }) {
+  return (
+    <span class={`av${small ? ' sm' : ''}`} style={{ '--c': colorVar(slot) }} aria-hidden="true">
+      {nameOf(slot).charAt(0)}
+    </span>
+  );
+}
+
+/* ---------- toast ---------- */
+
+interface Toast {
+  id: number;
+  message: string;
+  undo?: () => void;
+}
+export const toastState = signal<Toast | null>(null);
+let toastTimer: ReturnType<typeof setTimeout> | undefined;
+
+export function toast(message: string, undo?: () => void): void {
+  clearTimeout(toastTimer);
+  toastState.value = { id: Date.now(), message, ...(undo ? { undo } : {}) };
+  toastTimer = setTimeout(() => {
+    toastState.value = null;
+  }, 5000);
+}
+
+export function ToastHost() {
+  const t = toastState.value;
+  // The live region stays mounted so screen readers announce changes.
+  return (
+    <div class="toast-host" role="status" aria-live="polite">
+      {t && (
+        <div class="toast" key={t.id}>
+          <span>{t.message}</span>
+          {t.undo && (
+            <button
+              type="button"
+              onClick={() => {
+                t.undo?.();
+                toastState.value = null;
+              }}
+            >
+              Undo
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ---------- sheet ---------- */
+
+/**
+ * Modal sheet on the native <dialog>: focus is trapped by the browser,
+ * Escape closes it, and focus returns to the element that opened it.
+ */
+export function Sheet({
+  labelledBy,
+  onClose,
+  children,
+}: {
+  labelledBy: string;
+  onClose: () => void;
+  children: ComponentChildren;
+}) {
+  const ref = useRef<HTMLDialogElement>(null);
+  useEffect(() => {
+    const dialog = ref.current;
+    const opener = document.activeElement as HTMLElement | null;
+    if (dialog && !dialog.open) dialog.showModal();
+    const auto = dialog?.querySelector<HTMLElement>('[data-autofocus]');
+    auto?.focus();
+    return () => {
+      if (opener?.isConnected) opener.focus({ preventScroll: true });
+    };
+  }, []);
+  return (
+    // biome-ignore lint/a11y/useKeyWithClickEvents: backdrop click is a mouse shortcut; Escape (onCancel) and the Close button cover keyboard users
+    <dialog
+      ref={ref}
+      class="sheet"
+      aria-labelledby={labelledBy}
+      onCancel={(e) => {
+        e.preventDefault();
+        onClose();
+      }}
+      onClick={(e) => {
+        if (e.target === ref.current) onClose(); // backdrop click
+      }}
+    >
+      <div class="sheet-body">{children}</div>
+    </dialog>
+  );
+}
+
+export function CloseButton({ onClose }: { onClose: () => void }) {
+  return (
+    <button type="button" class="iconbtn" onClick={onClose} aria-label="Close">
+      <Icon name="x" />
+    </button>
+  );
+}
+
+export function Switch({
+  checked,
+  onChange,
+  label,
+  hint,
+}: {
+  checked: boolean;
+  onChange: (v: boolean) => void;
+  label: string;
+  hint: string;
+}) {
+  return (
+    <label class="sw">
+      <input
+        type="checkbox"
+        role="switch"
+        checked={checked}
+        aria-checked={checked}
+        onChange={(e) => onChange(e.currentTarget.checked)}
+      />
+      <span class="track" />
+      <span class="sw-t">
+        {label}
+        <small>{hint}</small>
+      </span>
+    </label>
+  );
+}

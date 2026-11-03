@@ -4,6 +4,10 @@ import './styles/base.css';
 import './styles/landing.css';
 import { APP_NAME } from './config';
 import { LogoMark } from './Logo';
+import { applyTheme } from './theme';
+
+const APP_ROUTES = new Set(['plan', 'lists', 'checkin', 'privacy']);
+const isAppRoute = () => APP_ROUTES.has(location.hash.slice(1));
 
 function Landing() {
   return (
@@ -25,6 +29,12 @@ function Landing() {
             A shared week, plans you can propose and accept, lists with owners, and a ten-minute
             weekly check-in. Everything is encrypted on your devices before it syncs.
           </p>
+          <div class="cta">
+            <a class="btn primary" href="#plan">
+              Try the demo
+            </a>
+            <span class="lede small">No account. Sample data stays in this browser.</span>
+          </div>
         </section>
         <div class="cards">
           <section class="card">
@@ -52,11 +62,36 @@ function Landing() {
             </p>
           </section>
         </div>
-        <p class="foot">Early build. No accounts yet.</p>
+        <p class="foot">
+          Early build: accounts and sync are not live yet.{' '}
+          <a href="https://github.com/jackhale98/ours">Source code</a>
+        </p>
       </main>
     </>
   );
 }
 
+applyTheme();
 const root = document.getElementById('app');
-if (root) render(<Landing />, root);
+
+async function route() {
+  if (!root) return;
+  if (isAppRoute()) {
+    // The app (and its stylesheet) loads only when someone opens it.
+    const { mountApp } = await import('./app/mount');
+    await mountApp(root);
+  } else {
+    render(<Landing />, root);
+  }
+}
+
+let inApp = isAppRoute();
+window.addEventListener('hashchange', () => {
+  if (isAppRoute() !== inApp) {
+    inApp = isAppRoute();
+    render(null, root as HTMLElement);
+    void route();
+    window.scrollTo(0, 0);
+  }
+});
+void route();

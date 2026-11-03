@@ -54,11 +54,19 @@ Timed events store wall-clock `start`/`end` (`YYYY-MM-DDTHH:mm`) plus an IANA zo
 | 0 | Scaffold, CI, docs, ADRs | Done (pending owner decisions in ADRs 0001, 0006) |
 | 1 | Core library | Done; independent crypto review signed off with conditions (`docs/reviews/0001-core-crypto.md`) |
 | 2 | API: auth, spaces, invites, backups, sync, quotas | Not started |
-| 3 | App shell, PWA, local store, onboarding, demo mode, policy pages | Not started |
-| 4 | MVP features | Not started |
+| 3 | App shell, PWA, local store, onboarding, demo mode, policy pages | In progress: app shell and demo mode live at the Pages URL (local store in `apps/web/src/app/model.ts`, writes validated with the same schema and scope policy as encrypted sync); PWA, IndexedDB, outbox, onboarding and policy pages to do |
+| 4 | MVP features | UI built against the demo store: plan, quick add, proposals, event sheet with notes, lists with assignees, private lists, busy-only events, undo toasts, check-in; E2E + axe in CI. Needs sync to be real |
 | 5 | Notifications | Not started |
 | 6 | Couple features, feed, export | Not started |
 | 7 | Hardening and release | Not started |
+
+## Web app structure
+
+- `src/main.tsx` renders the static landing page; app routes (`#plan`, `#lists`, `#checkin`, `#privacy`) lazy-load `src/app/` and its stylesheet, so the landing page ships ~11 KB of JS.
+- `src/app/model.ts` is the local record store (signals). Records are `DecodedRecord`s; visibility mirrors a real device (user-scope records only for their owner; a partner's private event appears only as its busy stub).
+- `src/app/select.ts` derives the agenda, proposals, countdowns and free evenings from the store using `@ours/core/time`.
+- Views: `views/Plan.tsx` (main chunk), `Lists`, `Checkin`, `Privacy` (lazy). Sheets use native `<dialog>`.
+- Start-up is split into separate tasks (load, seed, compute agenda, render) to keep Total Blocking Time low on slow phones.
 
 ## UX reference
 

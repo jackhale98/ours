@@ -2,7 +2,7 @@
 
 A free, open-source, end-to-end encrypted planner for couples: a shared calendar, proposals, lists, and a weekly check-in.
 
-> **Status: early development (phase 0–1 of 7).** The core encryption, data and parsing library exists and is tested. There is no usable app or public instance yet. See [the build plan phases](docs/ARCHITECTURE.md#delivery-phases).
+> **Status: early development.** The core encryption, data and parsing library is built and independently reviewed, and the full app UI runs as a **local demo** with sample data: **[try it](https://jackhale98.github.io/ours/)**. Accounts, sync and notifications are not live yet. See [the build plan phases](docs/ARCHITECTURE.md#delivery-phases).
 
 ## What is protected, and what is not
 

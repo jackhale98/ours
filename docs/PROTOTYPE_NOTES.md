@@ -33,7 +33,7 @@
 | "See it as *partner*" switch | Kept as a **preview**: renders your own data with your private items masked the way your partner sees them. In demo mode it switches sides fully. | A real device cannot decrypt the partner's private items, and shouldn't. |
 | "Decline" deletes the event | Decline = tombstone + encrypted notification to the proposer | Same UX; plan's proposal flow. |
 | Chores come from the list named "Home" | A settings field chooses which list is "chores" (default: first shared check list) | No magic names; phase 6. |
-| "Both free this evening" = no event touching 17:00 onwards and nobody away | `time/free.ts` with a 17:00–22:00 window per viewer zone; an evening counts as free if both have ≥ 2 h free in it; `away` all-day events block it | Same idea, zone-aware. Thresholds configurable later. |
+| "Both free this evening" = no event touching 17:00 onwards and nobody away | Same rule, zone-aware: nobody has anything between 17:00 and 22:00 in the viewer's zone, and nobody has an `away` all-day event that day (`apps/web/src/app/select.ts`, using `time/free.ts`) | Window configurable later. |
 | No notification or quiet-hours settings | Added to the Privacy tab (phase 5) | Plan section 8. |
 | Data in `localStorage` | Encrypted IndexedDB + outbox | Plan section 2; demo mode keeps sample data local. |
 

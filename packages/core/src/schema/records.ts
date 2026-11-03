@@ -24,13 +24,21 @@ const Slot = v.picklist(['a', 'b']);
 const Owner = v.picklist(['a', 'b', 'both']);
 const Color = v.pipe(v.string(), v.regex(/^#[0-9a-f]{6}$/i));
 
+const zoneCache = new Map<string, boolean>();
+
+/** True for IANA zones the runtime knows. Cached: constructing Intl formatters is slow. */
 export function isTimeZone(tz: string): boolean {
-  try {
-    new Intl.DateTimeFormat('en-US', { timeZone: tz });
-    return true;
-  } catch {
-    return false;
+  let ok = zoneCache.get(tz);
+  if (ok === undefined) {
+    try {
+      new Intl.DateTimeFormat('en-US', { timeZone: tz });
+      ok = true;
+    } catch {
+      ok = false;
+    }
+    if (zoneCache.size < 1000) zoneCache.set(tz, ok);
   }
+  return ok;
 }
 
 interface WhenFields {
@@ -105,6 +113,7 @@ export const CommentData = v.strictObject({
 export const CHECKIN_STEPS = ['week', 'chores', 'time', 'note'] as const;
 export const CheckinData = v.strictObject({
   date: LocalDate,
+  author: Slot,
   steps_done: v.pipe(v.array(v.picklist(CHECKIN_STEPS)), v.maxLength(CHECKIN_STEPS.length)),
   note: v.nullable(Text(4000)),
 });
@@ -125,6 +134,8 @@ export const SettingsData = v.strictObject({
   default_reminder_minutes: v.optional(v.nullable(v.pipe(v.number(), v.integer(), v.minValue(0)))),
   members: v.optional(v.strictObject({ a: v.optional(Member), b: v.optional(Member) })),
   theme: v.optional(v.picklist(['system', 'light', 'dark'])),
+  /** Which shared check list the weekly check-in uses for chores. */
+  chores_list: v.optional(v.nullable(RefId)),
 });
 
 export const KIND_SCHEMAS = {

@@ -75,7 +75,7 @@ const samples: DecodedRecord[] = [
   {
     kind: 'checkin',
     deleted: false,
-    data: { date: '2026-11-08', steps_done: ['week', 'chores'], note: null },
+    data: { date: '2026-11-08', author: 'a', steps_done: ['week', 'chores'], note: null },
     ...meta,
   },
   {
