@@ -86,8 +86,13 @@ async function until(check: () => boolean, ms = 2000) {
 
 const SPACE_KEY = crypto.getRandomValues(new Uint8Array(32));
 
-function sealed(spaceId: string, title: string, opts: { not_before?: number } = {}) {
-  const s = sealNotification(SPACE_KEY, spaceId, 1, {
+function sealed(
+  spaceId: string,
+  title: string,
+  opts: { not_before?: number; recipient?: string; scope?: 'space' | 'user' } = {},
+) {
+  const to = { space_id: spaceId, scope: opts.scope ?? 'space', recipient: opts.recipient ?? 'u' };
+  const s = sealNotification(SPACE_KEY, to, 1, {
     title,
     body: 'Friday 7 PM',
     ...(opts.not_before ? { not_before: opts.not_before } : {}),
@@ -236,7 +241,12 @@ describe('push routes', () => {
     const title = 'Sam asked: Dinner at Rosa’s';
     const res = await call('/push/notify', {
       token: sam.token,
-      body: { space_id: spaceId, key_version: 1, to: 'partner', payload: sealed(spaceId, title) },
+      body: {
+        space_id: spaceId,
+        key_version: 1,
+        to: 'partner',
+        payload: sealed(spaceId, title, { recipient: alex.userId }),
+      },
     });
     expect(res.status).toBe(200);
     expect(res.json).toEqual({ queued: 1, deferred: 0 });
@@ -255,13 +265,14 @@ describe('push routes', () => {
     expect(wrapper).not.toContain('Dinner');
     expect(wrapper).not.toContain('Friday');
     const w = JSON.parse(wrapper);
-    expect(Object.keys(w).sort()).toEqual(['k', 'p', 's', 'v']);
+    expect(Object.keys(w).sort()).toEqual(['c', 'k', 'p', 's', 'v']);
+    expect(w.c).toBe('s');
     expect(w.s).toBe(spaceId);
     // Alex's device, holding the space key, can read it.
     const bytes = fromB64Url(w.p);
     const opened = openNotification(
       SPACE_KEY,
-      spaceId,
+      { space_id: spaceId, scope: 'space', recipient: alex.userId },
       w.k,
       { nonce: bytes.slice(0, 24), ciphertext: bytes.slice(24) },
       Date.now(),
@@ -420,5 +431,182 @@ describe('push routes', () => {
       .bind(spaceId)
       .first<{ n: number }>();
     expect(rem?.n).toBe(0);
+  });
+
+  it('decodes payloads defensively (review I1)', async () => {
+    const { sam, spaceId } = await couple();
+    const res = await call('/push/notify', {
+      token: sam.token,
+      body: {
+        space_id: spaceId,
+        key_version: 1,
+        to: 'partner',
+        payload: { nonce: 'A'.repeat(32), ciphertext: 'A'.repeat(41) },
+      },
+    });
+    expect(res.status).toBe(422);
+  });
+
+  it('a leaked endpoint cannot take over someone else’s subscription (review L1)', async () => {
+    const a = await signIn(uniqueEmail());
+    const b = await signIn(uniqueEmail());
+    const phone = await browser();
+    await call('/push/subscription', { token: a.token, method: 'PUT', body: phone.subscription });
+    const other = await browser();
+    const hijack = await call('/push/subscription', {
+      token: b.token,
+      method: 'PUT',
+      body: { ...other.subscription, endpoint: phone.endpoint },
+    });
+    expect(hijack.status).toBe(409);
+    expect((await call('/push/config', { token: a.token })).json.subscribed).toBe(true);
+    // The same browser (same keys) may move to another account.
+    const move = await call('/push/subscription', {
+      token: b.token,
+      method: 'PUT',
+      body: phone.subscription,
+    });
+    expect(move.status).toBe(200);
+  });
+
+  it('reminders are personal-key payloads, future only (review H1, M1)', async () => {
+    const { sam, spaceId } = await couple();
+    const phone = await browser();
+    await call('/push/subscription', { token: sam.token, method: 'PUT', body: phone.subscription });
+    const now = Date.now();
+    const put = await call('/push/reminders', {
+      token: sam.token,
+      method: 'PUT',
+      body: {
+        space_id: spaceId,
+        items: [
+          { fire_at: now - 30_000, key_version: 1, payload: sealed(spaceId, 'past') },
+          {
+            fire_at: now + 60_000,
+            key_version: 1,
+            payload: sealed(spaceId, 'soon', { scope: 'user', recipient: sam.userId }),
+          },
+        ],
+      },
+    });
+    expect(put.json.stored).toBe(1);
+    const sent = capturePushes();
+    await sendDue(env, now + 61_000);
+    const mine = sent.filter((x) => x.url === phone.endpoint);
+    expect(mine).toHaveLength(1);
+    const w = JSON.parse(
+      new TextDecoder().decode(await phone.decrypt(mine[0]?.body as Uint8Array)),
+    );
+    expect(w.c).toBe('u');
+  });
+
+  it('is fair across people and bounded per run (review M1)', async () => {
+    const busy = await couple();
+    const quiet = await couple();
+    const busyPhone = await browser();
+    const quietPhone = await browser();
+    await call('/push/subscription', {
+      token: busy.sam.token,
+      method: 'PUT',
+      body: busyPhone.subscription,
+    });
+    await call('/push/subscription', {
+      token: quiet.sam.token,
+      method: 'PUT',
+      body: quietPhone.subscription,
+    });
+    const now = Date.now();
+    const many = Array.from({ length: 60 }, (_, i) => ({
+      fire_at: now + 1000 + i,
+      key_version: 1,
+      payload: sealed(busy.spaceId, `r${i}`),
+    }));
+    await call('/push/reminders', {
+      token: busy.sam.token,
+      method: 'PUT',
+      body: { space_id: busy.spaceId, items: many },
+    });
+    await call('/push/reminders', {
+      token: quiet.sam.token,
+      method: 'PUT',
+      body: {
+        space_id: quiet.spaceId,
+        items: [{ fire_at: now + 5000, key_version: 1, payload: sealed(quiet.spaceId, 'q') }],
+      },
+    });
+    const sent = capturePushes();
+    await sendDue(env, now + 10_000);
+    expect(sent.filter((x) => x.url === quietPhone.endpoint)).toHaveLength(1);
+    expect(sent.filter((x) => x.url === busyPhone.endpoint).length).toBeLessThanOrEqual(5);
+    expect(sent.length).toBeLessThanOrEqual(40);
+  });
+
+  it('retries after a failed run and keeps working subscriptions (review M2)', async () => {
+    const { sam, spaceId } = await couple();
+    const phone = await browser();
+    await call('/push/subscription', { token: sam.token, method: 'PUT', body: phone.subscription });
+    const now = Date.now();
+    await call('/push/reminders', {
+      token: sam.token,
+      method: 'PUT',
+      body: {
+        space_id: spaceId,
+        items: [{ fire_at: now + 1000, key_version: 1, payload: sealed(spaceId, 'x') }],
+      },
+    });
+    // The push service is down for a while: many failures, subscription kept.
+    capturePushes(503);
+    for (let i = 0; i < 12; i++) await sendDue(env, now + 2000 + i * 6 * 60_000);
+    const sub = await env.DB.prepare('SELECT failures FROM push_subs WHERE endpoint = ?')
+      .bind(phone.endpoint)
+      .first<{ failures: number }>();
+    expect(sub?.failures).toBe(0);
+    // A reminder that failed once is retried by a later run.
+    await call('/push/reminders', {
+      token: sam.token,
+      method: 'PUT',
+      body: {
+        space_id: spaceId,
+        items: [{ fire_at: now + 120_000, key_version: 1, payload: sealed(spaceId, 'y') }],
+      },
+    });
+    capturePushes(503);
+    await sendDue(env, now + 121_000);
+    const sent = capturePushes(201);
+    await sendDue(env, now + 121_000 + 6 * 60_000);
+    expect(sent.filter((x) => x.url === phone.endpoint)).toHaveLength(1);
+  });
+
+  it('caps held notifications per sender and drops them when the sender leaves (L2, L6)', async () => {
+    const { sam, alex, spaceId } = await couple();
+    const nowMin = new Date().getUTCHours() * 60 + new Date().getUTCMinutes();
+    await call('/push/quiet', {
+      token: alex.token,
+      method: 'PUT',
+      body: { start: (nowMin + 1440 - 60) % 1440, end: (nowMin + 60) % 1440, tz: 'UTC' },
+    });
+    for (let i = 0; i < 25; i++) {
+      const r = await call('/push/notify', {
+        token: sam.token,
+        body: {
+          space_id: spaceId,
+          key_version: 1,
+          to: 'partner',
+          payload: sealed(spaceId, `${i}`),
+        },
+      });
+      expect(r.json.deferred).toBe(1);
+    }
+    const count = async () =>
+      (
+        await env.DB.prepare(
+          "SELECT COUNT(*) AS n FROM reminders WHERE target_user_id = ? AND kind = 'deferred'",
+        )
+          .bind(alex.userId)
+          .first<{ n: number }>()
+      )?.n;
+    expect(await count()).toBe(20);
+    await call(`/spaces/${spaceId}/membership`, { token: sam.token, method: 'DELETE' });
+    expect(await count()).toBe(0);
   });
 });

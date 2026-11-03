@@ -45,6 +45,7 @@ export {
   MAX_LIFETIME_MS,
   NotificationBody,
   type NotificationInput,
+  type NotifyTarget,
   type OpenedNotification,
   openNotification,
   sealNotification,

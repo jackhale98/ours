@@ -5,10 +5,13 @@
  * - This device subscribes with its browser push service; the Worker learns
  *   the push address and keys for it, nothing else.
  * - Telling the partner about a proposal or an answer: the text is sealed
- *   here with the space key (core sealNotification) and sent after the record
- *   itself has synced, so a tap always finds the plan.
+ *   here with the space key for the partner's user id (core
+ *   sealNotification) and sent after the record itself has synced, so a tap
+ *   always finds the plan.
  * - Reminders: this device works out its upcoming reminders (8 days ahead),
- *   seals each and replaces the server's list whenever they change.
+ *   seals each with the person's own key (never the shared one, so a
+ *   reminder about a private plan can't be read by the partner) and
+ *   replaces the server's list whenever they change.
  */
 import {
   type KeyRing,
@@ -43,6 +46,9 @@ interface Context {
   ring: KeyRing;
   spaceId: string;
   slot: Slot;
+  userId: string;
+  /** The partner's user id, once they have joined. */
+  partnerId: () => string | null;
   /** Resolves once local changes have reached the server. */
   synced: () => Promise<void>;
 }
@@ -74,6 +80,12 @@ function supported(): boolean {
 export async function startNotifications(next: Context): Promise<void> {
   ctx = next;
   await refreshPushState();
+}
+
+/** Stops this browser receiving pushes, without asking the server (e.g. after a 401). */
+export async function unsubscribeLocally(): Promise<void> {
+  const sub = await (await registration())?.pushManager.getSubscription();
+  await sub?.unsubscribe().catch(() => false);
 }
 
 export function stopNotifications(): void {
@@ -174,12 +186,7 @@ export async function disablePush(): Promise<void> {
   const sub = await (await registration())?.pushManager.getSubscription();
   await sub?.unsubscribe().catch(() => false);
   await api('/push/subscription', { method: 'DELETE' }).catch(() => undefined);
-  if (ctx) {
-    await api('/push/reminders', {
-      method: 'PUT',
-      body: { space_id: ctx.spaceId, items: [] },
-    }).catch(() => undefined);
-  }
+  // Reminders stay: this person's other devices may still want them.
   lastReminderSig = null;
   await kvSet('reminders-sig', null);
   pushState.value = 'off';
@@ -192,10 +199,25 @@ export async function setQuietHours(q: QuietHours | null): Promise<void> {
 
 /* ---------- sending ---------- */
 
-function sealFor(input: NotificationInput) {
+type Recipient = 'partner' | 'me' | 'reminder';
+
+/**
+ * Seals for one recipient. Partner notifications and tests use the space
+ * key; reminders use the personal key. The recipient's user id is bound in.
+ */
+function sealFor(input: NotificationInput, recipient: Recipient) {
   if (!ctx) return null;
-  const key = ctx.ring.currentSpaceKey(ctx.spaceId);
-  const s = sealNotification(key.key, ctx.spaceId, key.version, input);
+  const to = recipient === 'partner' ? ctx.partnerId() : ctx.userId;
+  if (!to) return null;
+  const scope = recipient === 'reminder' ? 'user' : 'space';
+  const key =
+    scope === 'user' ? ctx.ring.currentPersonalKey() : ctx.ring.currentSpaceKey(ctx.spaceId);
+  const s = sealNotification(
+    key.key,
+    { space_id: ctx.spaceId, scope, recipient: to },
+    key.version,
+    input,
+  );
   return {
     key_version: key.version,
     payload: { nonce: toBase64Url(s.nonce), ciphertext: toBase64Url(s.ciphertext) },
@@ -215,11 +237,14 @@ export function notifyPartner(input: NotificationInput): void {
   void c
     .synced()
     .then(() => {
-      const sealed = sealFor({
-        ...input,
-        title: truncate(input.title, 120),
-        body: truncate(input.body, 400),
-      });
+      const sealed = sealFor(
+        {
+          ...input,
+          title: truncate(input.title, 120),
+          body: truncate(input.body, 400),
+        },
+        'partner',
+      );
       if (!sealed) return;
       return api('/push/notify', {
         body: { space_id: c.spaceId, to: 'partner', ...sealed },
@@ -231,11 +256,14 @@ export function notifyPartner(input: NotificationInput): void {
 /** Sends a test notification to this person's own devices. */
 export async function sendTest(): Promise<void> {
   if (!ctx) return;
-  const sealed = sealFor({
-    title: 'Notifications are on',
-    body: `This is how ${nameOf(ctx.slot === 'a' ? 'b' : 'a')}’s plans and your reminders will look.`,
-    kind: 'test',
-  });
+  const sealed = sealFor(
+    {
+      title: 'Notifications are on',
+      body: `This is how ${nameOf(ctx.slot === 'a' ? 'b' : 'a')}’s plans and your reminders will look.`,
+      kind: 'test',
+    },
+    'me',
+  );
   if (!sealed) return;
   try {
     await api('/push/notify', { body: { space_id: ctx.spaceId, to: 'me', ...sealed } });
@@ -319,14 +347,17 @@ export async function syncReminders(): Promise<void> {
   lastReminderSig ??= (await kvGet<string | null>('reminders-sig')) ?? null;
   if (sig === lastReminderSig) return;
   const items = planned.flatMap((p) => {
-    const sealed = sealFor({
-      title: truncate(p.title, 120),
-      body: truncate(p.body, 400),
-      record_id: p.record_id,
-      kind: 'reminder',
-      not_before: p.fire_at,
-      ttl_ms: 2 * 3_600_000,
-    });
+    const sealed = sealFor(
+      {
+        title: truncate(p.title, 120),
+        body: truncate(p.body, 400),
+        record_id: p.record_id,
+        kind: 'reminder',
+        not_before: p.fire_at,
+        ttl_ms: 2 * 3_600_000,
+      },
+      'reminder',
+    );
     return sealed ? [{ fire_at: p.fire_at, ...sealed }] : [];
   });
   try {

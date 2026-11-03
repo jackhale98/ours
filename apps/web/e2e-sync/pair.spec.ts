@@ -46,7 +46,7 @@ async function recoveryPhrase(page: Page) {
   await page.getByRole('button', { name: 'I’ve written them down' }).click();
   for (const label of await page.locator('label[for^="rc-"]').allTextContents()) {
     const n = Number(label.replace(/\D/g, ''));
-    await page.getByRole('textbox', { name: label }).fill(words[n - 1] ?? '');
+    await page.getByRole('textbox', { name: label, exact: true }).fill(words[n - 1] ?? '');
   }
   await page.getByRole('button', { name: 'Confirm' }).click();
   return words;
@@ -223,7 +223,7 @@ test('sign up, pair, compare safety codes, and sync plans both ways', async ({ b
     expect(pushBody.includes(Buffer.from(secret))).toBe(false);
   }
   const wrapper = await openWebPush(pushBody, alexSub);
-  expect(Object.keys(JSON.parse(wrapper)).sort()).toEqual(['k', 'p', 's', 'v']);
+  expect(Object.keys(JSON.parse(wrapper)).sort()).toEqual(['c', 'k', 'p', 's', 'v']);
   for (const secret of ['Dinner', 'Vic', 'Sam asked']) expect(wrapper).not.toContain(secret);
 
   // Hand it to Alex's service worker the way the browser would: it decrypts
@@ -253,18 +253,26 @@ test('sign up, pair, compare safety codes, and sync plans both ways', async ({ b
       { timeout: 10_000 },
     )
     .toEqual([{ title: 'Sam asked: Dinner', body: expect.stringContaining('7 PM') }]);
-  // A replayed push is dropped: still one notification.
+  // A replayed push is never shown again: only a generic notice, no text.
   await cdp.send('ServiceWorker.deliverPushMessage', {
     origin: 'http://localhost:4174',
     registrationId: await registration,
     data: wrapper,
   });
-  await alex.waitForTimeout(500);
-  expect(
-    await alex.evaluate(
-      async () => (await (await navigator.serviceWorker.ready).getNotifications()).length,
-    ),
-  ).toBe(1);
+  await expect
+    .poll(
+      () =>
+        alex.evaluate(async () =>
+          (await (await navigator.serviceWorker.ready).getNotifications())
+            .map((n) => `${n.title}|${n.body}`)
+            .sort(),
+        ),
+      { timeout: 10_000 },
+    )
+    .toEqual([
+      'Ours|Something changed. Open Ours to see it.',
+      expect.stringMatching(/^Sam asked: Dinner\|/),
+    ]);
 
   // Sam also adds a private plan.
   await sam.keyboard.press('n');

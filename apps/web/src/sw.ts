@@ -45,6 +45,7 @@ interface Wrapper {
   v: 1;
   s: string; // space id
   k: number; // key version
+  c: 's' | 'u'; // sealed with the space key, or this person's own key
   p: string; // nonce || ciphertext, base64url
 }
 
@@ -53,7 +54,13 @@ const ICON = new URL('icon-192.png', self.registration.scope).href;
 function parseWrapper(data: PushMessageData | null): Wrapper | null {
   try {
     const w = data?.json() as Partial<Wrapper> | undefined;
-    if (w?.v === 1 && typeof w.s === 'string' && typeof w.k === 'number' && typeof w.p === 'string')
+    if (
+      w?.v === 1 &&
+      typeof w.s === 'string' &&
+      typeof w.k === 'number' &&
+      (w.c === 's' || w.c === 'u') &&
+      typeof w.p === 'string'
+    )
       return w as Wrapper;
   } catch {
     // fall through
@@ -73,54 +80,80 @@ async function tellClients(): Promise<void> {
   for (const c of clients) c.postMessage({ type: 'ours-sync' });
 }
 
+/** Browsers require a visible notification for every push; say as little as possible. */
+async function showGeneric(): Promise<void> {
+  await self.registration.showNotification('Ours', {
+    body: 'Something changed. Open Ours to see it.',
+    icon: ICON,
+    tag: 'ours-generic',
+  });
+}
+
+/** Serialises updates to the replay list across concurrent pushes. */
+async function withSeenLock<T>(fn: () => Promise<T>): Promise<T> {
+  const locks = (self.navigator as Navigator & { locks?: LockManager }).locks;
+  return locks ? locks.request('ours-seen-nids', fn) : fn();
+}
+
 async function handlePush(data: PushMessageData | null): Promise<void> {
   const now = Date.now();
   const wrapper = parseWrapper(data);
   const ring = wrapper ? await loadRing().catch(() => null) : null;
   let key: Uint8Array | null = null;
   try {
-    if (wrapper && ring) key = ring.spaceKey(wrapper.s, wrapper.k);
+    if (wrapper && ring)
+      key = wrapper.c === 'u' ? ring.personalKey(wrapper.k) : ring.spaceKey(wrapper.s, wrapper.k);
   } catch {
     key = null;
   }
-  if (!wrapper || !key) {
-    // Signed out, or keys not on this device yet. Browsers require a visible
-    // notification for each push, so say as little as possible.
-    await self.registration.showNotification('Ours', {
-      body: 'Something changed. Open Ours to see it.',
-      icon: ICON,
-      tag: 'ours-generic',
-    });
+  if (!wrapper || !ring || !key) {
+    // Signed out, or keys not on this device yet.
+    await showGeneric();
     return;
   }
-  const seen = await seenIds(now);
   const bytes = fromBase64Url(wrapper.p);
-  let opened: ReturnType<typeof openNotification>;
-  try {
-    opened = openNotification(
-      key,
-      wrapper.s,
-      wrapper.k,
-      { nonce: bytes.subarray(0, 24), ciphertext: bytes.subarray(24) },
-      now,
-      (nid) => nid in seen,
-    );
-  } catch (err) {
-    if (!(err instanceof CryptoError)) throw err;
-    return; // Not authentic: show nothing.
-  }
+  const target = {
+    space_id: wrapper.s,
+    scope: wrapper.c === 'u' ? ('user' as const) : ('space' as const),
+    // Bound to this person: a payload meant for someone else fails to open.
+    recipient: ring.userId,
+  };
+  const openKey = key;
+  const shown = await withSeenLock(async () => {
+    const seen = await seenIds(now);
+    let opened: ReturnType<typeof openNotification>;
+    try {
+      opened = openNotification(
+        openKey,
+        target,
+        wrapper.k,
+        { nonce: bytes.subarray(0, 24), ciphertext: bytes.subarray(24) },
+        now,
+        (nid) => nid in seen,
+      );
+    } catch (err) {
+      if (!(err instanceof CryptoError)) throw err;
+      return null; // Not authentic, or not for this person.
+    }
+    if (opened.status !== 'show') return null;
+    seen[opened.body.nid] = opened.body.expires_at;
+    await kvSet('seen-nids', seen);
+    return opened.body;
+  });
   await tellClients();
-  if (opened.status !== 'show') return;
-  const body = opened.body;
-  seen[body.nid] = body.expires_at;
-  await kvSet('seen-nids', seen);
-  await self.registration.showNotification(body.title, {
-    body: body.body,
+  if (!shown) {
+    // Early, expired, replayed or not authentic: never show its claimed text,
+    // but don't leave the push silent (browsers penalise that).
+    await showGeneric();
+    return;
+  }
+  await self.registration.showNotification(shown.title, {
+    body: shown.body,
     icon: ICON,
-    tag: body.nid,
-    data: { record_id: body.record_id ?? null, kind: body.kind ?? null },
+    tag: shown.nid,
+    data: { record_id: shown.record_id ?? null, kind: shown.kind ?? null },
     // Actions show on Chrome, Edge and Android; elsewhere a tap opens the plan.
-    ...(body.kind === 'proposal'
+    ...(shown.kind === 'proposal'
       ? {
           actions: [
             { action: 'yes', title: 'Yes, add it' },
@@ -139,10 +172,12 @@ self.addEventListener('notificationclick', (event) => {
   event.notification.close();
   const data = (event.notification.data ?? {}) as { record_id?: string | null; kind?: string };
   const id = data.record_id && /^[A-Za-z0-9-]{1,64}$/.test(data.record_id) ? data.record_id : null;
-  const hash = event.action === 'yes' && id ? `#accept=${id}` : id ? `#plan&open=${id}` : '#plan';
+  const hash = id ? `#plan&open=${id}` : '#plan';
   const url = new URL(hash, self.registration.scope).href;
   event.waitUntil(
     (async () => {
+      // "Yes" is passed to the app out of band, so no link can accept a plan.
+      if (event.action === 'yes' && id) await kvSet('pending-accept', { id, at: Date.now() });
       const clients = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
       const existing = clients.find((c) => c.url.startsWith(self.registration.scope));
       if (existing) {

@@ -64,8 +64,23 @@ describe('cross-context rejection with the same key', () => {
   it('a record ciphertext is not a notification, and vice versa', () => {
     const key = generateKey();
     const rec = encryptRecord(key, { ...header, space_id: 's' }, utf8('{}'));
-    expect(() => openNotification(key, 's', 1, rec, 0, () => false)).toThrow(CryptoError);
-    const n = sealNotification(key, 's', 1, { title: 't', body: 'b' }, 0);
+    expect(() =>
+      openNotification(
+        key,
+        { space_id: 's', scope: 'space', recipient: 'u' },
+        1,
+        rec,
+        0,
+        () => false,
+      ),
+    ).toThrow(CryptoError);
+    const n = sealNotification(
+      key,
+      { space_id: 's', scope: 'space', recipient: 'u' },
+      1,
+      { title: 't', body: 'b' },
+      0,
+    );
     expect(() => decryptRecord(key, { ...header, space_id: 's' }, n)).toThrow(CryptoError);
   });
 

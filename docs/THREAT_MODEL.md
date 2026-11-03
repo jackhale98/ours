@@ -62,6 +62,8 @@ Every stored field (keep in sync with `apps/api/migrations` and the privacy poli
 
 **Notifications (ADR 0010):** the sender's device seals the text with the space key (`sealNotification`, with an authenticated time window and replay id). The Worker wraps that ciphertext in Web Push encryption (RFC 8291) for each of the recipient's subscriptions and signs with its VAPID key. The push service sees neither layer's content; the Worker never sees the text. The recipient's service worker opens it with the key ring on that device and drops replays and stale messages. The server learns who notified whom and when, and when reminders fire. The push endpoint allowlist stops the Worker being used to send requests anywhere else.
 
+Notification metadata the server and push services can observe (security review 0003, L5): who notifies whom and when; reminder fire times, which with common lead times (15 minutes, 1 hour, 1 day, or 9 AM for all-day plans) hint at when plans start, including private ones; the time zone if quiet hours are set; payload sizes rounded up to 64 bytes; and the `Urgency` header, which is `high` for reminders and `normal` for partner notifications. Reminders are sealed with the person's own key, never the shared space key, and every notification's authenticated data names its recipient, so the server cannot show one person's reminder or message on the other's device.
+
 The service worker precaches only the static build (HTML, JS, CSS, fonts, icons). It never caches API responses; user data lives only in the encrypted IndexedDB store.
 
 Cloudflare's own invocation logs are switched off (`observability.logs.invocation_logs: false`, enforced by `pnpm check:worker`), because they would record request URLs and client IP addresses.

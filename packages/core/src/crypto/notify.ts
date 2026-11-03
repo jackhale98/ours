@@ -9,6 +9,13 @@
  *   scheduled reminders work and the server cannot deliver them early or late;
  * - `nid` is a random id; the receiver remembers ids it has shown (until
  *   `expires_at`) and drops replays.
+ *
+ * The AAD names the recipient (a user id) and which key sealed it:
+ * - 'space': notifications for the partner, under the shared space key;
+ * - 'user': reminders for oneself, under the personal key, so a reminder
+ *   about a private plan can never be opened by the partner.
+ * The server therefore cannot redirect a payload to someone else: their
+ * device checks the AAD against its own user id and fails closed.
  */
 import * as v from 'valibot';
 import { buildAad } from './aad';
@@ -48,14 +55,25 @@ export const MAX_LIFETIME_MS = 7 * DEFAULT_TTL_MS;
 /** Tolerated clock difference between sender and receiver. */
 export const CLOCK_SKEW_MS = 5 * 60 * 1000;
 
-function notifyAad(spaceId: string, keyVersion: number): Uint8Array {
+export interface NotifyTarget {
+  space_id: string;
+  /** Which key sealed it: the shared space key, or the recipient's personal key. */
+  scope: 'space' | 'user';
+  /** User id of the person it is for. */
+  recipient: string;
+}
+
+function notifyAad(to: NotifyTarget, keyVersion: number): Uint8Array {
   assertVersion(keyVersion);
-  return buildAad([LABELS.notify, spaceId, keyVersion]);
+  if (to.scope !== 'space' && to.scope !== 'user')
+    throw new CryptoError('format', 'Invalid notification scope');
+  if (!to.recipient) throw new CryptoError('format', 'Missing recipient');
+  return buildAad([LABELS.notify, to.space_id, keyVersion, to.scope, to.recipient]);
 }
 
 export function sealNotification(
   key: Uint8Array,
-  spaceId: string,
+  to: NotifyTarget,
   keyVersion: number,
   input: NotificationInput,
   now = Date.now(),
@@ -68,7 +86,7 @@ export function sealNotification(
     expires_at: not_before + ttl_ms,
   });
   if (!result.success) throw new CryptoError('format', 'Invalid notification');
-  return seal(key, utf8(JSON.stringify(result.output)), notifyAad(spaceId, keyVersion));
+  return seal(key, utf8(JSON.stringify(result.output)), notifyAad(to, keyVersion));
 }
 
 export type OpenedNotification =
@@ -82,13 +100,13 @@ export type OpenedNotification =
  */
 export function openNotification(
   key: Uint8Array,
-  spaceId: string,
+  to: NotifyTarget,
   keyVersion: number,
   sealed: Sealed,
   now: number,
   seen: (nid: string) => boolean,
 ): OpenedNotification {
-  const bytes = open(key, sealed.nonce, sealed.ciphertext, notifyAad(spaceId, keyVersion));
+  const bytes = open(key, sealed.nonce, sealed.ciphertext, notifyAad(to, keyVersion));
   let json: unknown;
   try {
     json = JSON.parse(fromUtf8(bytes));

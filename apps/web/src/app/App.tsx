@@ -3,6 +3,7 @@
 import { signal } from '@preact/signals';
 import { lazy, Suspense } from 'preact/compat';
 import { useEffect } from 'preact/hooks';
+import { kvGet, kvSet } from '../account/db';
 import { account, consumeSignInLink, syncNow } from '../account/session';
 import { syncStatus } from '../account/sync';
 import { LogoMark } from '../Logo';
@@ -30,8 +31,12 @@ const TABS: [Tab, string, IconName][] = [
 export const isTab = (h: string): h is Tab => TABS.some(([t]) => t === h);
 
 export const tab = signal<Tab>('plan');
-/** Links from notifications: #accept=<id> (the "Yes" action) and #plan&open=<id>. */
-async function deepLink(action: 'accept' | 'open', id: string): Promise<void> {
+/**
+ * Links from notifications: #plan&open=<id>. A "Yes" tapped on the
+ * notification arrives separately (the service worker records it on this
+ * device), so a link on its own can only open a plan, never accept it.
+ */
+async function deepLink(id: string): Promise<void> {
   history.replaceState(null, '', '#plan');
   tab.value = 'plan';
   startRequested.value = false;
@@ -42,15 +47,18 @@ async function deepLink(action: 'accept' | 'open', id: string): Promise<void> {
     return;
   }
   const d = e.rec.data;
-  if (action === 'accept' && d.status === 'proposed' && d.proposed_by === partner.value) accept(id);
+  const pending = await kvGet<{ id: string; at: number }>('pending-accept').catch(() => undefined);
+  if (pending) await kvSet('pending-accept', null).catch(() => undefined);
+  const yes = pending?.id === id && Date.now() - pending.at < 10 * 60_000;
+  if (yes && d.status === 'proposed' && d.proposed_by === partner.value) accept(id);
   else openEvent(id);
 }
 
 function syncFromHash() {
   const h = location.hash.slice(1);
-  const link = /^(accept|plan&open)=([A-Za-z0-9-]{1,64})$/.exec(h);
-  if (link?.[2]) {
-    void deepLink(link[1] === 'accept' ? 'accept' : 'open', link[2]);
+  const link = /^plan&open=([A-Za-z0-9-]{1,64})$/.exec(h);
+  if (link?.[1]) {
+    void deepLink(link[1]);
     return;
   }
   if (h === 'start') startRequested.value = true;

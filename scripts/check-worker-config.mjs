@@ -16,17 +16,27 @@ if (obs?.enabled && obs?.logs?.invocation_logs !== false) {
   );
 }
 if (obs?.traces?.enabled) problems.push('observability.traces must stay disabled');
-for (const secret of [
-  'VAPID_PRIVATE_KEY',
-  'EMAIL_API_KEY',
-  'TURNSTILE_SECRET',
-  'RATE_LIMIT_SALT',
-]) {
-  if (config.vars && secret in config.vars)
-    problems.push(`${secret} must be a secret (wrangler secret put), not a var`);
+// Every vars block: top level and each environment (security review 0003, I5).
+const varBlocks = [
+  ['vars', config.vars],
+  ...Object.entries(config.env ?? {}).map(([name, e]) => [`env.${name}.vars`, e?.vars]),
+];
+for (const [where, vars] of varBlocks) {
+  if (!vars) continue;
+  for (const secret of [
+    'VAPID_PRIVATE_KEY',
+    'EMAIL_API_KEY',
+    'TURNSTILE_SECRET',
+    'RATE_LIMIT_SALT',
+  ]) {
+    if (secret in vars)
+      problems.push(`${where}.${secret} must be a secret (wrangler secret put), not a var`);
+  }
+  if (vars.EMAIL_PROVIDER === 'dev-outbox')
+    problems.push(`${where}.EMAIL_PROVIDER 'dev-outbox' is for local tests only`);
+  if (vars.VAPID_SUBJECT && !/^(mailto:|https:\/\/)/.test(vars.VAPID_SUBJECT))
+    problems.push(`${where}.VAPID_SUBJECT must start with mailto: or https://`);
 }
-if (config.vars?.EMAIL_PROVIDER === 'dev-outbox')
-  problems.push("EMAIL_PROVIDER 'dev-outbox' is for local tests only");
 if (problems.length) {
   console.error(`Worker config check failed:\n  ${problems.join('\n  ')}`);
   process.exit(1);

@@ -25,6 +25,7 @@ import { isPushEndpoint } from '../push/vapid';
 
 export const MAX_REMINDERS = 64;
 const HORIZON_MS = 8 * 86_400_000;
+/** Held notifications per sender and target during quiet hours. */
 const MAX_DEFERRED_PER_TARGET = 20;
 const NONCE_BYTES = 24;
 const TAG_BYTES = 16;
@@ -38,8 +39,14 @@ const SealedPayload = v.strictObject({
 });
 
 function pack(p: v.InferOutput<typeof SealedPayload>): Uint8Array {
-  const nonce = fromB64Url(p.nonce);
-  const ct = fromB64Url(p.ciphertext);
+  let nonce: Uint8Array;
+  let ct: Uint8Array;
+  try {
+    nonce = fromB64Url(p.nonce);
+    ct = fromB64Url(p.ciphertext);
+  } catch {
+    throw new HttpError(422, 'invalid', 'Malformed payload');
+  }
   if (nonce.length !== NONCE_BYTES || ct.length < TAG_BYTES)
     throw new HttpError(422, 'invalid', 'Malformed payload');
   const out = new Uint8Array(nonce.length + ct.length);
@@ -95,6 +102,19 @@ push.put('/subscription', async (c) => {
   if (fromB64Url(input.p256dh)[0] !== 4) throw new HttpError(422, 'invalid', 'Bad key');
   await rateLimit(c.env, `push-sub:${c.var.user.id}`, 30, 3600);
   const device = c.var.session.device_id;
+  // The same browser can move between accounts, but only by proving it holds
+  // the subscription (same keys). A leaked endpoint alone can't take it over.
+  const existing = await c.env.DB.prepare(
+    'SELECT user_id, p256dh, auth FROM push_subs WHERE endpoint = ?',
+  )
+    .bind(input.endpoint)
+    .first<{ user_id: string; p256dh: string; auth: string }>();
+  if (
+    existing &&
+    existing.user_id !== c.var.user.id &&
+    (existing.p256dh !== input.p256dh || existing.auth !== input.auth)
+  )
+    throw new HttpError(409, 'endpoint_in_use');
   await c.env.DB.batch([
     c.env.DB.prepare('DELETE FROM push_subs WHERE endpoint = ? OR device_id = ?').bind(
       input.endpoint,
@@ -178,23 +198,20 @@ push.post('/notify', async (c) => {
       sendNow.push(t.user_id);
       continue;
     }
-    const held = await c.env.DB.prepare(
-      `INSERT INTO reminders (id, space_id, target_user_id, kind, fire_at, key_version, payload, created_at)
-       SELECT ?1, ?2, ?3, 'deferred', ?4, ?5, ?6, ?7
-        WHERE (SELECT COUNT(*) FROM reminders WHERE target_user_id = ?3 AND kind = 'deferred') < ?8`,
-    )
-      .bind(
-        newId(),
-        input.space_id,
-        t.user_id,
-        until,
-        input.key_version,
-        payload,
-        now,
-        MAX_DEFERRED_PER_TARGET,
-      )
-      .run();
-    if (held.meta.changes) deferred++;
+    // At most MAX_DEFERRED per sender and target: a new one replaces the oldest.
+    await c.env.DB.batch([
+      c.env.DB.prepare(
+        `DELETE FROM reminders WHERE id IN (
+           SELECT id FROM reminders
+            WHERE target_user_id = ?1 AND sender_user_id = ?2 AND kind = 'deferred'
+            ORDER BY created_at DESC LIMIT -1 OFFSET ?3)`,
+      ).bind(t.user_id, uid, MAX_DEFERRED_PER_TARGET - 1),
+      c.env.DB.prepare(
+        `INSERT INTO reminders (id, space_id, target_user_id, sender_user_id, kind, scope, fire_at, key_version, payload, created_at)
+         VALUES (?, ?, ?, ?, 'deferred', 'space', ?, ?, ?, ?)`,
+      ).bind(newId(), input.space_id, t.user_id, uid, until, input.key_version, payload, now),
+    ]);
+    deferred++;
   }
   // Sending happens after the response, so its timing reveals nothing to the caller.
   c.executionCtx.waitUntil(
@@ -203,7 +220,7 @@ push.post('/notify', async (c) => {
         deliver(
           c.env,
           target,
-          { space_id: input.space_id, key_version: input.key_version, payload },
+          { space_id: input.space_id, key_version: input.key_version, scope: 'space', payload },
           { ttlSeconds: ttl, urgency: 'normal' },
           now,
         ),
@@ -239,16 +256,26 @@ push.put('/reminders', async (c) => {
     if (item.fire_at > now + HORIZON_MS)
       throw new HttpError(422, 'invalid', 'Reminders reach at most 8 days ahead');
   }
-  const future = input.items.filter((i) => i.fire_at >= now - 60_000);
+  // Only future reminders: past ones would jump the queue for everyone (review M1).
+  const future = input.items.filter((i) => i.fire_at > now);
   await c.env.DB.batch([
     c.env.DB.prepare(
       "DELETE FROM reminders WHERE target_user_id = ? AND space_id = ? AND kind = 'reminder'",
     ).bind(uid, input.space_id),
     ...future.map((item) =>
       c.env.DB.prepare(
-        `INSERT INTO reminders (id, space_id, target_user_id, kind, fire_at, key_version, payload, created_at)
-         VALUES (?, ?, ?, 'reminder', ?, ?, ?, ?)`,
-      ).bind(newId(), input.space_id, uid, item.fire_at, item.key_version, pack(item.payload), now),
+        `INSERT INTO reminders (id, space_id, target_user_id, sender_user_id, kind, scope, fire_at, key_version, payload, created_at)
+         VALUES (?, ?, ?, ?, 'reminder', 'user', ?, ?, ?, ?)`,
+      ).bind(
+        newId(),
+        input.space_id,
+        uid,
+        uid,
+        item.fire_at,
+        item.key_version,
+        pack(item.payload),
+        now,
+      ),
     ),
   ]);
   return c.json({ ok: true, stored: future.length });

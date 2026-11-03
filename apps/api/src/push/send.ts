@@ -25,6 +25,8 @@ const MAX_FAILURES = 10;
 export interface Sealed {
   space_id: string;
   key_version: number;
+  /** Which key sealed it: the space key (partner notifications) or the recipient's personal key (reminders). */
+  scope: 'space' | 'user';
   /** nonce || ciphertext */
   payload: Uint8Array;
 }
@@ -45,6 +47,7 @@ export function wrap(message: Sealed): Uint8Array {
       v: 1,
       s: message.space_id,
       k: message.key_version,
+      c: message.scope === 'user' ? 'u' : 's',
       p: toB64Url(message.payload),
     }),
   );
@@ -57,32 +60,47 @@ interface SubRow {
   auth: string;
 }
 
-/** Sends to every subscription of `userId`. Returns how many push services accepted it. */
+export interface DeliveryResult {
+  /** Push services that accepted it. */
+  delivered: number;
+  /** Some sends failed in a way worth retrying (network, 429, 5xx). */
+  transient: boolean;
+  /** Outgoing requests made (Workers cap subrequests per invocation). */
+  requests: number;
+}
+
+/** Sends to every subscription of `userId`, making at most `budget` requests. */
 export async function deliver(
   env: Env,
   userId: string,
   message: Sealed,
-  opts: { ttlSeconds: number; urgency: 'normal' | 'high' },
+  opts: { ttlSeconds: number; urgency: 'normal' | 'high'; budget?: number },
   now = Date.now(),
-): Promise<number> {
+): Promise<DeliveryResult> {
+  const result: DeliveryResult = { delivered: 0, transient: false, requests: 0 };
   const keys = vapidKeys(env);
-  if (!keys) return 0;
+  if (!keys) return result;
   const subs = await env.DB.prepare(
     'SELECT id, endpoint, p256dh, auth FROM push_subs WHERE user_id = ?',
   )
     .bind(userId)
     .all<SubRow>();
   const body = wrap(message);
-  let delivered = 0;
+  const budget = opts.budget ?? 20;
   const updates: D1PreparedStatement[] = [];
   for (const sub of subs.results) {
     if (!isPushEndpoint(sub.endpoint)) {
       updates.push(env.DB.prepare('DELETE FROM push_subs WHERE id = ?').bind(sub.id));
       continue;
     }
+    if (result.requests >= budget) {
+      result.transient = true;
+      break;
+    }
     let status = 0;
     try {
       const encrypted = await encryptPush(body, b64(sub.p256dh), b64(sub.auth));
+      result.requests++;
       if (env.EMAIL_PROVIDER === 'dev-outbox') {
         devPushes.push({
           endpoint: sub.endpoint,
@@ -91,27 +109,27 @@ export async function deliver(
           urgency: opts.urgency,
         });
         if (devPushes.length > 50) devPushes.shift();
-        delivered++;
-        continue;
+        status = 201;
+      } else {
+        const res = await fetch(sub.endpoint, {
+          method: 'POST',
+          headers: {
+            Authorization: await vapidAuthorization(sub.endpoint, keys, now),
+            'Content-Encoding': 'aes128gcm',
+            'Content-Type': 'application/octet-stream',
+            TTL: String(Math.max(0, Math.floor(opts.ttlSeconds))),
+            Urgency: opts.urgency,
+          },
+          body: encrypted,
+          redirect: 'manual',
+        });
+        status = res.status;
       }
-      const res = await fetch(sub.endpoint, {
-        method: 'POST',
-        headers: {
-          Authorization: await vapidAuthorization(sub.endpoint, keys, now),
-          'Content-Encoding': 'aes128gcm',
-          'Content-Type': 'application/octet-stream',
-          TTL: String(Math.max(0, Math.floor(opts.ttlSeconds))),
-          Urgency: opts.urgency,
-        },
-        body: encrypted,
-        redirect: 'manual',
-      });
-      status = res.status;
     } catch {
       status = 0;
     }
     if (status >= 200 && status < 300) {
-      delivered++;
+      result.delivered++;
       updates.push(
         env.DB.prepare('UPDATE push_subs SET last_ok = ?, failures = 0 WHERE id = ?').bind(
           now,
@@ -121,10 +139,14 @@ export async function deliver(
     } else if (status === 404 || status === 410) {
       // The browser dropped this subscription.
       updates.push(env.DB.prepare('DELETE FROM push_subs WHERE id = ?').bind(sub.id));
-    } else {
+    } else if (status === 400 || status === 403 || status === 413) {
+      // A definite rejection of this subscription (bad keys, wrong VAPID key).
+      // Network errors, 429 and 5xx say nothing about the subscription.
       updates.push(
         env.DB.prepare('UPDATE push_subs SET failures = failures + 1 WHERE id = ?').bind(sub.id),
       );
+    } else {
+      result.transient = true;
     }
   }
   if (updates.length) {
@@ -136,7 +158,7 @@ export async function deliver(
     );
     await env.DB.batch(updates);
   }
-  return delivered;
+  return result;
 }
 
 function b64(text: string): Uint8Array {
@@ -177,48 +199,98 @@ export function quietUntil(
   return now - (now % 60_000) + wait * 60_000;
 }
 
-/** Cron: sends due reminders and notifications held for quiet hours. */
+/** Rows per user per run, rows per run, and outgoing requests per run (Workers Free allows 50 subrequests). */
+const PER_USER_PER_RUN = 5;
+const ROWS_PER_RUN = 40;
+const REQUESTS_PER_RUN = 40;
+/** A claimed row that was not finished is retried after this long, up to MAX_ATTEMPTS times. */
+const CLAIM_MS = 5 * 60_000;
+const MAX_ATTEMPTS = 3;
+/** Later than this, a reminder is no use: dropped unsent. */
+const TOO_LATE_MS = 3_600_000;
+
+/**
+ * Cron: sends due reminders and notifications held for quiet hours.
+ * Fair across users (a few rows each per run), bounded per run, and
+ * retried: rows are claimed, and deleted only once handled.
+ */
 export async function sendDue(env: Env, now = Date.now()): Promise<number> {
   if (!vapidKeys(env)) return 0;
+  await env.DB.prepare('DELETE FROM reminders WHERE fire_at < ? OR attempts >= ?')
+    .bind(now - TOO_LATE_MS, MAX_ATTEMPTS)
+    .run();
   const due = await env.DB.prepare(
-    `SELECT r.id, r.space_id, r.target_user_id, r.key_version, r.payload, r.fire_at
-       FROM reminders r
-      WHERE r.fire_at <= ?
-      ORDER BY r.fire_at
-      LIMIT 100`,
+    `SELECT id, space_id, target_user_id, key_version, scope, payload FROM (
+       SELECT r.*, ROW_NUMBER() OVER (PARTITION BY target_user_id ORDER BY fire_at) AS n
+         FROM reminders r
+        WHERE fire_at <= ?1 AND (claimed_at IS NULL OR claimed_at < ?2)
+     ) WHERE n <= ?3
+     ORDER BY fire_at
+     LIMIT ?4`,
   )
-    .bind(now)
+    .bind(now, now - CLAIM_MS, PER_USER_PER_RUN, ROWS_PER_RUN)
     .all<{
       id: string;
       space_id: string;
       target_user_id: string;
       key_version: number;
+      scope: 'space' | 'user';
       payload: ArrayBuffer;
-      fire_at: number;
     }>();
   if (!due.results.length) return 0;
   // Claim first, so an overlapping run cannot send the same one twice.
   const claimed = await env.DB.batch(
-    due.results.map((r) => env.DB.prepare('DELETE FROM reminders WHERE id = ?').bind(r.id)),
+    due.results.map((r) =>
+      env.DB.prepare(
+        'UPDATE reminders SET claimed_at = ?1, attempts = attempts + 1 WHERE id = ?2 AND (claimed_at IS NULL OR claimed_at < ?3)',
+      ).bind(now, r.id, now - CLAIM_MS),
+    ),
   );
   let sent = 0;
+  let requests = 0;
+  const done: string[] = [];
+  const release: string[] = [];
   for (const [i, r] of due.results.entries()) {
     if (!claimed[i]?.meta.changes) continue;
-    // Too late to be useful, or the target left the space.
-    if (r.fire_at < now - 3_600_000) continue;
+    if (requests >= REQUESTS_PER_RUN) {
+      release.push(r.id);
+      continue;
+    }
     const member = await env.DB.prepare(
       'SELECT 1 FROM memberships WHERE space_id = ? AND user_id = ?',
     )
       .bind(r.space_id, r.target_user_id)
       .first();
-    if (!member) continue;
-    sent += await deliver(
+    if (!member) {
+      done.push(r.id);
+      continue;
+    }
+    const result = await deliver(
       env,
       r.target_user_id,
-      { space_id: r.space_id, key_version: r.key_version, payload: bytesOf(r.payload) },
-      { ttlSeconds: 3600, urgency: 'high' },
+      {
+        space_id: r.space_id,
+        key_version: r.key_version,
+        scope: r.scope,
+        payload: bytesOf(r.payload),
+      },
+      { ttlSeconds: 3600, urgency: 'high', budget: REQUESTS_PER_RUN - requests },
       now,
     );
+    requests += result.requests;
+    sent += result.delivered;
+    // Delivered to at least one device, or nothing worth retrying: finished.
+    if (result.delivered > 0 || !result.transient) done.push(r.id);
   }
+  const finish = [
+    ...done.map((id) => env.DB.prepare('DELETE FROM reminders WHERE id = ?').bind(id)),
+    // Not attempted this run for lack of budget: unclaim without using up an attempt.
+    ...release.map((id) =>
+      env.DB.prepare(
+        'UPDATE reminders SET claimed_at = NULL, attempts = attempts - 1 WHERE id = ?',
+      ).bind(id),
+    ),
+  ];
+  if (finish.length) await env.DB.batch(finish);
   return sent;
 }

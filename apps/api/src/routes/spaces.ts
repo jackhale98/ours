@@ -43,10 +43,10 @@ spaces.delete('/:id/membership', async (c) => {
   await c.env.DB.batch([
     c.env.DB.prepare('DELETE FROM records WHERE space_id = ? AND owner_user_id = ?').bind(id, uid),
     c.env.DB.prepare('DELETE FROM memberships WHERE space_id = ? AND user_id = ?').bind(id, uid),
-    c.env.DB.prepare('DELETE FROM reminders WHERE space_id = ? AND target_user_id = ?').bind(
-      id,
-      uid,
-    ),
+    // Their reminders, and notifications they sent that are held for quiet hours.
+    c.env.DB.prepare(
+      'DELETE FROM reminders WHERE space_id = ? AND (target_user_id = ? OR sender_user_id = ?)',
+    ).bind(id, uid, uid),
     c.env.DB.prepare(
       'DELETE FROM spaces WHERE id = ? AND NOT EXISTS (SELECT 1 FROM memberships WHERE space_id = ?)',
     ).bind(id, id),
