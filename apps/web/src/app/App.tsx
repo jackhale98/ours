@@ -8,6 +8,7 @@ import { account, consumeSignInLink, newKeysFrom, syncNow } from '../account/ses
 import { needsNewKeys, syncStatus } from '../account/sync';
 import { LogoMark } from '../Logo';
 import { findEntry, mode, nameOf, names, partner, viewer } from './model';
+import { type PlanMode, planHash, setPlanMode } from './planview';
 import { now } from './select';
 import { accept, afterAdd, openEvent, openQuick, SheetHost, sheet } from './sheets';
 import { Avatar, Icon, type IconName, ToastHost, toast } from './ui';
@@ -62,6 +63,14 @@ function syncFromHash() {
     return;
   }
   if (h === 'start') startRequested.value = true;
+  const view = /^plan\/(week|month)$/.exec(h);
+  if (view?.[1]) {
+    setPlanMode(view[1] as PlanMode, false);
+    tab.value = 'plan';
+    startRequested.value = false;
+    return;
+  }
+  if (h === 'plan') setPlanMode('agenda', false);
   if (isTab(h)) {
     tab.value = h;
     startRequested.value = false;
@@ -70,7 +79,9 @@ function syncFromHash() {
 
 export function go(t: Tab) {
   sheet.value = null;
-  if (location.hash !== `#${t}`) location.hash = t;
+  // The Plan tab reopens in the view last used on this device.
+  const hash = t === 'plan' ? planHash() : t;
+  if (location.hash !== `#${hash}`) location.hash = hash;
   tab.value = t;
   window.scrollTo(0, 0);
   document.getElementById('main')?.focus({ preventScroll: true });

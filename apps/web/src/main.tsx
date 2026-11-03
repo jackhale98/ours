@@ -8,7 +8,9 @@ import { applyTheme } from './theme';
 
 const APP_ROUTES = new Set(['plan', 'lists', 'checkin', 'privacy', 'start']);
 const isAppRoute = () =>
-  APP_ROUTES.has(location.hash.slice(1)) || location.hash.startsWith('#signin=');
+  APP_ROUTES.has(location.hash.slice(1)) ||
+  /^#plan[/&]/.test(location.hash) ||
+  location.hash.startsWith('#signin=');
 
 function Landing() {
   return (

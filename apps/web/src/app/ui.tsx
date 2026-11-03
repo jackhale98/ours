@@ -27,6 +27,9 @@ const PATHS = {
   laptop: '<rect x="4.5" y="5" width="15" height="10.5" rx="1.5"/><path d="M2.5 19h19"/>',
   clock: '<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>',
   download: '<path d="M12 4v11M7 10l5 5 5-5M5 20h14"/>',
+  prev: '<path d="M14.5 6l-6 6 6 6"/>',
+  next: '<path d="M9.5 6l6 6-6 6"/>',
+  flag: '<path d="M6 21V4.5M6 5h11l-2.5 4 2.5 4H6"/>',
 } as const;
 export type IconName = keyof typeof PATHS;
 

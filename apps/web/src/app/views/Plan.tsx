@@ -3,6 +3,7 @@
 import { addDays } from '@ours/core/time';
 import { signal } from '@preact/signals';
 import { commentsFor, nameOf, names, partner, viewer } from '../model';
+import { planMode } from '../planview';
 import {
   agenda,
   awaitingMe,
@@ -19,10 +20,11 @@ import {
 } from '../select';
 import { accept, decline, openEvent, openImport, openQuick } from '../sheets';
 import { Icon, Marker, MarkerKey } from '../ui';
+import { MonthView, ViewSwitch, WeekView } from './Calendar';
 
 const weeks = signal<1 | 2>(1);
 
-function EventRow({ row, date }: { row: Row; date: string }) {
+export function EventRow({ row, date }: { row: Row; date: string }) {
   const me = viewer.value;
   const p = partner.value;
   const masked = row.type === 'busy';
@@ -148,22 +150,40 @@ function AskCard({ id }: { id: string }) {
 
 export function PlanView() {
   const t = today.value;
-  const days = agenda(7 * weeks.value);
-  const cds = countdowns.value;
-  return (
+  const mode = planMode.value;
+  const header = (
     <>
       <header class="vhead">
         <div>
-          <p class="eyebrow">
-            {monDay(t)} – {monDay(addDays(t, 6))}
-          </p>
-          <h1>This week</h1>
+          {mode === 'agenda' && (
+            <p class="eyebrow">
+              {monDay(t)} – {monDay(addDays(t, 6))}
+            </p>
+          )}
+          <h1>{mode === 'agenda' ? 'This week' : mode === 'week' ? 'Week' : 'Month'}</h1>
         </div>
         <a class="enc" href="#privacy">
           <Icon name="lock" size={14} />
           Encrypted
         </a>
       </header>
+      <ViewSwitch />
+    </>
+  );
+  if (mode !== 'agenda') {
+    return (
+      <>
+        {header}
+        {mode === 'week' ? <WeekView /> : <MonthView />}
+        <MarkerKey names={names.value} />
+      </>
+    );
+  }
+  const days = agenda(7 * weeks.value);
+  const cds = countdowns.value;
+  return (
+    <>
+      {header}
       {cds.length > 0 && (
         // biome-ignore lint/a11y/noNoninteractiveTabindex: a horizontally scrolling region must be keyboard-focusable (WCAG 2.1.1, axe scrollable-region-focusable)
         <section class="cd-wrap" aria-label="Countdowns" tabIndex={0}>

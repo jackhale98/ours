@@ -1744,3 +1744,367 @@ dialog.sheet::backdrop {
   flex: none;
   margin-top: 2px;
 }
+
+/* ---------- week and month views (docs/design/calendar-views.md) ---------- */
+
+.viewsw {
+  grid-template-columns: repeat(3, 1fr);
+  margin: 4px 0 16px;
+  max-width: 360px;
+}
+
+.phead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.ptitle {
+  font-size: 1.1875rem;
+  margin: 0;
+}
+.pnav {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.pnav .iconbtn {
+  width: var(--tap);
+  height: var(--tap);
+}
+
+.needs {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: var(--tap);
+  padding: 8px 12px;
+  margin-bottom: 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  text-align: left;
+  font-weight: 600;
+}
+
+.cal-marks {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 1px;
+  min-height: 14px;
+}
+.cal-marks .mk {
+  width: 16px;
+  margin-top: 0;
+}
+.cal-marks .mk-ours {
+  width: 20px;
+}
+.cal-more {
+  font-size: 0.6875rem;
+  font-weight: 700;
+  color: var(--muted);
+}
+
+.daypanel {
+  margin-top: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.daypanel .btn {
+  align-self: flex-start;
+}
+
+/* Month */
+.month-wrap {
+  display: block;
+}
+.month {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 2px;
+  table-layout: fixed;
+}
+.mdow {
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--muted);
+  padding: 4px 0;
+}
+.mdow abbr {
+  text-decoration: none;
+}
+.month td {
+  padding: 0;
+  vertical-align: top;
+}
+.mcell {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  width: 100%;
+  min-height: 52px;
+  padding: 4px 4px 8px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  text-align: left;
+  overflow: hidden;
+}
+.month.wide .mcell {
+  min-height: 92px;
+}
+.mcell.out {
+  background: transparent;
+  border-style: dashed;
+}
+.mcell.out .mnum {
+  color: var(--faint);
+}
+.mcell.today .mnum {
+  background: var(--ink);
+  color: var(--paper);
+  border-radius: 999px;
+  padding: 0 6px;
+}
+.mcell.sel {
+  border: 2px solid var(--focus);
+  padding: 3px 3px 7px;
+}
+.mnum {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  font-size: 0.8125rem;
+  font-weight: 700;
+  line-height: 18px;
+}
+.mtitles {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  width: 100%;
+  font-size: 0.6875rem;
+  line-height: 1.25;
+}
+.mtitles span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Both free this evening: a hollow ring (shape, not colour). */
+.mfree {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  width: 9px;
+  height: 9px;
+  border: 2px solid var(--ours);
+  border-radius: 50%;
+}
+/* Away or on a trip: a bar along the bottom. */
+.maway {
+  position: absolute;
+  left: 3px;
+  right: 3px;
+  bottom: 2px;
+  height: 3px;
+  border-radius: 2px;
+  background: repeating-linear-gradient(90deg, var(--ink) 0 4px, transparent 4px 7px);
+  opacity: 0.6;
+}
+@media (min-width: 1080px) {
+  .month-wrap {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 300px;
+    gap: 20px;
+    align-items: start;
+  }
+  .month-wrap .daypanel {
+    margin-top: 0;
+  }
+}
+
+/* Week: phones */
+.wstrip {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 4px;
+}
+.wday {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  min-height: 64px;
+  padding: 6px 2px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+}
+.wday[aria-pressed="true"] {
+  border: 2px solid var(--focus);
+  padding: 5px 1px;
+}
+.wday.today .wnum {
+  background: var(--ink);
+  color: var(--paper);
+  border-radius: 999px;
+  padding: 0 6px;
+}
+.wdow {
+  font-size: 0.6875rem;
+  font-weight: 700;
+  color: var(--muted);
+}
+.wnum {
+  font-weight: 700;
+}
+.wday .cal-marks {
+  justify-content: center;
+}
+
+/* Week: wide screens */
+.wgrid {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  overflow: hidden;
+}
+.wg-head,
+.wg-allday,
+.wg-body {
+  display: grid;
+  grid-template-columns: 56px repeat(7, minmax(0, 1fr));
+}
+.wg-head span {
+  padding: 8px 6px;
+  font-size: 0.8125rem;
+  color: var(--muted);
+  border-bottom: 1px solid var(--line);
+}
+.wg-head span.today {
+  color: var(--ink);
+}
+.wg-head b {
+  color: var(--ink);
+}
+.wg-allday {
+  border-bottom: 1px solid var(--line-strong);
+}
+.wg-lbl {
+  font-size: 0.6875rem;
+  color: var(--muted);
+  padding: 6px;
+}
+.wg-adcell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 3px;
+  border-left: 1px solid var(--line);
+  min-height: 30px;
+}
+.wg-chip {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-height: 24px;
+  padding: 2px 4px;
+  border-radius: 6px;
+  background: var(--sunk);
+  font-size: 0.75rem;
+  text-align: left;
+  overflow: hidden;
+}
+.wg-chip span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.wg-chip.away {
+  outline: 1px dashed var(--line-strong);
+}
+.wg-chip .mk {
+  margin-top: 0;
+}
+.wg-hours span {
+  display: block;
+  font-size: 0.6875rem;
+  color: var(--muted);
+  text-align: right;
+  padding: 0 6px;
+  transform: translateY(-6px);
+}
+.wg-col {
+  position: relative;
+  border-left: 1px solid var(--line);
+  background-image: linear-gradient(var(--line) 1px, transparent 1px);
+  background-size: 100% 44px;
+  cursor: copy;
+}
+.wg-col.today {
+  background-color: color-mix(in srgb, var(--focus) 5%, transparent);
+}
+.wg-free {
+  position: absolute;
+  left: 0;
+  right: 0;
+  padding: 4px;
+  font-size: 0.6875rem;
+  font-weight: 700;
+  color: var(--ours);
+  border-left: 3px solid var(--ours);
+  background: color-mix(in srgb, var(--ours) 8%, transparent);
+  pointer-events: none;
+}
+.wg-ev {
+  position: absolute;
+  display: flex;
+  flex-wrap: wrap;
+  align-content: flex-start;
+  gap: 0 2px;
+  padding: 2px 4px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  background: var(--surface);
+  box-shadow: 0 1px 2px var(--shadow);
+  font-size: 0.75rem;
+  line-height: 1.2;
+  text-align: left;
+  overflow: hidden;
+  cursor: pointer;
+}
+.wg-ev.tentative {
+  border-style: dashed;
+}
+.wg-ev.is-masked {
+  background: repeating-linear-gradient(45deg, var(--sunk) 0 4px, var(--surface) 4px 8px);
+}
+.wg-ev .mk {
+  margin-top: 0;
+  width: 16px;
+}
+.wg-t {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: calc(100% - 20px);
+}
+.wg-time {
+  flex-basis: 100%;
+  color: var(--muted);
+  font-size: 0.6875rem;
+}
+.wg-hidden {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+}

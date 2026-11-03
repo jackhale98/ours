@@ -1,0 +1,616 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+/**
+ * Week and month views of the Plan tab (docs/design/calendar-views.md).
+ * Both are summaries: every plan in them is also in a list (the chosen day's
+ * agenda), and every day has a text label, so nothing depends on seeing the grid.
+ */
+import { addDays, toInstant } from '@ours/core/time';
+import { signal } from '@preact/signals';
+import { useEffect, useRef } from 'preact/hooks';
+import { nameOf, partner } from '../model';
+import { focusDate, type PlanMode, planMode, setPlanMode } from '../planview';
+import {
+  agendaFrom,
+  awaitingMe,
+  type Day,
+  dayNum,
+  dow,
+  fmtLong,
+  fmtTime,
+  monDay,
+  type Row,
+  startOfWeek,
+  today,
+  weekStartsOn,
+  zone,
+} from '../select';
+import { openEvent, openQuick } from '../sheets';
+import { Icon, Marker } from '../ui';
+import { EventRow } from './Plan';
+
+/* ---------- shared bits ---------- */
+
+const DOW_LONG = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+const DOW_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const MONTHS = [
+  'January',
+  'February',
+  'March',
+  'April',
+  'May',
+  'June',
+  'July',
+  'August',
+  'September',
+  'October',
+  'November',
+  'December',
+];
+
+const ymd = (date: string) => date.split('-').map(Number) as [number, number, number];
+const monthOf = (date: string) => date.slice(0, 7);
+const longDay = (date: string) =>
+  `${DOW_LONG[dow(date)]} ${dayNum(date)} ${MONTHS[ymd(date)[1] - 1]}`;
+export const monthTitle = (date: string) => `${MONTHS[ymd(date)[1] - 1]} ${ymd(date)[0]}`;
+
+/** Adds months, keeping the day where possible (31 Jan + 1 month = 28/29 Feb). */
+function addMonths(date: string, n: number): string {
+  const [y, m, d] = ymd(date);
+  const first = new Date(Date.UTC(y, m - 1 + n, 1));
+  const last = new Date(Date.UTC(first.getUTCFullYear(), first.getUTCMonth() + 1, 0)).getUTCDate();
+  const out = new Date(Date.UTC(first.getUTCFullYear(), first.getUTCMonth(), Math.min(d, last)));
+  return out.toISOString().slice(0, 10);
+}
+
+export const selected = () => focusDate.value ?? today.value;
+
+/** Wide screens get the time grid and titles in month cells. */
+const wide = signal(typeof matchMedia === 'function' && matchMedia('(min-width: 720px)').matches);
+if (typeof matchMedia === 'function') {
+  matchMedia('(min-width: 720px)').addEventListener('change', (e) => {
+    wide.value = e.matches;
+  });
+}
+
+/** What a day holds, in words (screen readers; also the cell's accessible name). */
+function dayLabel(day: Day, isToday: boolean): string {
+  const plans = day.rows.filter((r) => !r.free);
+  const parts = [`${isToday ? 'Today, ' : ''}${longDay(day.date)}`];
+  parts.push(
+    plans.length ? `${plans.length} plan${plans.length === 1 ? '' : 's'}` : 'nothing planned',
+  );
+  if (plans.some((r) => r.away)) parts.push('someone is away');
+  if (plans.some((r) => r.countdown)) parts.push('a countdown day');
+  if (day.bothFree && day.date >= today.value) parts.push('both free this evening');
+  return parts.join(', ');
+}
+
+const markerMode = (r: Row) =>
+  r.type === 'busy' ? ('busy' as const) : r.status !== 'confirmed' ? ('dash' as const) : undefined;
+
+function Markers({ rows, max = 3 }: { rows: Row[]; max?: number }) {
+  const shown = rows.slice(0, max);
+  const more = rows.length - shown.length;
+  return (
+    <span class="cal-marks" aria-hidden="true">
+      {shown.map((r) => {
+        const mode = markerMode(r);
+        return <Marker key={r.key} owner={r.owner} {...(mode ? { mode } : {})} />;
+      })}
+      {more > 0 && <span class="cal-more">+{more}</span>}
+    </span>
+  );
+}
+
+/** Agenda · Week · Month. */
+export function ViewSwitch() {
+  const labels: Record<PlanMode, string> = { agenda: 'Agenda', week: 'Week', month: 'Month' };
+  return (
+    // biome-ignore lint/a11y/useSemanticElements: toggle-button group (aria-pressed), labelled; fieldset/legend breaks the segmented layout
+    <div class="seg viewsw" role="group" aria-label="View">
+      {(['agenda', 'week', 'month'] as const).map((m) => (
+        <button
+          type="button"
+          key={m}
+          aria-pressed={planMode.value === m}
+          onClick={() => setPlanMode(m)}
+        >
+          {labels[m]}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function PeriodNav({ unit, step }: { unit: 'week' | 'month'; step: (n: number) => void }) {
+  return (
+    <div class="pnav">
+      <button
+        type="button"
+        class="iconbtn"
+        aria-label={`Previous ${unit}`}
+        onClick={() => step(-1)}
+      >
+        <Icon name="prev" size={18} />
+      </button>
+      <button
+        type="button"
+        class="btn sm"
+        onClick={() => {
+          focusDate.value = null;
+        }}
+      >
+        Today
+      </button>
+      <button type="button" class="iconbtn" aria-label={`Next ${unit}`} onClick={() => step(1)}>
+        <Icon name="next" size={18} />
+      </button>
+    </div>
+  );
+}
+
+/** Proposals stay visible in every view. */
+function NeedsAnswer() {
+  const n = awaitingMe.value.length;
+  if (!n) return null;
+  return (
+    <button type="button" class="needs" onClick={() => setPlanMode('agenda')}>
+      <Marker owner="both" mode="dash" />
+      {n === 1 ? '1 plan needs your answer' : `${n} plans need your answer`}
+      <span class="free-cta">Answer</span>
+    </button>
+  );
+}
+
+/** The chosen day's plans: the same rows as the agenda. */
+function DayPanel({ day }: { day: Day }) {
+  const isToday = day.date === today.value;
+  return (
+    <section class="daypanel" aria-label={`Plans on ${longDay(day.date)}`}>
+      <h2 class="h3">{isToday ? `Today, ${fmtLong(day.date)}` : fmtLong(day.date)}</h2>
+      <div class="dlist">
+        {day.rows.map((row) => (
+          <EventRow key={row.key} row={row} date={day.date} />
+        ))}
+        {!day.rows.length && <p class="nothing">Nothing planned</p>}
+        {day.bothFree && day.date >= today.value && (
+          <p class="small muted">You’re both free this evening.</p>
+        )}
+      </div>
+      <button
+        type="button"
+        class="btn sm"
+        onClick={() =>
+          openQuick({ date: day.date, ...(day.bothFree ? { time: '19:00', who: 'ours' } : {}) })
+        }
+      >
+        <Icon name="plus" size={15} />
+        Add a plan on this day
+      </button>
+    </section>
+  );
+}
+
+/** Arrow-key movement shared by the month grid and the week strip. */
+function moveBy(e: KeyboardEvent, current: string, unit: 'week' | 'month'): string | null {
+  const ws = weekStartsOn.value;
+  switch (e.key) {
+    case 'ArrowLeft':
+      return addDays(current, -1);
+    case 'ArrowRight':
+      return addDays(current, 1);
+    case 'ArrowUp':
+      return unit === 'month' ? addDays(current, -7) : null;
+    case 'ArrowDown':
+      return unit === 'month' ? addDays(current, 7) : null;
+    case 'PageUp':
+      return unit === 'month' ? addMonths(current, -1) : addDays(current, -7);
+    case 'PageDown':
+      return unit === 'month' ? addMonths(current, 1) : addDays(current, 7);
+    case 'Home':
+      return startOfWeek(current, ws);
+    case 'End':
+      return addDays(startOfWeek(current, ws), 6);
+    default:
+      return null;
+  }
+}
+
+/** Keeps keyboard focus on the chosen day after it moves (and re-renders). */
+function useFollowFocus(container: { current: HTMLElement | null }, date: string) {
+  const hadFocus = useRef(false);
+  useEffect(() => {
+    if (!hadFocus.current) return;
+    hadFocus.current = false;
+    container.current?.querySelector<HTMLElement>(`[data-date="${date}"]`)?.focus();
+  }, [date]);
+  return () => {
+    hadFocus.current = !!container.current?.contains(document.activeElement);
+  };
+}
+
+/* ---------- month ---------- */
+
+export function MonthView() {
+  const sel = selected();
+  const first = `${monthOf(sel)}-01`;
+  const gridStart = startOfWeek(first);
+  const [y, m] = ymd(first);
+  const inMonth = new Date(Date.UTC(y, m, 0)).getUTCDate();
+  const lead = Math.round((Date.parse(first) - Date.parse(gridStart)) / 86_400_000);
+  const weeks = Math.ceil((lead + inMonth) / 7);
+  const days = agendaFrom(gridStart, weeks * 7);
+  const t = today.value;
+  const grid = useRef<HTMLTableElement>(null);
+  const remember = useFollowFocus(grid, sel);
+  const ws = weekStartsOn.value;
+  const selDay = days.find((d) => d.date === sel) ?? agendaFrom(sel, 1)[0];
+
+  const onKey = (e: KeyboardEvent) => {
+    const next = moveBy(e, sel, 'month');
+    if (!next) return;
+    e.preventDefault();
+    remember();
+    focusDate.value = next;
+  };
+
+  return (
+    <>
+      <div class="phead">
+        <h2 class="ptitle" aria-live="polite">
+          {monthTitle(sel)}
+        </h2>
+        <PeriodNav
+          unit="month"
+          step={(n) => {
+            focusDate.value = addMonths(sel, n);
+          }}
+        />
+      </div>
+      <NeedsAnswer />
+      <div class="month-wrap">
+        {/* A calendar table: one tab stop (the chosen day); arrow keys, Page Up/Down and Home/End move. */}
+        <table
+          class={`month${wide.value ? ' wide' : ''}`}
+          aria-label={monthTitle(sel)}
+          ref={grid}
+          onKeyDown={onKey}
+        >
+          <thead>
+            <tr>
+              {Array.from({ length: 7 }, (_, i) => {
+                const d = (ws + i) % 7;
+                return (
+                  <th scope="col" key={d} class="mdow">
+                    <abbr title={DOW_LONG[d]}>{DOW_SHORT[d]}</abbr>
+                  </th>
+                );
+              })}
+            </tr>
+          </thead>
+          <tbody>
+            {Array.from({ length: weeks }, (_, w) => (
+              <tr key={days[w * 7]?.date}>
+                {days.slice(w * 7, w * 7 + 7).map((day) => {
+                  const out = monthOf(day.date) !== monthOf(sel);
+                  const isSel = day.date === sel;
+                  const plans = day.rows.filter((r) => !r.free);
+                  const away = plans.some((r) => r.away);
+                  return (
+                    <td key={day.date}>
+                      <button
+                        type="button"
+                        aria-pressed={isSel}
+                        class={`mcell${out ? ' out' : ''}${day.date === t ? ' today' : ''}${isSel ? ' sel' : ''}`}
+                        data-date={day.date}
+                        tabIndex={isSel ? 0 : -1}
+                        aria-label={dayLabel(day, day.date === t)}
+                        aria-current={day.date === t ? 'date' : undefined}
+                        onClick={() => {
+                          focusDate.value = day.date;
+                        }}
+                      >
+                        <span class="mnum" aria-hidden="true">
+                          {dayNum(day.date)}
+                          {plans.some((r) => r.countdown) && <Icon name="flag" size={11} />}
+                        </span>
+                        {wide.value && (
+                          <span class="mtitles" aria-hidden="true">
+                            {plans.slice(0, 2).map((r) => (
+                              <span key={r.key}>{r.title}</span>
+                            ))}
+                          </span>
+                        )}
+                        <Markers rows={wide.value ? plans.slice(2) : plans} />
+                        {day.bothFree && !out && day.date >= t && (
+                          <span class="mfree" aria-hidden="true" />
+                        )}
+                        {away && <span class="maway" aria-hidden="true" />}
+                      </button>
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {selDay && <DayPanel day={selDay} />}
+      </div>
+    </>
+  );
+}
+
+/* ---------- week ---------- */
+
+const HOUR_PX = 44;
+
+interface Block {
+  row: Row;
+  top: number;
+  height: number;
+  lane: number;
+  lanes: number;
+}
+
+/** Minutes after the day's midnight, clipped to the day (plans crossing midnight). */
+function minutesIn(row: Row, date: string): { start: number; end: number } {
+  const dayStart = toInstant(`${date}T00:00`, zone);
+  const dayEnd = toInstant(`${addDays(date, 1)}T00:00`, zone);
+  const s = Math.max(row.occStart, dayStart);
+  const e = Math.min(Math.max(row.occEnd, row.occStart), dayEnd);
+  const start = Math.round((s - dayStart) / 60_000);
+  const end = Math.max(start + 20, Math.round((e - dayStart) / 60_000));
+  return { start, end: Math.min(end, 24 * 60) };
+}
+
+/** Side-by-side lanes for overlapping plans (at most 3; the rest are counted). */
+function layout(rows: Row[], date: string, fromHour: number): { blocks: Block[]; hidden: number } {
+  const items = rows
+    .map((row) => ({ row, ...minutesIn(row, date) }))
+    .sort((a, b) => a.start - b.start || b.end - a.end);
+  const blocks: Block[] = [];
+  let hidden = 0;
+  let cluster: (typeof items)[number][] = [];
+  let clusterEnd = -1;
+  const flush = () => {
+    const laneEnds: number[] = [];
+    const placed: { item: (typeof cluster)[number]; lane: number }[] = [];
+    for (const item of cluster) {
+      let lane = laneEnds.findIndex((end) => end <= item.start);
+      if (lane < 0) lane = laneEnds.length;
+      if (lane >= 3) {
+        hidden++;
+        continue;
+      }
+      laneEnds[lane] = item.end;
+      placed.push({ item, lane });
+    }
+    const lanes = Math.max(1, laneEnds.length);
+    for (const { item, lane } of placed) {
+      blocks.push({
+        row: item.row,
+        top: ((item.start - fromHour * 60) / 60) * HOUR_PX,
+        height: ((item.end - item.start) / 60) * HOUR_PX,
+        lane,
+        lanes,
+      });
+    }
+    cluster = [];
+  };
+  for (const item of items) {
+    if (cluster.length && item.start >= clusterEnd) flush();
+    cluster.push(item);
+    clusterEnd = Math.max(clusterEnd, item.end);
+  }
+  if (cluster.length) flush();
+  return { blocks, hidden };
+}
+
+function blockLabel(r: Row): string {
+  const who = r.type === 'busy' ? `${nameOf(r.owner === 'both' ? partner.value : r.owner)}: ` : '';
+  const when = r.allDay ? 'all day' : `${fmtTime(r.start)} to ${fmtTime(r.end)}`;
+  const tentative = r.status === 'proposed' ? ', tentative' : '';
+  return `${who}${r.title}, ${when}${tentative}`;
+}
+
+function WeekGrid({ days }: { days: Day[] }) {
+  const t = today.value;
+  const timed = days.map((d) => d.rows.filter((r) => !r.allDay));
+  let from = 7;
+  let to = 23;
+  for (const [i, rows] of timed.entries()) {
+    for (const r of rows) {
+      const { start, end } = minutesIn(r, days[i]?.date ?? '');
+      from = Math.min(from, Math.floor(start / 60));
+      to = Math.max(to, Math.ceil(end / 60));
+    }
+  }
+  to = Math.min(24, to);
+  const hours = Array.from({ length: to - from }, (_, i) => from + i);
+  const eveTop = ((17 - from) * 60 * HOUR_PX) / 60;
+  const eveHeight = 5 * HOUR_PX;
+  return (
+    <div class="wgrid" style={{ '--hours': hours.length } as Record<string, number>}>
+      <div class="wg-head">
+        <span />
+        {days.map((d) => (
+          <span key={d.date} class={d.date === t ? 'today' : ''}>
+            <b>{DOW_SHORT[dow(d.date)]}</b> {dayNum(d.date)}
+          </span>
+        ))}
+      </div>
+      <div class="wg-allday">
+        <span class="wg-lbl">All day</span>
+        {days.map((d) => (
+          <div key={d.date} class="wg-adcell">
+            {d.rows
+              .filter((r) => r.allDay)
+              .map((r) => {
+                const mode = markerMode(r);
+                return (
+                  <button
+                    type="button"
+                    key={r.key}
+                    class={`wg-chip${r.away ? ' away' : ''}`}
+                    aria-label={blockLabel(r)}
+                    onClick={() => openEvent(r.id)}
+                  >
+                    <Marker owner={r.owner} {...(mode ? { mode } : {})} />
+                    <span>{r.title}</span>
+                  </button>
+                );
+              })}
+          </div>
+        ))}
+      </div>
+      <div class="wg-body">
+        <div class="wg-hours" aria-hidden="true">
+          {hours.map((h) => (
+            <span key={h} style={{ height: `${HOUR_PX}px` }}>
+              {fmtTime(`${String(h).padStart(2, '0')}:00`)}
+            </span>
+          ))}
+        </div>
+        {days.map((d, i) => {
+          const { blocks, hidden } = layout(timed[i] ?? [], d.date, from);
+          return (
+            // biome-ignore lint/a11y/useKeyWithClickEvents: tapping empty time is a mouse shortcut; the "Add a plan on this day" button covers keyboard users
+            // biome-ignore lint/a11y/noStaticElementInteractions: see above
+            <div
+              key={d.date}
+              class={`wg-col${d.date === t ? ' today' : ''}`}
+              style={{ height: `${hours.length * HOUR_PX}px` }}
+              onClick={(e) => {
+                if (e.target !== e.currentTarget) return;
+                const y = (e as MouseEvent).offsetY;
+                const h = Math.min(23, from + Math.floor(y / HOUR_PX));
+                openQuick({ date: d.date, time: `${String(h).padStart(2, '0')}:00` });
+              }}
+            >
+              {d.bothFree && d.date >= t && (
+                <span class="wg-free" style={{ top: `${eveTop}px`, height: `${eveHeight}px` }}>
+                  Both free
+                </span>
+              )}
+              {blocks.map((b) => {
+                const mode = markerMode(b.row);
+                return (
+                  <button
+                    type="button"
+                    key={b.row.key}
+                    class={`wg-ev${b.row.type === 'busy' ? ' is-masked' : ''}${b.row.status !== 'confirmed' ? ' tentative' : ''}`}
+                    style={{
+                      top: `${b.top}px`,
+                      height: `${Math.max(22, b.height - 2)}px`,
+                      left: `${(b.lane / b.lanes) * 100}%`,
+                      width: `${100 / b.lanes}%`,
+                    }}
+                    aria-label={blockLabel(b.row)}
+                    onClick={() => openEvent(b.row.id)}
+                  >
+                    <Marker owner={b.row.owner} {...(mode ? { mode } : {})} />
+                    <span class="wg-t">{b.row.title}</span>
+                    <span class="wg-time">{fmtTime(b.row.start)}</span>
+                  </button>
+                );
+              })}
+              {hidden > 0 && <span class="cal-more wg-hidden">+{hidden}</span>}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function WeekStrip({ days, sel }: { days: Day[]; sel: string }) {
+  const t = today.value;
+  const strip = useRef<HTMLDivElement>(null);
+  const remember = useFollowFocus(strip, sel);
+  return (
+    // biome-ignore lint/a11y/useSemanticElements: toggle-button group (aria-pressed), labelled
+    <div
+      class="wstrip"
+      role="group"
+      aria-label="Days this week"
+      ref={strip}
+      onKeyDown={(e) => {
+        const next = moveBy(e, sel, 'week');
+        if (!next) return;
+        e.preventDefault();
+        remember();
+        focusDate.value = next;
+      }}
+    >
+      {days.map((d) => (
+        <button
+          type="button"
+          key={d.date}
+          data-date={d.date}
+          class={`wday${d.date === t ? ' today' : ''}`}
+          aria-pressed={d.date === sel}
+          aria-label={dayLabel(d, d.date === t)}
+          tabIndex={d.date === sel ? 0 : -1}
+          onClick={() => {
+            focusDate.value = d.date;
+          }}
+        >
+          <span class="wdow" aria-hidden="true">
+            {DOW_SHORT[dow(d.date)]}
+          </span>
+          <span class="wnum" aria-hidden="true">
+            {dayNum(d.date)}
+          </span>
+          <Markers rows={d.rows.filter((r) => !r.free)} />
+        </button>
+      ))}
+    </div>
+  );
+}
+
+export function WeekView() {
+  const sel = selected();
+  const start = startOfWeek(sel);
+  const days = agendaFrom(start, 7);
+  const selDay = days.find((d) => d.date === sel) ?? days[0];
+  // Swipe on the day strip changes week (a shortcut; the buttons do the same).
+  const touch = useRef<number | null>(null);
+  return (
+    <>
+      <div class="phead">
+        <h2 class="ptitle" aria-live="polite">
+          {monDay(start)} – {monDay(addDays(start, 6))}
+        </h2>
+        <PeriodNav
+          unit="week"
+          step={(n) => {
+            focusDate.value = addDays(sel, 7 * n);
+          }}
+        />
+      </div>
+      <NeedsAnswer />
+      {wide.value ? (
+        <>
+          <WeekGrid days={days} />
+          {selDay && <DayPanel day={selDay} />}
+        </>
+      ) : (
+        <div
+          onTouchStart={(e) => {
+            touch.current = e.touches[0]?.clientX ?? null;
+          }}
+          onTouchEnd={(e) => {
+            const x0 = touch.current;
+            const x1 = e.changedTouches[0]?.clientX;
+            touch.current = null;
+            if (x0 === null || x1 === undefined || Math.abs(x1 - x0) < 60) return;
+            focusDate.value = addDays(sel, x1 < x0 ? 7 : -7);
+          }}
+        >
+          <WeekStrip days={days} sel={sel} />
+          {selDay && <DayPanel day={selDay} />}
+        </div>
+      )}
+    </>
+  );
+}

@@ -13,7 +13,16 @@ import {
   zoneDiffers,
 } from '@ours/core/time';
 import { computed, signal } from '@preact/signals';
-import { byKind, commentsFor, type Entry, partner, type Slot, viewer, visible } from './model';
+import {
+  byKind,
+  commentsFor,
+  type Entry,
+  partner,
+  type Slot,
+  settings,
+  viewer,
+  visible,
+} from './model';
 
 /** The viewer's zone. Every date in the UI is a calendar date in this zone. */
 export const zone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
@@ -139,6 +148,8 @@ export interface Row {
   privacy: 'full' | 'busy';
   /** Original zone label when it shows a different clock time. */
   zoneNote: string | null;
+  /** A milestone counted down to on the Plan screen. */
+  countdown: boolean;
   occStart: number;
   occEnd: number;
 }
@@ -184,6 +195,7 @@ function rowsFor(entry: Entry, from: number, to: number): { day: string; row: Ro
         !d.all_day && d.tz && zoneDiffers(d.tz, zone, o.start)
           ? `${o.localStart.slice(11)} ${d.tz.split('/').pop()?.replace(/_/g, ' ')}`
           : null,
+      countdown: r.kind === 'event' && r.data.countdown,
       occStart: o.start,
       occEnd: o.end,
     };
@@ -214,6 +226,7 @@ function importRows(entry: SnapshotEntry, from: number, to: number): { day: stri
         comments: 0,
         privacy: 'full',
         zoneNote: null,
+        countdown: false,
         occStart: o.start,
         occEnd: o.end,
         source: d.name ?? null,
@@ -235,19 +248,48 @@ export interface Day {
   bothFree: boolean;
 }
 
-let agendaCache: { key: unknown[]; days: Day[] } | null = null;
+const agendaCache = new Map<string, { data: unknown; days: Day[] }>();
 
 /** Days from today. Memoised on the store, viewer and date, so views can share it. */
 export function agenda(days: number): Day[] {
-  const key = [visible.value, today.value, days];
-  if (agendaCache?.key.every((k, i) => k === key[i])) return agendaCache.days;
-  const result = computeAgenda(days);
-  agendaCache = { key, days: result };
+  return agendaFrom(today.value, days);
+}
+
+/** `days` days starting at `first` (any date: week and month views). Memoised. */
+export function agendaFrom(first: string, days: number): Day[] {
+  const data = visible.value;
+  const key = `${first}|${days}|${today.value}`;
+  const hit = agendaCache.get(key);
+  if (hit && hit.data === data) return hit.days;
+  if (agendaCache.size > 12) agendaCache.clear();
+  const result = computeAgenda(first, days);
+  agendaCache.set(key, { data, days: result });
   return result;
 }
 
-function computeAgenda(days: number): Day[] {
-  const first = today.value;
+/** First day of the week: shared setting, else the locale's convention (Sunday in the US). */
+export const weekStartsOn = computed<number>(() => {
+  const set = settings.value.week_start;
+  if (set !== undefined) return set;
+  try {
+    const loc = new Intl.Locale(navigator.language) as Intl.Locale & {
+      getWeekInfo?: () => { firstDay: number };
+      weekInfo?: { firstDay: number };
+    };
+    const first = (loc.getWeekInfo?.() ?? loc.weekInfo)?.firstDay;
+    if (first) return first % 7; // Intl: 1 = Monday … 7 = Sunday
+  } catch {
+    // older browsers
+  }
+  return 1;
+});
+
+/** The first day of the week containing `date`. */
+export function startOfWeek(date: string, startsOn = weekStartsOn.value): string {
+  return addDays(date, -((dow(date) - startsOn + 7) % 7));
+}
+
+function computeAgenda(first: string, days: number): Day[] {
   const from = toInstant(`${first}T00:00`, zone);
   const to = toInstant(`${addDays(first, days)}T00:00`, zone);
   const byDay = new Map<string, Row[]>();
