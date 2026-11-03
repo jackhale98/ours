@@ -2,7 +2,7 @@
 /** Shared UI pieces: icons, ownership markers, avatars, toast, sheet. */
 import { signal } from '@preact/signals';
 import type { ComponentChildren } from 'preact';
-import { useEffect, useRef } from 'preact/hooks';
+import { useLayoutEffect, useRef } from 'preact/hooks';
 import { nameOf, type Slot } from './model';
 
 const PATHS = {
@@ -177,7 +177,11 @@ export function Sheet({
   children: ComponentChildren;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
-  useEffect(() => {
+  const close = useRef(onClose);
+  close.current = onClose;
+  // Layout effect: open the modal and start listening before the browser paints,
+  // so there is no moment where the sheet is visible but Escape does nothing.
+  useLayoutEffect(() => {
     const dialog = ref.current;
     const active = document.activeElement as HTMLElement | null;
     const opener = active && active !== document.body ? active : lastPressed;
@@ -187,11 +191,24 @@ export function Sheet({
       dialog?.querySelector<HTMLElement>('[data-autofocus]') ??
       dialog?.querySelector<HTMLElement>(FOCUSABLE);
     first?.focus();
+    // Escape anywhere closes the sheet, even before focus has moved into it
+    // (Safari doesn't focus a clicked button, so a quick Escape lands on <body>).
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        close.current();
+      }
+    };
+    document.addEventListener('keydown', onKey);
     return () => {
+      document.removeEventListener('keydown', onKey);
+      // Close the modal first: while it is open the rest of the page is inert and can't take focus.
+      if (dialog?.open) dialog.close();
       if (opener?.isConnected) opener.focus({ preventScroll: true });
     };
   }, []);
   return (
+    // biome-ignore lint/a11y/useKeyWithClickEvents: backdrop click is a mouse shortcut; Escape and the Close button cover keyboard users
     <dialog
       ref={ref}
       class="sheet"
@@ -199,13 +216,6 @@ export function Sheet({
       onCancel={(e) => {
         e.preventDefault();
         onClose();
-      }}
-      onKeyDown={(e) => {
-        // Some engines don't fire 'cancel' reliably; handle Escape directly too.
-        if (e.key === 'Escape') {
-          e.preventDefault();
-          onClose();
-        }
       }}
       onClick={(e) => {
         if (e.target === ref.current) onClose(); // backdrop click

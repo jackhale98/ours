@@ -114,6 +114,7 @@ test('escape closes a sheet and returns focus', async ({ page }) => {
   await openDemo(page);
   const trigger = page.getByRole('button', { name: /Dinner with Jordan/ });
   await trigger.click();
+  await expect(page.getByRole('dialog')).toBeVisible();
   await page.keyboard.press('Escape');
   await expect(page.getByRole('dialog')).toHaveCount(0);
   await expect(trigger).toBeFocused();
