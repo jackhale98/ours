@@ -133,3 +133,29 @@ test('changing a private plan’s time moves the partner’s “Busy” too', as
   await expect(page.getByText('Physio')).toHaveCount(0);
   await expect(page.locator('.ev.is-masked').filter({ hasText: '6:30' })).toHaveCount(1);
 });
+
+test('quick add understands repeats, and the choice can be changed', async ({ page }) => {
+  await page.keyboard.press('n');
+  const quick = page.getByRole('dialog', { name: 'New plan' });
+  await page.getByRole('textbox', { name: 'What’s the plan?' }).fill('Yoga every tue and thu 6am');
+  await expect(quick.locator('.pchip', { hasText: 'Every Tuesday and Thursday' })).toBeVisible();
+  await expect(quick.getByRole('combobox', { name: 'Repeats' })).toHaveValue(
+    'FREQ=WEEKLY;BYDAY=TU,TH',
+  );
+  await quick.getByRole('button', { name: /Add plan|Send to/ }).click();
+  await page.getByRole('button', { name: 'Show next week' }).click();
+  // Two weeks: four Yoga rows (or three if this week's Tuesday has passed).
+  expect(await page.getByRole('button', { name: /Yoga/ }).count()).toBeGreaterThanOrEqual(3);
+
+  // Picking a repeat by hand overrides what was typed.
+  await page.keyboard.press('n');
+  await page.getByRole('textbox', { name: 'What’s the plan?' }).fill('Book club tomorrow 7pm');
+  await quick.getByRole('combobox', { name: 'Repeats' }).selectOption({ label: 'Every month' });
+  await quick.getByRole('button', { name: /Add plan|Send to/ }).click();
+  await page
+    .getByRole('button', { name: /Book club/ })
+    .filter({ hasText: 'Every month' })
+    .first()
+    .click();
+  await expect(page.getByRole('dialog', { name: 'Book club' })).toContainText('Every month');
+});

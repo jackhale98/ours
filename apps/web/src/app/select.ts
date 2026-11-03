@@ -110,10 +110,27 @@ export function repeatText(rrule: string | null): string {
   const n = Number(p.INTERVAL ?? 1);
   const unit =
     { DAILY: 'day', WEEKLY: 'week', MONTHLY: 'month', YEARLY: 'year' }[p.FREQ ?? ''] ?? '';
-  if (p.FREQ === 'WEEKLY' && p.BYDAY && !p.BYDAY.includes(',') && n === 1) {
-    return `Every ${DAY_NAMES[p.BYDAY] ?? 'week'}`;
+  if (p.FREQ === 'WEEKLY' && p.BYDAY) {
+    const days = p.BYDAY.split(',');
+    if (days.join(',') === 'MO,TU,WE,TH,FR')
+      return n > 1 ? `Every ${n} weeks on weekdays` : 'Every weekday';
+    if (days.join(',') === 'SA,SU') return n > 1 ? `Every ${n} weekends` : 'Every weekend';
+    const names = days.map((d) => DAY_NAMES[d.replace(/^[+-]?\d+/, '')] ?? d);
+    const list =
+      names.length > 1
+        ? `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`
+        : names[0];
+    return n === 2
+      ? `Every other ${list}`
+      : n > 2
+        ? `Every ${n} weeks on ${list}`
+        : `Every ${list}`;
   }
-  return n > 1 ? `Every ${n} ${unit}s` : `Every ${unit}`;
+  return n === 2 && unit === 'week'
+    ? 'Every other week'
+    : n > 1
+      ? `Every ${n} ${unit}s`
+      : `Every ${unit}`;
 }
 
 /* ---------- imported calendars ---------- */

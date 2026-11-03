@@ -30,7 +30,7 @@ export interface QuickAddContext {
   weekStart?: Weekday;
 }
 
-export type TokenType = 'date' | 'time' | 'place' | 'privacy' | 'ask';
+export type TokenType = 'date' | 'time' | 'place' | 'privacy' | 'ask' | 'repeat';
 
 export interface ParsedToken {
   type: TokenType;
@@ -48,6 +48,8 @@ export interface QuickAddResult {
   place: string | null;
   private: boolean;
   ask: boolean;
+  /** RRULE value for "every …" phrases, e.g. FREQ=WEEKLY;BYDAY=SA; null if it doesn't repeat. */
+  rrule: string | null;
   tokens: ParsedToken[];
 }
 
@@ -285,6 +287,55 @@ function findPlace(
   };
 }
 
+const RRULE_DAY = ['SU', 'MO', 'TU', 'WE', 'TH', 'FR', 'SA'];
+const RE_REPEAT_DAYS = new RegExp(
+  `(?<!\\w)every\\s+(?<other>other\\s+)?(?<a>${WD})s?(?:\\s*(?:,|and|&)\\s*(?<b>${WD})s?)?(?!\\w)`,
+  'gi',
+);
+const REPEATS: [RegExp, string][] = [
+  [/(?<!\w)(?:every\s+weekday|weekdays)(?!\w)/gi, 'FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR'],
+  [/(?<!\w)(?:every\s+weekend|weekends)(?!\w)/gi, 'FREQ=WEEKLY;BYDAY=SA,SU'],
+  [/(?<!\w)(?:every\s+day|daily)(?!\w)/gi, 'FREQ=DAILY'],
+  [
+    /(?<!\w)(?:every\s+(?:other|2nd|second|two)\s+weeks?|every\s+2\s+weeks|fortnightly|biweekly)(?!\w)/gi,
+    'FREQ=WEEKLY;INTERVAL=2',
+  ],
+  [/(?<!\w)(?:every\s+week|weekly)(?!\w)/gi, 'FREQ=WEEKLY'],
+  [/(?<!\w)(?:every\s+month|monthly)(?!\w)/gi, 'FREQ=MONTHLY'],
+  [/(?<!\w)(?:every\s+year|yearly|annually)(?!\w)/gi, 'FREQ=YEARLY'],
+];
+
+const wdIndex = (w: string): number => WD_KEYS.indexOf(w.slice(0, 3).toLowerCase());
+
+/** "every …" phrases: the rule, where it is, and the first weekday it names (if any). */
+function findRepeat(
+  text: string,
+): { start: number; end: number; rrule: string; firstDay: number | null } | null {
+  const days = new RegExp(RE_REPEAT_DAYS.source, 'i').exec(text);
+  if (days) {
+    const a = wdIndex(days.groups?.a ?? '');
+    const b = days.groups?.b ? wdIndex(days.groups.b) : -1;
+    if (a >= 0) {
+      const byday = [a, b]
+        .filter((d) => d >= 0)
+        .sort((x, y) => ((x + 6) % 7) - ((y + 6) % 7))
+        .map((d) => RRULE_DAY[d])
+        .join(',');
+      return {
+        start: days.index,
+        end: days.index + days[0].length,
+        rrule: `FREQ=WEEKLY;${days.groups?.other ? 'INTERVAL=2;' : ''}BYDAY=${byday}`,
+        firstDay: a,
+      };
+    }
+  }
+  for (const [re, rrule] of REPEATS) {
+    const m = new RegExp(re.source, 'i').exec(text);
+    if (m) return { start: m.index, end: m.index + m[0].length, rrule, firstDay: null };
+  }
+  return null;
+}
+
 function cleanTitle(raw: string): string {
   let s = raw.replace(/\s+/g, ' ').replace(EDGE_PUNCT, '');
   const words = s.split(' ').filter(Boolean);
@@ -303,17 +354,27 @@ export function parseQuickAdd(input: string, ctx: QuickAddContext): QuickAddResu
     tokens.push({ type, text: input.slice(c.start, c.end), start: c.start, end: c.end });
   const stops: number[] = [];
 
-  // dates first; the chosen date is masked so it cannot be re-read as a time
-  const dates = findDates(input, t);
+  // "every …" first; it is masked so "every saturday" isn't also "this saturday"
+  const repeat = findRepeat(input);
+  const unrepeated = repeat
+    ? input.slice(0, repeat.start) + ' '.repeat(repeat.end - repeat.start) + input.slice(repeat.end)
+    : input;
+  if (repeat) {
+    push('repeat', repeat);
+    stops.push(repeat.start);
+  }
+
+  // dates next; the chosen date is masked so it cannot be re-read as a time
+  const dates = findDates(unrepeated, t);
   const dateTok = first(dates);
   stops.push(...dates.map((d) => d.start));
-  let masked = input;
+  let masked = unrepeated;
   if (dateTok) {
     push('date', dateTok);
     masked =
-      input.slice(0, dateTok.start) +
+      unrepeated.slice(0, dateTok.start) +
       ' '.repeat(dateTok.end - dateTok.start) +
-      input.slice(dateTok.end);
+      unrepeated.slice(dateTok.end);
   }
 
   const times = findTimes(masked);
@@ -361,15 +422,23 @@ export function parseQuickAdd(input: string, ctx: QuickAddContext): QuickAddResu
   rest += input.slice(cur);
 
   if (time === null && dateTok?.value.tonight) time = 19 * 60;
+  // "every monday" with no date starts on the next Monday (today counts).
+  let date = dateTok?.value.date ?? null;
+  if (!date && repeat?.firstDay !== null && repeat?.firstDay !== undefined) {
+    const today = toDays(t.y, t.m, t.d);
+    const n = today + ((repeat.firstDay - dowOf(today) + 7) % 7);
+    date = fromDays(n);
+  }
   return {
     title: cleanTitle(rest),
-    date: dateTok?.value.date ?? null,
+    date,
     time: time === null ? null : fmtMin(time),
     endTime: end === null ? null : fmtMin(end),
     allDay: dateTok !== undefined && time === null,
     place: placeRes?.place ?? null,
     private: priv !== null,
     ask: askM !== null,
+    rrule: repeat?.rrule ?? null,
     tokens,
   };
 }

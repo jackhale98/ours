@@ -11,6 +11,7 @@ type Expected = Partial<{
   place: string;
   private: boolean;
   ask: boolean;
+  rrule: string;
 }>;
 
 const TUE: QuickAddContext = { today: '2026-11-03' };
@@ -28,6 +29,7 @@ function expand(e: Expected): Omit<QuickAddResult, 'tokens'> {
     place: e.place ?? null,
     private: e.private ?? false,
     ask: e.ask ?? false,
+    rrule: e.rrule ?? null,
   };
 }
 
@@ -37,6 +39,45 @@ function check(input: string, ctx: QuickAddContext, e: Expected) {
 }
 
 const cases: [string, QuickAddContext, Expected][] = [
+  // repeats
+  [
+    'Swim every saturday 7am',
+    TUE,
+    { title: 'Swim', date: '2026-11-07', time: '07:00', rrule: 'FREQ=WEEKLY;BYDAY=SA' },
+  ],
+  [
+    'Yoga every tue and thu 6pm',
+    TUE,
+    { title: 'Yoga', date: '2026-11-03', time: '18:00', rrule: 'FREQ=WEEKLY;BYDAY=TU,TH' },
+  ],
+  [
+    'Bins every other monday',
+    TUE,
+    { title: 'Bins', date: '2026-11-09', rrule: 'FREQ=WEEKLY;INTERVAL=2;BYDAY=MO' },
+  ],
+  [
+    'Standup weekdays 9am',
+    TUE,
+    { title: 'Standup', time: '09:00', rrule: 'FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR' },
+  ],
+  ['Water plants daily', TUE, { title: 'Water plants', rrule: 'FREQ=DAILY' }],
+  [
+    'Date night weekly fri 8pm',
+    TUE,
+    { title: 'Date night', date: '2026-11-06', time: '20:00', rrule: 'FREQ=WEEKLY' },
+  ],
+  ['Rent monthly', TUE, { title: 'Rent', rrule: 'FREQ=MONTHLY' }],
+  [
+    'Anniversary dinner every year dec 12',
+    TUE,
+    { title: 'Anniversary dinner', date: '2026-12-12', allDay: true, rrule: 'FREQ=YEARLY' },
+  ],
+  [
+    'Cleaner fortnightly wed 10am',
+    TUE,
+    { title: 'Cleaner', date: '2026-11-04', time: '10:00', rrule: 'FREQ=WEEKLY;INTERVAL=2' },
+  ],
+
   // plain / relative
   ['buy milk', TUE, { title: 'buy milk' }],
   ['', TUE, {}],

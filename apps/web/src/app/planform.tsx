@@ -25,7 +25,7 @@ import { CloseButton, Marker, Sheet, Switch, toast } from './ui';
 
 export type Draft = Partial<EventData>;
 
-const REPEATS: [string, string][] = [
+export const REPEAT_CHOICES: [string, string][] = [
   ['', 'Doesn’t repeat'],
   ['FREQ=DAILY', 'Every day'],
   ['FREQ=WEEKLY', 'Every week'],
@@ -78,7 +78,7 @@ export function PlanForm({ id, draft }: { id: string | null; draft?: Draft }) {
   const [ask, setAsk] = useState(!editing);
   const [error, setError] = useState<string | null>(null);
 
-  const custom = !!repeat && !REPEATS.some(([v]) => v === repeat);
+  const custom = !!repeat && !REPEAT_CHOICES.some(([v]) => v === repeat);
 
   const save = (e: Event) => {
     e.preventDefault();
@@ -275,7 +275,7 @@ export function PlanForm({ id, draft }: { id: string | null; draft?: Draft }) {
             value={repeat}
             onChange={(e) => setRepeat(e.currentTarget.value)}
           >
-            {REPEATS.map(([v, label]) => (
+            {REPEAT_CHOICES.map(([v, label]) => (
               <option key={v} value={v}>
                 {label}
               </option>

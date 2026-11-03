@@ -20,7 +20,7 @@ import {
   viewer,
 } from './model';
 import { noticeAnswer, noticeNote, noticeProposal } from './notices';
-import { type Draft, PlanForm } from './planform';
+import { type Draft, PlanForm, REPEAT_CHOICES } from './planform';
 import {
   fmtTime,
   ownerLabel,
@@ -92,10 +92,13 @@ function QuickAdd({ preset }: { preset: QuickPreset }) {
   const [priv, setPriv] = useState(false);
   const [dateOverride, setDate] = useState<string | null>(null);
   const [timeOverride, setTime] = useState<string | null>(null);
+  const [repeatOverride, setRepeat] = useState<string | null>(null);
 
   const parsed = parseQuickAdd(text, { today: today.value });
   const date = dateOverride ?? parsed.date ?? preset.date ?? today.value;
   const time = timeOverride ?? parsed.time ?? preset.time ?? '';
+  // What was typed ("every saturday") sets the repeat until it is chosen by hand.
+  const repeat = repeatOverride ?? parsed.rrule ?? '';
   const title = parsed.title
     ? capitalise(parsed.title)
     : !text.trim() && preset.placeholder
@@ -121,7 +124,7 @@ function QuickAdd({ preset }: { preset: QuickPreset }) {
         end,
         all_day: !time,
         tz: time ? zone : null,
-        rrule: null,
+        rrule: repeat || null,
         away: false,
         owner,
         status: proposing ? 'proposed' : 'confirmed',
@@ -184,6 +187,12 @@ function QuickAdd({ preset }: { preset: QuickPreset }) {
                     (parsed.endTime && !timeOverride ? ` – ${fmtTime(parsed.endTime)}` : '')
                   : 'All day'}
               </span>
+              {repeat && (
+                <span class="pchip">
+                  <Icon name="repeat" size={13} />
+                  {repeatText(repeat)}
+                </span>
+              )}
               {parsed.place && (
                 <span class="pchip">
                   <Icon name="pin" size={13} />
@@ -224,6 +233,24 @@ function QuickAdd({ preset }: { preset: QuickPreset }) {
               onInput={(e) => setTime(e.currentTarget.value)}
             />
           </div>
+        </div>
+        <div class="field">
+          <label for="qa-rep">Repeats</label>
+          <select
+            id="qa-rep"
+            class="txt"
+            value={repeat}
+            onChange={(e) => setRepeat(e.currentTarget.value)}
+          >
+            {REPEAT_CHOICES.map(([v, label]) => (
+              <option key={v} value={v}>
+                {label}
+              </option>
+            ))}
+            {repeat && !REPEAT_CHOICES.some(([v]) => v === repeat) && (
+              <option value={repeat}>{repeatText(repeat)}</option>
+            )}
+          </select>
         </div>
         <div class="field">
           <span class="lbl" id="who-l">
@@ -283,11 +310,12 @@ function QuickAdd({ preset }: { preset: QuickPreset }) {
                   : addWallMinutes(start, 60)
                 : addDays(date, 1),
               location: parsed.place,
+              rrule: repeat || null,
               privacy: isPrivate ? 'busy' : 'full',
             });
           }}
         >
-          More options: repeat, several days, notes, countdown
+          More options: several days, notes, countdown, away
         </button>
       </form>
     </Sheet>
