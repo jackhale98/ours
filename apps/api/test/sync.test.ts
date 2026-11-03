@@ -149,7 +149,7 @@ describe('quotas', () => {
     const space = await env.DB.prepare('SELECT bytes FROM spaces WHERE id = ?')
       .bind(spaceId)
       .first<{ bytes: number }>();
-    expect(space?.bytes).toBe(180_000);
+    expect(space?.bytes).toBe(3 * (60_000 + 24 + 256));
   });
 
   it('refuses oversized records', async () => {

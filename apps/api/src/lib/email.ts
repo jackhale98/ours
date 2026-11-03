@@ -21,8 +21,20 @@ export function setSender(sender: Sender | null): void {
   override = sender;
 }
 
+/**
+ * Development only: EMAIL_PROVIDER='dev-outbox' keeps the last messages in
+ * memory and serves them at GET /dev/outbox, so local end-to-end tests can
+ * follow magic links. Never set this in production.
+ */
+export const devOutbox: Email[] = [];
+
 export async function sendEmail(env: Env, email: Email): Promise<void> {
   if (override) return override(env, email);
+  if (env.EMAIL_PROVIDER === 'dev-outbox') {
+    devOutbox.push(email);
+    if (devOutbox.length > 50) devOutbox.shift();
+    return;
+  }
   if (env.EMAIL_PROVIDER === 'resend') {
     if (!env.EMAIL_API_KEY || !env.EMAIL_FROM) throw new Error('email_not_configured');
     const res = await fetch('https://api.resend.com/emails', {

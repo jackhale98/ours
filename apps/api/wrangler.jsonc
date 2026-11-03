@@ -5,7 +5,9 @@
   "main": "src/index.ts",
   "compatibility_date": "2026-10-01",
   "compatibility_flags": ["nodejs_compat"],
-  "observability": { "enabled": true, "head_sampling_rate": 1 },
+  // Platform invocation logs would record request URLs (invite ids) and headers
+  // (client IPs). Keep them off; the app logs route/status/latency itself.
+  "observability": { "enabled": true, "logs": { "invocation_logs": false } },
   "vars": {
     // Comma-separated origins of the web app allowed by CORS.
     "ALLOWED_ORIGINS": "http://localhost:5173,http://localhost:4173",

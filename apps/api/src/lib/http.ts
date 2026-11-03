@@ -15,15 +15,40 @@ export class HttpError extends Error {
 
 export const MAX_BODY_BYTES = 1024 * 1024;
 
+/** Reads the body as text, stopping as soon as it passes MAX_BODY_BYTES (no full buffering). */
+async function readLimited(c: Context): Promise<string> {
+  const declared = Number(c.req.header('content-length') ?? 0);
+  if (declared > MAX_BODY_BYTES) throw new HttpError(413, 'too_large');
+  const stream = c.req.raw.body;
+  if (!stream) return '';
+  const reader = stream.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > MAX_BODY_BYTES) {
+      await reader.cancel();
+      throw new HttpError(413, 'too_large');
+    }
+    chunks.push(value);
+  }
+  const all = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    all.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return new TextDecoder().decode(all);
+}
+
 /** Reads and validates a JSON body. Rejects oversized or malformed input. */
 export async function body<S extends v.GenericSchema>(
   c: Context,
   schema: S,
 ): Promise<v.InferOutput<S>> {
-  const declared = Number(c.req.header('content-length') ?? 0);
-  if (declared > MAX_BODY_BYTES) throw new HttpError(413, 'too_large');
-  const text = await c.req.text();
-  if (text.length > MAX_BODY_BYTES) throw new HttpError(413, 'too_large');
+  const text = await readLimited(c);
   let json: unknown;
   try {
     json = JSON.parse(text);

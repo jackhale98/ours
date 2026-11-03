@@ -11,6 +11,7 @@
 import { Hono } from 'hono';
 import * as v from 'valibot';
 import { type AppEnv, requireAuth } from '../auth/session';
+import { num } from '../env';
 import { bytesOf, fromB64Url, hashToken, newId, toB64Url } from '../lib/crypto';
 import { body, HttpError } from '../lib/http';
 import { requireMember } from '../lib/members';
@@ -142,22 +143,33 @@ invites.post('/:id/accept', async (c) => {
     .first<{ kind: 'partner' | 'device'; space_id: string | null }>();
   if (!row) throw new HttpError(404, 'not_found');
   const now = Date.now();
+  // The invite is consumed (and its key blob erased) only if the join itself
+  // succeeded: a full space or a capped joiner leaves the invite intact.
   const statements = [
-    c.env.DB.prepare("UPDATE invites SET used_at = ?, wrapped = x'' WHERE id = ?").bind(
-      now,
-      idHash,
-    ),
+    c.env.DB.prepare(
+      `UPDATE invites SET used_at = ?1, wrapped = x''
+        WHERE id = ?2 AND (kind = 'device' OR EXISTS (SELECT 1 FROM memberships WHERE space_id = ?3 AND user_id = ?4))`,
+    ).bind(now, idHash, row.space_id, uid),
   ];
   if (row.kind === 'partner' && row.space_id) {
+    // Space not full, and the joiner under their own space cap, checked atomically.
     statements.unshift(
       c.env.DB.prepare(
         `INSERT INTO memberships (space_id, user_id, role, joined_at)
-         SELECT ?1, ?2, 'b', ?3 WHERE (SELECT COUNT(*) FROM memberships WHERE space_id = ?1) < 2`,
-      ).bind(row.space_id, uid, now),
+         SELECT ?1, ?2, 'b', ?3
+          WHERE (SELECT COUNT(*) FROM memberships WHERE space_id = ?1) < 2
+            AND (SELECT COUNT(*) FROM memberships WHERE user_id = ?2) < ?4`,
+      ).bind(row.space_id, uid, now, num(c.env.MAX_SPACES_PER_USER, 3)),
     );
   }
   const results = await c.env.DB.batch(statements);
-  if (row.kind === 'partner' && !results[0]?.meta.changes) throw new HttpError(409, 'space_full');
+  if (row.kind === 'partner' && !results[0]?.meta.changes) {
+    throw new HttpError(
+      409,
+      'cannot_join',
+      'This space is full, or you’re already in the most spaces allowed.',
+    );
+  }
   return c.json({ ok: true, space_id: row.space_id, role: row.kind === 'partner' ? 'b' : null });
 });
 

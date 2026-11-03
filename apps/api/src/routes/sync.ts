@@ -22,6 +22,7 @@ import { num } from '../env';
 import { bytesOf, fromB64Url, toB64Url } from '../lib/crypto';
 import { body, query } from '../lib/http';
 import { requireMember } from '../lib/members';
+import { isQuotaAbort, recordCost, SPACE_BYTES_SQL } from '../lib/quota';
 import { rateLimit } from '../lib/ratelimit';
 
 interface Row {
@@ -37,6 +38,9 @@ interface Row {
   updated_at: number;
   updated_by: string;
 }
+
+/** Pages stop once this much ciphertext is included (always at least one record). */
+const PULL_PAGE_BYTES = 4 * 1024 * 1024;
 
 const COLUMNS =
   'id, space_id, scope, owner_user_id, key_version, nonce, ciphertext, deleted, rev, updated_at, updated_by';
@@ -121,7 +125,12 @@ sync.post('/push', async (c) => {
         continue;
       }
     }
-    accepted.push({ item, nonce, ct, oldBytes: cur ? bytesOf(cur.ciphertext).length : 0 });
+    accepted.push({
+      item,
+      nonce,
+      ct,
+      oldBytes: cur ? recordCost(bytesOf(cur.nonce).length, bytesOf(cur.ciphertext).length) : 0,
+    });
   }
 
   let seq = 0;
@@ -129,8 +138,12 @@ sync.post('/push', async (c) => {
     const space = await c.env.DB.prepare('SELECT bytes FROM spaces WHERE id = ?')
       .bind(req.space_id)
       .first<{ bytes: number }>();
-    const delta = accepted.reduce((n, a) => n + a.ct.length - a.oldBytes, 0);
-    if ((space?.bytes ?? 0) + delta > num(c.env.MAX_SPACE_BYTES, 20 * 1024 * 1024)) {
+    const delta = accepted.reduce(
+      (n, a) => n + recordCost(a.nonce.length, a.ct.length) - a.oldBytes,
+      0,
+    );
+    const maxBytes = num(c.env.MAX_SPACE_BYTES, 20 * 1024 * 1024);
+    if ((space?.bytes ?? 0) + delta > maxBytes) {
       for (const a of accepted)
         results.set(a.item.envelope.id, {
           status: 'rejected',
@@ -147,6 +160,11 @@ sync.post('/push', async (c) => {
           delta,
           req.space_id,
         ),
+        // Atomic quota check: if the new total is over, this insert fails and
+        // the whole batch (including the writes below) rolls back.
+        c.env.DB.prepare(
+          'INSERT INTO quota_guard (x) SELECT NULL WHERE (SELECT bytes FROM spaces WHERE id = ?) > ?',
+        ).bind(req.space_id, maxBytes),
         ...accepted.map((a, k) => {
           const e = a.item.envelope;
           return c.env.DB.prepare(
@@ -175,27 +193,52 @@ sync.post('/push', async (c) => {
         }),
         c.env.DB.prepare('SELECT seq FROM spaces WHERE id = ?').bind(req.space_id),
       ];
-      const out = await c.env.DB.batch(statements);
-      seq = (out[out.length - 1]?.results[0] as { seq: number } | undefined)?.seq ?? 0;
+      let out: D1Result[] | null = null;
+      try {
+        out = await c.env.DB.batch(statements);
+      } catch (err) {
+        if (!isQuotaAbort(err)) throw err;
+        // A concurrent push filled the space first; nothing was written.
+        for (const a of accepted) {
+          results.set(a.item.envelope.id, {
+            status: 'rejected',
+            id: a.item.envelope.id,
+            reason: 'quota',
+          });
+        }
+      }
       const lost: string[] = [];
-      accepted.forEach((a, k) => {
-        const id = a.item.envelope.id;
-        if (out[k + 1]?.meta.changes) results.set(id, { status: 'ok', id, rev: seq - (n - 1 - k) });
-        else lost.push(id);
-      });
+      if (out) {
+        seq = (out[out.length - 1]?.results[0] as { seq: number } | undefined)?.seq ?? 0;
+        accepted.forEach((a, k) => {
+          const id = a.item.envelope.id;
+          if (out?.[k + 2]?.meta.changes)
+            results.set(id, { status: 'ok', id, rev: seq - (n - 1 - k) });
+          else lost.push(id);
+        });
+      }
       if (lost.length) {
         // Lost a race with another device: report the current versions, and
         // recompute the space's byte count since our delta over-counted.
+        // Only records the caller may see: anything else that took the id in
+        // the meantime is reported as not allowed, never shown.
         const current = await c.env.DB.prepare(
-          `SELECT ${COLUMNS} FROM records WHERE id IN (${lost.map(() => '?').join(',')})`,
+          `SELECT ${COLUMNS} FROM records
+            WHERE id IN (${lost.map(() => '?').join(',')})
+              AND space_id = ? AND (scope = 'space' OR owner_user_id = ?)`,
         )
-          .bind(...lost)
+          .bind(...lost, req.space_id, uid)
           .all<Row>();
-        for (const r of current.results)
-          results.set(r.id, { status: 'conflict', id: r.id, current: toEnvelope(r) });
-        await c.env.DB.prepare(
-          'UPDATE spaces SET bytes = (SELECT COALESCE(SUM(length(ciphertext)), 0) FROM records WHERE space_id = ?) WHERE id = ?',
-        )
+        for (const id of lost) {
+          const r = current.results.find((x) => x.id === id);
+          results.set(
+            id,
+            r
+              ? { status: 'conflict', id, current: toEnvelope(r) }
+              : { status: 'rejected', id, reason: 'not_allowed' },
+          );
+        }
+        await c.env.DB.prepare(`UPDATE spaces SET bytes = ${SPACE_BYTES_SQL} WHERE id = ?`)
           .bind(req.space_id, req.space_id)
           .run();
       }
@@ -223,8 +266,16 @@ sync.get('/pull', async (c) => {
   )
     .bind(q.space_id, q.since, uid, q.limit + 1)
     .all<Row>();
-  const more = rows.results.length > q.limit;
-  const page = rows.results.slice(0, q.limit);
+  // Cap each page by size too, so a space full of large records stays pullable.
+  const page: Row[] = [];
+  let bytes = 0;
+  for (const r of rows.results.slice(0, q.limit)) {
+    const size = bytesOf(r.ciphertext).length;
+    if (page.length && bytes + size > PULL_PAGE_BYTES) break;
+    page.push(r);
+    bytes += size;
+  }
+  const more = rows.results.length > page.length;
   return c.json({
     envelopes: page.map(toEnvelope),
     cursor: page.length ? (page[page.length - 1]?.rev ?? q.since) : q.since,

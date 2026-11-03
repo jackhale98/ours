@@ -15,12 +15,34 @@ export interface AuthUser {
 export interface AuthSession {
   token_hash: string;
   device_id: string;
+  created_at: number;
 }
 
 export type AppEnv = {
   Bindings: Env;
   Variables: { user: AuthUser; session: AuthSession };
 };
+
+/**
+ * Makes room for a new device. Never fails at the cap (that would lock people
+ * out): devices without a live session go first, then the least recently seen
+ * (its sessions end). Users see and remove devices in Privacy.
+ */
+async function makeRoomForDevice(env: Env, userId: string, now: number): Promise<void> {
+  const max = num(env.MAX_DEVICES_PER_USER, 10);
+  await env.DB.batch([
+    env.DB.prepare(
+      `DELETE FROM devices WHERE user_id = ?1
+         AND NOT EXISTS (SELECT 1 FROM sessions WHERE device_id = devices.id AND expires_at > ?2)`,
+    ).bind(userId, now),
+    env.DB.prepare(
+      `DELETE FROM devices WHERE id IN (
+         SELECT id FROM devices WHERE user_id = ?1
+          ORDER BY COALESCE(last_seen, created_at) ASC
+          LIMIT MAX(0, (SELECT COUNT(*) FROM devices WHERE user_id = ?1) - ?2 + 1))`,
+    ).bind(userId, max),
+  ]);
+}
 
 /** Creates a device (if needed) and a session. Returns the raw token, shown once. */
 export async function createSession(
@@ -38,16 +60,7 @@ export async function createSession(
     if (!owned) device = undefined;
   }
   if (!device) {
-    const count = await env.DB.prepare('SELECT COUNT(*) AS n FROM devices WHERE user_id = ?')
-      .bind(userId)
-      .first<{ n: number }>();
-    if ((count?.n ?? 0) >= num(env.MAX_DEVICES_PER_USER, 10)) {
-      throw new HttpError(
-        409,
-        'too_many_devices',
-        'Remove a device in Privacy before adding another.',
-      );
-    }
+    await makeRoomForDevice(env, userId, now);
     device = newId();
     await env.DB.prepare(
       'INSERT INTO devices (id, user_id, label, created_at, last_seen) VALUES (?, ?, ?, ?, ?)',
@@ -66,6 +79,16 @@ export async function createSession(
   return { token, device_id: device, expires_at: expires };
 }
 
+/** Ends a session; its device goes too if no other session uses it. */
+export async function endSession(env: Env, session: AuthSession): Promise<void> {
+  await env.DB.batch([
+    env.DB.prepare('DELETE FROM sessions WHERE token_hash = ?').bind(session.token_hash),
+    env.DB.prepare(
+      'DELETE FROM devices WHERE id = ? AND NOT EXISTS (SELECT 1 FROM sessions WHERE device_id = ?)',
+    ).bind(session.device_id, session.device_id),
+  ]);
+}
+
 /** Requires `Authorization: Bearer <token>`; sets c.var.user and c.var.session. */
 export const requireAuth: MiddlewareHandler<AppEnv> = async (c, next) => {
   const header = c.req.header('Authorization') ?? '';
@@ -74,7 +97,7 @@ export const requireAuth: MiddlewareHandler<AppEnv> = async (c, next) => {
   const tokenHash = await hashToken(match[1]);
   const now = Date.now();
   const row = await c.env.DB.prepare(
-    `SELECT s.token_hash, s.device_id, s.expires_at, s.last_seen, u.id, u.email
+    `SELECT s.token_hash, s.device_id, s.created_at, s.expires_at, s.last_seen, u.id, u.email
        FROM sessions s JOIN users u ON u.id = s.user_id
       WHERE s.token_hash = ?`,
   )
@@ -82,6 +105,7 @@ export const requireAuth: MiddlewareHandler<AppEnv> = async (c, next) => {
     .first<{
       token_hash: string;
       device_id: string;
+      created_at: number;
       expires_at: number;
       last_seen: number | null;
       id: string;
@@ -101,6 +125,10 @@ export const requireAuth: MiddlewareHandler<AppEnv> = async (c, next) => {
     );
   }
   c.set('user', { id: row.id, email: row.email });
-  c.set('session', { token_hash: row.token_hash, device_id: row.device_id });
+  c.set('session', {
+    token_hash: row.token_hash,
+    device_id: row.device_id,
+    created_at: row.created_at,
+  });
   await next();
 };

@@ -3,6 +3,7 @@
 import { Hono } from 'hono';
 import { type AppEnv, requireAuth } from '../auth/session';
 import { HttpError } from '../lib/http';
+import { SPACE_BYTES_SQL } from '../lib/quota';
 
 export const me = new Hono<AppEnv>();
 
@@ -55,6 +56,9 @@ me.delete('/me', requireAuth, async (c) => {
     .all<{ space_id: string }>();
   const statements = [
     c.env.DB.prepare('DELETE FROM records WHERE owner_user_id = ?').bind(uid),
+    // No trace of the id left behind on shared records or claimed invites.
+    c.env.DB.prepare("UPDATE records SET updated_by = 'deleted' WHERE updated_by = ?").bind(uid),
+    c.env.DB.prepare('UPDATE invites SET claimed_by = NULL WHERE claimed_by = ?').bind(uid),
     c.env.DB.prepare('DELETE FROM email_tokens WHERE email = ?').bind(email),
     c.env.DB.prepare('DELETE FROM users WHERE id = ?').bind(uid), // cascades sessions, devices, passkeys, memberships, backups, push, feed
   ];
@@ -63,9 +67,10 @@ me.delete('/me', requireAuth, async (c) => {
       c.env.DB.prepare(
         'DELETE FROM spaces WHERE id = ? AND NOT EXISTS (SELECT 1 FROM memberships WHERE space_id = ?)',
       ).bind(space_id, space_id),
-      c.env.DB.prepare(
-        'UPDATE spaces SET bytes = (SELECT COALESCE(SUM(length(ciphertext)), 0) FROM records WHERE space_id = ?) WHERE id = ?',
-      ).bind(space_id, space_id),
+      c.env.DB.prepare(`UPDATE spaces SET bytes = ${SPACE_BYTES_SQL} WHERE id = ?`).bind(
+        space_id,
+        space_id,
+      ),
     );
   }
   await c.env.DB.batch(statements);

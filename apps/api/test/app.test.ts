@@ -62,3 +62,10 @@ describe('app shell', () => {
     await expect(bad).rejects.toThrow();
   });
 });
+
+describe('dev outbox', () => {
+  it('is off unless EMAIL_PROVIDER is dev-outbox', async () => {
+    const res = await exports.default.fetch(new Request('https://api.example/dev/outbox'));
+    expect(res.status).toBe(404);
+  });
+});

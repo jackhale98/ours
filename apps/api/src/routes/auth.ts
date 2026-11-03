@@ -3,8 +3,8 @@
  * Sign-in. Accounts are created by email (magic link), which proves the
  * address; passkeys are then added and used for later sign-ins. See ADR 0012.
  *
- * Responses to /auth/email/start are identical whether or not an account
- * exists, so the endpoint cannot be used to discover who has an account.
+ * /auth/email/start answers identically, and in the same time, whether or not
+ * an account exists or an email is sent: the work happens after the response.
  */
 import {
   generateAuthenticationOptions,
@@ -12,9 +12,10 @@ import {
   verifyAuthenticationResponse,
   verifyRegistrationResponse,
 } from '@simplewebauthn/server';
+import type { Context } from 'hono';
 import { Hono } from 'hono';
 import * as v from 'valibot';
-import { type AppEnv, createSession, requireAuth } from '../auth/session';
+import { type AppEnv, createSession, endSession, requireAuth } from '../auth/session';
 import type { Env } from '../env';
 import { bytesOf, hashToken, newId, newToken } from '../lib/crypto';
 import { sendEmail } from '../lib/email';
@@ -24,6 +25,9 @@ import { verifyTurnstile } from '../lib/turnstile';
 
 const EMAIL_TOKEN_MINUTES = 15;
 const CHALLENGE_MINUTES = 5;
+const MAX_PASSKEYS = 10;
+/** Adding a passkey needs a sign-in this recent (a stolen old session can't add one). */
+const RECENT_SIGNIN_MS = 10 * 60_000;
 
 const Email = v.pipe(
   v.string(),
@@ -36,16 +40,25 @@ const DeviceLabel = v.optional(v.pipe(v.string(), v.trim(), v.maxLength(60)), 'B
 const Token = v.pipe(v.string(), v.regex(/^[A-Za-z0-9_-]{43}$/));
 const InviteId = v.optional(v.pipe(v.string(), v.regex(/^[A-Za-z0-9_-]{8,64}$/)));
 
-const ip = (c: { req: { header(n: string): string | undefined } }) =>
-  c.req.header('CF-Connecting-IP') ?? 'unknown';
+/** Client network for rate limiting: the full IPv4 address, or the IPv6 /64. */
+function clientNet(c: Context<AppEnv>): string {
+  const ip = c.req.header('CF-Connecting-IP') ?? 'unknown';
+  if (!ip.includes(':')) return ip;
+  const parts = ip.split(':');
+  return `${parts.slice(0, 4).join(':')}::/64`;
+}
 
-/** Whether a new account may be created right now (sign-up policy, ADR 0012). */
-async function canCreateAccount(env: Env, inviteId: string | undefined): Promise<boolean> {
-  if (env.ALLOW_SIGNUPS === 'open') return true;
-  // Partners joining through a valid invite can always sign up.
-  if (!inviteId) return false;
+/** In production (real email), refuse to run without a stable rate-limit salt. */
+function requireProductionConfig(env: Env): void {
+  if (env.EMAIL_PROVIDER === 'resend' && !env.RATE_LIMIT_SALT) {
+    throw new HttpError(503, 'misconfigured', 'Sign-in is temporarily unavailable.');
+  }
+}
+
+/** Whether invite-gated sign-up could apply (sign-ups not open). */
+async function inviteUsable(env: Env, inviteId: string): Promise<boolean> {
   const row = await env.DB.prepare(
-    "SELECT 1 FROM invites WHERE id = ? AND kind = 'partner' AND used_at IS NULL AND expires_at > ?",
+    "SELECT 1 FROM invites WHERE id = ? AND kind = 'partner' AND used_at IS NULL AND expires_at > ? AND claimed_by IS NULL",
   )
     .bind(await hashToken(inviteId), Date.now())
     .first();
@@ -92,8 +105,9 @@ async function takeChallenge(
   )
     .bind(id, purpose, Date.now())
     .first<{ challenge: string; user_id: string | null }>();
-  if (!row || (userId !== null && row.user_id !== userId))
+  if (!row || (userId !== null && row.user_id !== userId)) {
     throw new HttpError(400, 'challenge_invalid');
+  }
   return row.challenge;
 }
 
@@ -101,7 +115,49 @@ export const auth = new Hono<AppEnv>();
 
 /* ---------- email ---------- */
 
+/** Issues a magic link if allowed. Runs after the response has been sent. */
+async function issueLink(
+  env: Env,
+  input: { email: string; accept_terms: boolean; invite?: string | undefined },
+): Promise<void> {
+  // Per-address limit: past it, silently stop sending (no 429 that would let
+  // anyone lock an address out, or reveal anything about it).
+  try {
+    await rateLimit(env, `email-start:addr:${input.email}`, 5, 3600);
+  } catch {
+    return;
+  }
+  const existing = await env.DB.prepare('SELECT id FROM users WHERE email = ?')
+    .bind(input.email)
+    .first();
+  const mayCreate =
+    input.accept_terms &&
+    (env.ALLOW_SIGNUPS === 'open' || (!!input.invite && (await inviteUsable(env, input.invite))));
+  if (!existing && !mayCreate) return;
+  const token = newToken();
+  const now = Date.now();
+  await env.DB.prepare(
+    'INSERT INTO email_tokens (token_hash, email, created_at, expires_at) VALUES (?, ?, ?, ?)',
+  )
+    .bind(await hashToken(token), input.email, now, now + EMAIL_TOKEN_MINUTES * 60_000)
+    .run();
+  const app = (env.APP_URL ?? rp(env, undefined).origin).replace(/\/?$/, '/');
+  await sendEmail(env, {
+    to: input.email,
+    subject: 'Your Ours sign-in link',
+    text: [
+      'Tap to sign in to Ours:',
+      '',
+      `${app}#signin=${token}`,
+      '',
+      `This link works once and expires in ${EMAIL_TOKEN_MINUTES} minutes.`,
+      'If you didn’t ask for it, ignore this email.',
+    ].join('\n'),
+  });
+}
+
 auth.post('/email/start', async (c) => {
+  requireProductionConfig(c.env);
   const input = await body(
     c,
     v.object({
@@ -111,37 +167,15 @@ auth.post('/email/start', async (c) => {
       invite: InviteId,
     }),
   );
-  await rateLimit(c.env, `email-start:ip:${ip(c)}`, 10, 3600);
-  await rateLimit(c.env, `email-start:addr:${input.email}`, 5, 3600);
-  await verifyTurnstile(c.env, input.turnstile, ip(c));
-
-  const existing = await c.env.DB.prepare('SELECT id FROM users WHERE email = ?')
-    .bind(input.email)
-    .first();
-  const allowed = existing || (input.accept_terms && (await canCreateAccount(c.env, input.invite)));
-  if (allowed) {
-    const token = newToken();
-    const now = Date.now();
-    await c.env.DB.prepare(
-      'INSERT INTO email_tokens (token_hash, email, created_at, expires_at) VALUES (?, ?, ?, ?)',
-    )
-      .bind(await hashToken(token), input.email, now, now + EMAIL_TOKEN_MINUTES * 60_000)
-      .run();
-    const app = (c.env.APP_URL ?? rp(c.env, undefined).origin).replace(/\/?$/, '/');
-    await sendEmail(c.env, {
-      to: input.email,
-      subject: 'Your Ours sign-in link',
-      text: [
-        'Tap to sign in to Ours:',
-        '',
-        `${app}#signin=${token}`,
-        '',
-        `This link works once and expires in ${EMAIL_TOKEN_MINUTES} minutes.`,
-        'If you didn’t ask for it, ignore this email.',
-      ].join('\n'),
-    });
-  }
-  // Same answer either way: no account enumeration.
+  // Bot check before anything is counted, so unsolved requests can't burn limits.
+  await verifyTurnstile(c.env, input.turnstile, c.req.header('CF-Connecting-IP'));
+  await rateLimit(c.env, `email-start:ip:${clientNet(c)}`, 10, 3600);
+  // Same answer, same timing, either way: the lookup and email happen after the response.
+  c.executionCtx.waitUntil(
+    issueLink(c.env, input).catch(() => {
+      // Delivery problems are not reported back (that would leak account existence).
+    }),
+  );
   return c.json({ ok: true });
 });
 
@@ -150,7 +184,7 @@ auth.post('/email/verify', async (c) => {
     c,
     v.object({ token: Token, device_label: DeviceLabel, invite: InviteId }),
   );
-  await rateLimit(c.env, `email-verify:ip:${ip(c)}`, 20, 3600);
+  await rateLimit(c.env, `email-verify:ip:${clientNet(c)}`, 20, 3600);
   const row = await c.env.DB.prepare(
     `UPDATE email_tokens SET used_at = ?1
       WHERE token_hash = ?2 AND used_at IS NULL AND expires_at > ?1
@@ -165,8 +199,21 @@ auth.post('/email/verify', async (c) => {
     .first<{ id: string; email: string }>();
   let created = false;
   if (!user) {
-    if (!(await canCreateAccount(c.env, input.invite))) throw new HttpError(403, 'signups_closed');
-    user = { id: newId(), email: row.email };
+    const id = newId();
+    if (c.env.ALLOW_SIGNUPS !== 'open') {
+      // Invite-gated sign-up: claim the invite for this one new account,
+      // atomically, so one invite can create at most one account.
+      if (!input.invite) throw new HttpError(403, 'signups_closed');
+      const claimed = await c.env.DB.prepare(
+        `UPDATE invites SET claimed_by = ?1
+          WHERE id = ?2 AND kind = 'partner' AND used_at IS NULL AND expires_at > ?3 AND claimed_by IS NULL
+          RETURNING id`,
+      )
+        .bind(id, await hashToken(input.invite), Date.now())
+        .first();
+      if (!claimed) throw new HttpError(403, 'signups_closed');
+    }
+    user = { id, email: row.email };
     await c.env.DB.prepare(
       'INSERT INTO users (id, email, created_at, last_active) VALUES (?, ?, ?, ?)',
     )
@@ -179,20 +226,25 @@ auth.post('/email/verify', async (c) => {
 });
 
 auth.post('/logout', requireAuth, async (c) => {
-  await c.env.DB.prepare('DELETE FROM sessions WHERE token_hash = ?')
-    .bind(c.var.session.token_hash)
-    .run();
+  await endSession(c.env, c.var.session);
   return c.json({ ok: true });
 });
 
 /* ---------- passkeys ---------- */
 
 auth.post('/passkey/register/options', requireAuth, async (c) => {
-  const { rpID, rpName } = rp(c.env, c.req.header('Origin'));
   const user = c.var.user;
+  await rateLimit(c.env, `passkey-register:${user.id}`, 20, 3600);
+  if (Date.now() - c.var.session.created_at > RECENT_SIGNIN_MS) {
+    throw new HttpError(403, 'reauth_required', 'Sign in again to add a passkey.');
+  }
+  const { rpID, rpName } = rp(c.env, c.req.header('Origin'));
   const existing = await c.env.DB.prepare('SELECT id, transports FROM passkeys WHERE user_id = ?')
     .bind(user.id)
     .all<{ id: string; transports: string | null }>();
+  if (existing.results.length >= MAX_PASSKEYS) {
+    throw new HttpError(409, 'too_many_passkeys', 'Remove a passkey before adding another.');
+  }
   const options = await generateRegistrationOptions({
     rpName,
     rpID,
@@ -236,8 +288,9 @@ auth.post('/passkey/register/verify', requireAuth, async (c) => {
   }
   if (!verification.verified) throw new HttpError(400, 'passkey_invalid');
   const cred = verification.registrationInfo.credential;
-  await c.env.DB.prepare(
-    'INSERT INTO passkeys (id, user_id, public_key, counter, transports, created_at) VALUES (?, ?, ?, ?, ?, ?)',
+  const inserted = await c.env.DB.prepare(
+    `INSERT INTO passkeys (id, user_id, public_key, counter, transports, created_at)
+     VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO NOTHING`,
   )
     .bind(
       cred.id,
@@ -248,11 +301,20 @@ auth.post('/passkey/register/verify', requireAuth, async (c) => {
       Date.now(),
     )
     .run();
+  if (!inserted.meta.changes) throw new HttpError(409, 'passkey_exists');
+  // Tell the owner, so a passkey added by someone else doesn't go unnoticed.
+  c.executionCtx.waitUntil(
+    sendEmail(c.env, {
+      to: c.var.user.email,
+      subject: 'A passkey was added to your Ours account',
+      text: 'A new passkey was just added to your Ours account. If this wasn’t you, open Ours → Privacy, remove it, and sign out other devices.',
+    }).catch(() => {}),
+  );
   return c.json({ ok: true, id: cred.id });
 });
 
 auth.post('/passkey/login/options', async (c) => {
-  await rateLimit(c.env, `passkey-login:ip:${ip(c)}`, 30, 600);
+  await rateLimit(c.env, `passkey-login:ip:${clientNet(c)}`, 30, 600);
   const { rpID } = rp(c.env, c.req.header('Origin'));
   const options = await generateAuthenticationOptions({ rpID, userVerification: 'preferred' });
   const challengeId = await storeChallenge(c.env, options.challenge, 'login', null);
@@ -268,7 +330,7 @@ auth.post('/passkey/login/verify', async (c) => {
       device_label: DeviceLabel,
     }),
   );
-  await rateLimit(c.env, `passkey-verify:ip:${ip(c)}`, 30, 600);
+  await rateLimit(c.env, `passkey-verify:ip:${clientNet(c)}`, 30, 600);
   const { rpID, origins } = rp(c.env, c.req.header('Origin'));
   const expectedChallenge = await takeChallenge(c.env, input.challenge_id, 'login', null);
   const passkey = await c.env.DB.prepare(
@@ -312,4 +374,22 @@ auth.post('/passkey/login/verify', async (c) => {
   if (!user) throw new HttpError(400, 'passkey_invalid');
   const session = await createSession(c.env, user.id, input.device_label);
   return c.json({ ...session, user, new_user: false });
+});
+
+/** The account's passkeys (id and when added). */
+auth.get('/passkeys', requireAuth, async (c) => {
+  const rows = await c.env.DB.prepare(
+    'SELECT id, created_at FROM passkeys WHERE user_id = ? ORDER BY created_at',
+  )
+    .bind(c.var.user.id)
+    .all<{ id: string; created_at: number }>();
+  return c.json({ passkeys: rows.results });
+});
+
+auth.delete('/passkeys/:id', requireAuth, async (c) => {
+  const result = await c.env.DB.prepare('DELETE FROM passkeys WHERE id = ? AND user_id = ?')
+    .bind(c.req.param('id'), c.var.user.id)
+    .run();
+  if (!result.meta.changes) throw new HttpError(404, 'not_found');
+  return c.json({ ok: true });
 });

@@ -10,6 +10,16 @@ setSender(async (_env, email) => {
   outbox.push(email);
 });
 
+/** Emails are sent after the response (no timing leak), so wait briefly for one to arrive. */
+export async function nextMail(index: number, timeoutMs = 500): Promise<Email | undefined> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (outbox[index]) return outbox[index];
+    await new Promise((r) => setTimeout(r, 5));
+  }
+  return outbox[index];
+}
+
 let ipCounter = 0;
 /** A fresh client IP per call keeps per-IP rate limits out of unrelated tests. */
 export const freshIp = () => `10.0.${Math.floor(++ipCounter / 250)}.${ipCounter % 250}`;
@@ -60,7 +70,7 @@ export async function signIn(email: string, opts: { invite?: string; acceptTerms
     },
   });
   if (start.status !== 200) throw new Error(`start ${start.status}`);
-  const mail = outbox[before];
+  const mail = await nextMail(before);
   if (!mail) throw new Error('no email sent');
   const token = /#signin=([A-Za-z0-9_-]{43})/.exec(mail.text)?.[1];
   const verify = await call('/auth/email/verify', {

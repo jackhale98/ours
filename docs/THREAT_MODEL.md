@@ -27,7 +27,7 @@
 - **Replaying a notification**: each payload carries a random id and an authenticated `not_before`/`expires_at` window (max 7 days, 5 min clock skew). The service worker drops early, expired and already-shown payloads.
 - **Private content under the shared key**: `sealDecodedRecord` refuses to seal busy-only events and private lists under the space key, and receivers flag such records.
 - **Tampered invite**: cannot be forged without the secret in the link. A link replaced in transit (e.g. an attacker's own invite) is caught by comparing safety codes in person.
-- **Leaked invite link**: the link secret plus the stored blob *is* the space key (or, for device links, the whole key ring). "Single use" is enforced by the server, not by cryptography, and the safety code does not detect an eavesdropper who saw the link. The server deletes the blob on first fetch (phase 2), links expire in 24 h, and the app strips the fragment from history. Moving to an ephemeral key exchange is tracked in `docs/reviews/0001-core-crypto.md` (M4).
+- **Leaked invite link**: the link secret plus the stored blob *is* the space key (or, for device links, the whole key ring). "Single use" is enforced by the server, not by cryptography, and the safety code does not detect an eavesdropper who saw the link. The first account to fetch an invite claims it, so nobody else can fetch the blob; the blob is erased when the invite is accepted; unaccepted invites expire after 24 h (and are deleted by the hourly cleanup); invite ids are stored hashed; and the app strips the fragment from history. Moving to an ephemeral key exchange is tracked in `docs/reviews/0001-core-crypto.md` (M4).
 - **Rollback of the key backup** to an older version: possible (the server picks which backup to serve). The effect is losing newer key versions on a restored device, not disclosure. Devices merge the current backup into their ring before writing a new one (`KeyRing.mergeFrom`), so a stale ring never overwrites keys; key versions can never be silently replaced.
 - **Withholding data** (not syncing, deleting): possible; the server is trusted for availability, not secrecy.
 
@@ -58,6 +58,8 @@ Every stored field (keep in sync with `apps/api/migrations` and the privacy poli
 | rate_limits | key (salted hash, no IP or email), window_start, count | Abuse protection; deleted after a day |
 
 **Imported calendars (opt-in):** when a user adds a calendar by subscription link, each refresh is relayed by the Worker, which sees the subscription URL and that calendar's contents **in transit** (not stored, not logged). The URL itself is stored only inside an encrypted record. File imports never reach the server. See ADR 0011.
+
+Cloudflare's own invocation logs are switched off (`observability.logs.invocation_logs: false`, enforced by `pnpm check:worker`), because they would record request URLs and client IP addresses.
 
 Also visible transiently, not stored in D1: IP addresses and user agents (Cloudflare edge), request timing, push timing. Worker logs contain route, method, status and latency only — never bodies or tokens.
 

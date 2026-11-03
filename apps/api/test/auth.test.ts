@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 import { env } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
-import { call, outbox, signIn, uniqueEmail } from './helpers';
+import { call, nextMail, outbox, signIn, uniqueEmail } from './helpers';
 
 describe('email sign-in', () => {
   it('creates an account, a device and a session', async () => {
@@ -33,6 +33,7 @@ describe('email sign-in', () => {
     });
     expect(unknown.status).toBe(200);
     expect(unknown.json).toEqual({ ok: true });
+    await new Promise((r) => setTimeout(r, 100));
     expect(outbox.length).toBe(before); // new address without accepting terms: no account, no email
   });
 
@@ -40,13 +41,13 @@ describe('email sign-in', () => {
     const email = uniqueEmail();
     const before = outbox.length;
     await call('/auth/email/start', { body: { email, accept_terms: true } });
-    const token = /#signin=([A-Za-z0-9_-]{43})/.exec(outbox[before]?.text ?? '')?.[1];
+    const token = /#signin=([A-Za-z0-9_-]{43})/.exec((await nextMail(before))?.text ?? '')?.[1];
     expect((await call('/auth/email/verify', { body: { token } })).status).toBe(200);
     expect((await call('/auth/email/verify', { body: { token } })).json.error).toBe('link_invalid');
 
     const before2 = outbox.length;
     await call('/auth/email/start', { body: { email } });
-    const t2 = /#signin=([A-Za-z0-9_-]{43})/.exec(outbox[before2]?.text ?? '')?.[1];
+    const t2 = /#signin=([A-Za-z0-9_-]{43})/.exec((await nextMail(before2))?.text ?? '')?.[1];
     await env.DB.prepare('UPDATE email_tokens SET expires_at = 1 WHERE used_at IS NULL').run();
     expect((await call('/auth/email/verify', { body: { token: t2 } })).json.error).toBe(
       'link_invalid',
@@ -60,15 +61,18 @@ describe('email sign-in', () => {
     expect(raw.status).toBe(422);
   });
 
-  it('rate-limits magic-link requests per address', async () => {
+  it('limits links per address silently (no 429 that could lock someone out)', async () => {
     const email = uniqueEmail();
+    const before = outbox.length;
     const statuses: number[] = [];
-    for (let i = 0; i < 7; i++)
+    for (let i = 0; i < 7; i++) {
       statuses.push(
         (await call('/auth/email/start', { body: { email, accept_terms: true } })).status,
       );
-    expect(statuses.slice(0, 5).every((s) => s === 200)).toBe(true);
-    expect(statuses.at(-1)).toBe(429);
+    }
+    await new Promise((r) => setTimeout(r, 200));
+    expect(statuses.every((s) => s === 200)).toBe(true);
+    expect(outbox.slice(before).filter((m) => m.to === email)).toHaveLength(5);
   });
 });
 

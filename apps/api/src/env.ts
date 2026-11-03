@@ -18,7 +18,8 @@ export interface Env {
   /** Cloudflare Turnstile secret. When unset, bot checks are skipped (local dev, tests). */
   TURNSTILE_SECRET?: string;
   /** Email: 'log' (dev; nothing sent) or 'resend'. */
-  EMAIL_PROVIDER?: 'log' | 'resend';
+  /** 'dev-outbox' is for local end-to-end tests only. */
+  EMAIL_PROVIDER?: 'log' | 'resend' | 'dev-outbox';
   EMAIL_FROM?: string;
   EMAIL_API_KEY?: string;
   /** Secret salt for hashing rate-limit keys (IPs, addresses) before storage. */
