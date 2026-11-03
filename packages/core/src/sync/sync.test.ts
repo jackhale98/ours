@@ -43,6 +43,7 @@ const event = (title: string, updated_at: number, device_id: string): DecodedRec
     location: null,
     notes: null,
     countdown: false,
+    away: false,
     stub_id: null,
   },
   updated_at,

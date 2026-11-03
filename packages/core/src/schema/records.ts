@@ -54,6 +54,8 @@ const whenEntries = {
   all_day: v.boolean(),
   tz: v.nullable(TimeZone),
   rrule: v.nullable(Text(500)),
+  /** Out of town / unavailable all day (e.g. a work trip): blocks "both free" evenings. */
+  away: v.boolean(),
 };
 const WHEN_MESSAGE = 'start/end must match all_day, end must not precede start';
 

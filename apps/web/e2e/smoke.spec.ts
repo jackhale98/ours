@@ -6,9 +6,9 @@ for (const scheme of ['light', 'dark'] as const) {
   test(`landing renders without a11y violations (${scheme})`, async ({ page }) => {
     await page.emulateMedia({ colorScheme: scheme });
     await page.goto('/');
-    await expect(page.getByRole('heading', { level: 1 })).toContainText('private planner');
+    await expect(page.getByRole('heading', { level: 1 })).toContainText('two of you');
     const results = await new AxeBuilder({ page })
-      .withTags(['wcag2a', 'wcag2aa', 'wcag21aa', 'wcag22aa'])
+      .withTags(['wcag2a', 'wcag2aa', 'wcag21aa', 'wcag22aa', 'best-practice'])
       .analyze();
     expect(results.violations).toEqual([]);
   });

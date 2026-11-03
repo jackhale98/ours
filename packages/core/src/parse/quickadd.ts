@@ -5,9 +5,9 @@
  * Documented rules:
  * - Only the FIRST date and FIRST time/range are used; later ones stay in the title.
  * - `fri` / `this fri` = next occurrence on or after today (today counts).
- *   `next fri` = that occurrence, plus 7 days if it falls in the same week as today
- *   (weeks start on `ctx.weekStart`, default Monday). So on Tue 3 Nov, `next fri` = 13 Nov
- *   and `next mon` = 9 Nov; on a Friday `next fri` = the following Friday.
+ *   `next fri` = the first Friday strictly after today, as in docs/prototype.html: on Tue 3 Nov
+ *   `next fri` = 6 Nov; on a Friday it is the following Friday. ("Next Friday" is ambiguous
+ *   in speech; the live chips under the input show the resolved date, and it is editable.)
  * - Month/day without a year that is already past rolls to next year (today itself does not).
  *   `feb 29` finds the next leap year. Invalid days (`feb 30`) are not dates.
  * - Numeric slash dates (`11/14`) are NOT supported (ambiguous); ISO `2026-11-14` is.
@@ -19,7 +19,7 @@
  * - `tonight` sets time 19:00 when no explicit time was given.
  * - Place: text after a `@` (at start or after whitespace) up to the next recognised
  *   date/time/#private/trailing-? token, or end of input.
- * - `ctx.nowTime` and `ctx.weekStart` beyond `next <weekday>` are reserved; dates never roll by time.
+ * - `ctx.nowTime` and `ctx.weekStart` are reserved; dates never roll by time.
  */
 
 export type Weekday = 0 | 1 | 2 | 3 | 4 | 5 | 6;
@@ -216,7 +216,7 @@ function buildDate(m: RegExpExecArray, t: { y: number; m: number; d: number }): 
   return null;
 }
 
-function findDates(text: string, t: { y: number; m: number; d: number }, weekStart: Weekday) {
+function findDates(text: string, t: { y: number; m: number; d: number }) {
   const todayN = toDays(t.y, t.m, t.d);
   const out: Cand<DateVal>[] = [];
   const add = (c: Cand<string>[]) => {
@@ -233,8 +233,7 @@ function findDates(text: string, t: { y: number; m: number; d: number }, weekSta
     scan(RE_WD, text, (m) => {
       const target = WD_KEYS.indexOf((grp(m, 'w') ?? '').slice(0, 3).toLowerCase());
       const delta = (target - dowOf(todayN) + 7) % 7;
-      const sameWeek = delta <= 6 - ((dowOf(todayN) - weekStart + 7) % 7);
-      const plus = grp(m, 'q')?.toLowerCase() === 'next' && sameWeek ? 7 : 0;
+      const plus = grp(m, 'q')?.toLowerCase() === 'next' && delta === 0 ? 7 : 0;
       return fromDays(todayN + delta + plus);
     }),
   );
@@ -305,7 +304,7 @@ export function parseQuickAdd(input: string, ctx: QuickAddContext): QuickAddResu
   const stops: number[] = [];
 
   // dates first; the chosen date is masked so it cannot be re-read as a time
-  const dates = findDates(input, t, ctx.weekStart ?? 1);
+  const dates = findDates(input, t);
   const dateTok = first(dates);
   stops.push(...dates.map((d) => d.start));
   let masked = input;

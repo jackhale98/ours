@@ -162,6 +162,7 @@ describe('scope policy', () => {
     location: null,
     notes: null,
     countdown: false,
+    away: false,
     stub_id: 'stub',
   };
   const busy: DecodedRecord = { kind: 'event', deleted: false, data: event, ...meta };
@@ -180,6 +181,7 @@ describe('scope policy', () => {
       all_day: false,
       tz: 'UTC',
       rrule: null,
+      away: false,
       owner: 'a',
     },
     ...meta,

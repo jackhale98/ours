@@ -28,6 +28,7 @@ const event: EventData = {
   location: 'Luigi’s',
   notes: null,
   countdown: false,
+  away: false,
   stub_id: null,
 };
 
@@ -48,6 +49,7 @@ const samples: DecodedRecord[] = [
       all_day: false,
       tz: 'America/New_York',
       rrule: 'FREQ=WEEKLY;BYDAY=SA',
+      away: false,
       owner: 'b',
     },
     ...meta,

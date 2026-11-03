@@ -29,6 +29,7 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm check:spdx
       - run: pnpm check:licenses
+      - run: pnpm check:contrast
       - name: DCO sign-off
         if: github.event_name == 'pull_request'
         run: node scripts/check-dco.mjs origin/${{ github.base_ref }}

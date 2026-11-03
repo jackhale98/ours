@@ -44,6 +44,13 @@ if (process.argv.includes('--notices')) {
     '|---|---|---|',
     ...rows.map((r) => `| ${r.name} | ${r.version} | ${r.license} |`),
     '',
+    '## Fonts (bundled, SIL Open Font License 1.1, full text in apps/web/src/fonts/OFL.txt)',
+    '',
+    '- Figtree — Copyright 2022 The Figtree Project Authors (https://github.com/erikdkennedy/figtree)',
+    '- Bricolage Grotesque — Copyright 2022 The Bricolage Grotesque Project Authors (https://github.com/ateliertriay/bricolage)',
+    '',
+    'Latin subsets taken from Fontsource 5.3.0 (`@fontsource-variable/figtree`, `@fontsource-variable/bricolage-grotesque`).',
+    '',
     'Build-time data: caniuse-lite (CC-BY-4.0), © Alexis Deveria and contributors.',
     '',
   ].join('\n');

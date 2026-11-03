@@ -68,10 +68,11 @@ const cases: [string, QuickAddContext, Expected][] = [
   ['lunch on friday', TUE, { title: 'lunch', date: '2026-11-06', allDay: true }],
   ['lunch this friday', TUE, { title: 'lunch', date: '2026-11-06', allDay: true }],
   ['lunch this tuesday', TUE, { title: 'lunch', date: '2026-11-03', allDay: true }],
-  ['lunch next friday', TUE, { title: 'lunch', date: '2026-11-13', allDay: true }],
+  // `next X` = first X strictly after today (prototype behaviour).
+  ['lunch next friday', TUE, { title: 'lunch', date: '2026-11-06', allDay: true }],
   ['lunch next monday', TUE, { title: 'lunch', date: '2026-11-09', allDay: true }],
   ['lunch next tuesday', TUE, { title: 'lunch', date: '2026-11-10', allDay: true }],
-  ['lunch next sunday', TUE, { title: 'lunch', date: '2026-11-15', allDay: true }],
+  ['lunch next sunday', TUE, { title: 'lunch', date: '2026-11-08', allDay: true }],
   ['lunch sunday', SUN, { title: 'lunch', date: '2026-11-08', allDay: true }],
   ['lunch next sunday', SUN, { title: 'lunch', date: '2026-11-15', allDay: true }],
   ['lunch next monday', SUN, { title: 'lunch', date: '2026-11-09', allDay: true }],
@@ -79,7 +80,7 @@ const cases: [string, QuickAddContext, Expected][] = [
   [
     'lunch next monday',
     { today: '2026-11-08', weekStart: 0 },
-    { title: 'lunch', date: '2026-11-16', allDay: true },
+    { title: 'lunch', date: '2026-11-09', allDay: true },
   ],
   ['fri nov 20 party', TUE, { title: 'party', date: '2026-11-20', allDay: true }],
   // month + day

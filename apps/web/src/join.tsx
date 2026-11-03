@@ -7,6 +7,7 @@
 import { parseInviteFragment } from '@ours/core/crypto';
 import { render } from 'preact';
 import './styles/base.css';
+import './styles/landing.css';
 import { APP_NAME } from './config';
 
 function readInvite(): { inviteId: string } | null {

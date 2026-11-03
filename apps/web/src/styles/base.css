@@ -1,4 +1,5 @@
 /* SPDX-License-Identifier: AGPL-3.0-or-later */
+/* Base elements and shared primitives, after docs/prototype.html. */
 @import "./tokens.css";
 
 *,
@@ -14,89 +15,186 @@ html {
 
 body {
   margin: 0;
-  background: var(--bg);
-  color: var(--text);
-  font: 1rem / 1.5 var(--font-body);
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--body);
+  font-size: 0.9375rem;
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
 }
 
-h1,
-h2 {
-  font-family: var(--font-display);
-  line-height: 1.15;
+button {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
 }
 
-a {
-  color: var(--ours);
+input,
+textarea {
+  font: inherit;
+  color: inherit;
 }
 
 :focus-visible {
-  outline: 3px solid var(--focus);
+  outline: 2px solid var(--focus);
   outline-offset: 2px;
+}
+
+h1,
+h2,
+h3 {
+  font-family: var(--display);
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  text-wrap: balance;
+  margin: 0;
+}
+
+h1 {
+  font-size: 2rem;
+  line-height: 1.05;
+}
+
+h2 {
+  font-size: 1.4375rem;
+  line-height: 1.15;
+}
+
+h3 {
+  font-size: 1.1875rem;
+  line-height: 1.2;
+}
+
+p {
+  margin: 0;
+}
+
+a {
+  color: var(--ink);
+  text-underline-offset: 3px;
+}
+
+.sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
 }
 
 .skip-link {
   position: absolute;
   left: var(--space-2);
   top: -100px;
+  z-index: 100;
   padding: var(--space-2) var(--space-4);
+  border-radius: var(--radius-sm);
   background: var(--surface);
-  color: var(--text);
+  color: var(--ink);
 }
 
 .skip-link:focus {
   top: var(--space-2);
 }
 
-.page {
-  max-width: 40rem;
-  margin: 0 auto;
-  padding: var(--space-8) var(--space-4);
+.eyebrow {
+  font-size: 0.71875rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-weight: 700;
+  margin-bottom: 4px;
 }
 
-.button {
+.lede {
+  color: var(--muted);
+  max-width: 52ch;
+}
+
+/* Logo: two overlapping circles, one per person. */
+.logo {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--display);
+  font-weight: 700;
+  font-size: 1.375rem;
+  letter-spacing: -0.03em;
+  color: var(--ink);
+  text-decoration: none;
+}
+
+.logo-a {
+  fill: var(--person-a);
+}
+
+.logo-b {
+  fill: var(--person-b);
+  fill-opacity: 0.82;
+}
+
+.btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  gap: 6px;
   min-height: var(--tap);
-  min-width: var(--tap);
-  padding: 0 var(--space-6);
-  border: 0;
+  padding: 0 18px;
   border-radius: 999px;
-  background: var(--ours);
-  color: var(--on-accent);
-  font: inherit;
+  border: 1px solid var(--line-strong);
+  background: var(--surface);
+  color: var(--ink);
   font-weight: 600;
+  font-size: 0.90625rem;
+  white-space: nowrap;
   text-decoration: none;
-  cursor: pointer;
 }
 
-.dots {
-  display: inline-flex;
-  gap: 0;
+.btn:hover {
+  border-color: var(--ink);
 }
 
-.dot {
-  width: 0.9rem;
-  height: 0.9rem;
-  border-radius: 50%;
-  display: inline-block;
+.btn.primary {
+  background: var(--ink);
+  color: var(--paper);
+  border-color: var(--ink);
 }
 
-.dot-a {
-  background: var(--person-a);
+.btn.primary:hover {
+  opacity: 0.9;
 }
 
-.dot-b {
-  background: var(--person-b);
-  margin-left: -0.3rem;
+.card {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.card h2,
+.card h3 {
+  font-size: 1.0625rem;
+}
+
+.card p {
+  color: var(--muted);
+  font-size: 0.875rem;
+  max-width: 58ch;
 }
 
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
   *::after {
-    animation-duration: 0.01ms !important;
-    transition-duration: 0.01ms !important;
+    animation: none !important;
+    transition: none !important;
     scroll-behavior: auto !important;
   }
 }

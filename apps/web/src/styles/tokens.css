@@ -1,59 +1,126 @@
 /* SPDX-License-Identifier: AGPL-3.0-or-later */
 /*
  * Design tokens: the single source of truth for colour, type and spacing.
- * Every colour pair used for text meets WCAG 2.2 AA (4.5:1) in both themes.
- * Person A and person B each get one hue; shared ("ours") is their mix.
+ * Palette and type follow docs/prototype.html: one hue per person (A = blue,
+ * B = rose) and "ours" as their mix. Changes from the prototype, made so text
+ * meets WCAG 2.2 AA (4.5:1) and controls meet 3:1 in both themes:
+ *   --faint      #899497 -> #626D70 (light), #768386 -> #869294 (dark)
+ *   --control    new: borders of inputs, checkboxes, unassigned chips (3:1);
+ *                --line-strong stays for decorative edges only.
+ * Verify with: node scripts/check-contrast.mjs
  */
-:root {
-  --font-display: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
-  --font-body: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
 
-  --space-1: 0.25rem;
-  --space-2: 0.5rem;
-  --space-3: 0.75rem;
-  --space-4: 1rem;
-  --space-6: 1.5rem;
-  --space-8: 2rem;
-  --radius: 0.75rem;
+@font-face {
+  font-family: "Figtree";
+  font-style: normal;
+  font-weight: 300 900;
+  font-display: swap;
+  src: url("../fonts/figtree-latin-wght.woff2") format("woff2");
+  unicode-range:
+    U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308,
+    U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: "Bricolage Grotesque";
+  font-style: normal;
+  font-weight: 200 800;
+  font-display: swap;
+  src: url("../fonts/bricolage-grotesque-latin-wght.woff2") format("woff2");
+  unicode-range:
+    U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308,
+    U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+:root {
+  --display: "Bricolage Grotesque", "Avenir Next", "Segoe UI", system-ui, sans-serif;
+  --body: "Figtree", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --radius-sm: 12px;
+  --radius: 16px;
+  --radius-lg: 24px;
   --tap: 44px;
 
-  --bg: #fbf8f4;
+  --paper: #f4f6f5;
   --surface: #ffffff;
-  --text: #1f1b17;
-  --text-muted: #5c544c;
-  --border: #ddd4c9;
-  --focus: #1d4ed8;
+  --sunk: #eaeeed;
+  --ink: #1b2427;
+  --muted: #5a676a;
+  --faint: #626d70;
+  --line: #dce2e1;
+  --line-strong: #b9c3c2;
+  --control: #869090;
+  --focus: #2b6e8c;
 
-  --person-a: #b4471f; /* terracotta, 5.3:1 on --bg */
-  --person-b: #22667a; /* teal, 6.2:1 on --bg */
-  --ours: #6a4a6e; /* plum mix, 7.6:1 on --bg */
+  --person-a: #2b6e8c;
+  --person-a-soft: #ddebf1;
+  --person-b: #b3486a;
+  --person-b-soft: #f6e2e9;
+  --ours: #6c5790;
+  --ours-soft: #ece7f3;
+
+  --good: #2f7a57;
+  --danger: #b23a3a;
   --on-accent: #ffffff;
+  --scrim: rgba(18, 26, 28, 0.38);
+  --shadow: rgba(20, 30, 32, 0.1);
+  color-scheme: light;
 }
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --bg: #171412;
-    --surface: #221e1b;
-    --text: #f3ede6;
-    --text-muted: #b9afa4;
-    --border: #3d3631;
-    --focus: #93b4ff;
-    --person-a: #f0956f;
-    --person-b: #73c3d8;
-    --ours: #c9a3cd;
-    --on-accent: #171412;
+    --paper: #111719;
+    --surface: #192124;
+    --sunk: #222b2e;
+    --ink: #e6eceb;
+    --muted: #a1adaf;
+    --faint: #869294;
+    --line: #2a3437;
+    --line-strong: #43504f;
+    --control: #606c6b;
+    --focus: #7db7d3;
+    --person-a: #7db7d3;
+    --person-a-soft: #1c323d;
+    --person-b: #e58eab;
+    --person-b-soft: #3a2230;
+    --ours: #b6a3d8;
+    --ours-soft: #29233a;
+    --good: #6fc39a;
+    --danger: #ee8a8a;
+    --on-accent: #111719;
+    --scrim: rgba(0, 0, 0, 0.58);
+    --shadow: rgba(0, 0, 0, 0.4);
+    color-scheme: dark;
   }
 }
 
 :root[data-theme="dark"] {
-  --bg: #171412;
-  --surface: #221e1b;
-  --text: #f3ede6;
-  --text-muted: #b9afa4;
-  --border: #3d3631;
-  --focus: #93b4ff;
-  --person-a: #f0956f;
-  --person-b: #73c3d8;
-  --ours: #c9a3cd;
-  --on-accent: #171412;
+  --paper: #111719;
+  --surface: #192124;
+  --sunk: #222b2e;
+  --ink: #e6eceb;
+  --muted: #a1adaf;
+  --faint: #869294;
+  --line: #2a3437;
+  --line-strong: #43504f;
+  --control: #606c6b;
+  --focus: #7db7d3;
+  --person-a: #7db7d3;
+  --person-a-soft: #1c323d;
+  --person-b: #e58eab;
+  --person-b-soft: #3a2230;
+  --ours: #b6a3d8;
+  --ours-soft: #29233a;
+  --good: #6fc39a;
+  --danger: #ee8a8a;
+  --on-accent: #111719;
+  --scrim: rgba(0, 0, 0, 0.58);
+  --shadow: rgba(0, 0, 0, 0.4);
+  color-scheme: dark;
 }

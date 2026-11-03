@@ -18,7 +18,8 @@
     "e2e": "pnpm --filter @ours/web e2e",
     "check:licenses": "node scripts/check-licenses.mjs",
     "check:dco": "node scripts/check-dco.mjs",
-    "check:spdx": "node scripts/check-spdx.mjs"
+    "check:spdx": "node scripts/check-spdx.mjs",
+    "check:contrast": "node scripts/check-contrast.mjs"
   },
   "devDependencies": {
     "@biomejs/biome": "2.6.4",
