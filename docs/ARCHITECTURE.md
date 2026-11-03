@@ -77,7 +77,7 @@ Timed events store wall-clock `start`/`end` (`YYYY-MM-DDTHH:mm`) plus an IANA zo
 1. License: AGPL-3.0-or-later (assumed, ADR 0001) or MIT?
 2. App name and custom domain (affects `OURS_BASE` and CORS).
 3. Email provider for magic links (needs a DPA).
-4. Push: share my-celium.org's Worker code or extract a shared package?
+4. Push: proposed in ADR 0010 — vendor mycelium-web's WebCrypto VAPID + RFC 8291 code into the Worker; no shared package yet.
 5. Week start day and default reminder times (assumed Monday; none).
 6. D1 jurisdiction (ADR 0006 proposes `eu`).
 7. Governing law; public abuse/security/privacy contact address.
