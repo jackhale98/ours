@@ -2,7 +2,7 @@
 
 A free, open-source, end-to-end encrypted planner for couples: a shared calendar, proposals, lists, and a weekly check-in.
 
-> **Status: early development.** The core encryption, data and parsing library is built and independently reviewed, and the full app UI runs as a **local demo** with sample data: **[try it](https://jackhale98.github.io/ours/)**. Accounts, sync and notifications are not live yet. See [the build plan phases](docs/ARCHITECTURE.md#delivery-phases).
+> **Status: release candidate.** Everything in the build plan is built and has been through independent security reviews ([docs/reviews](docs/reviews)): end-to-end encrypted accounts and sync, pairing with safety codes, recovery phrases, plans, proposals, lists, the weekly check-in, calendar import and an opt-in busy feed, encrypted notifications and reminders, export and import, and key rotation. The public site currently runs as a **local demo** with sample data, because the official API isn't deployed yet: **[try it](https://jackhale98.github.io/ours/)**. You can [run your own](docs/SELF_HOSTING.md) today.
 
 ## What is protected, and what is not
 
@@ -13,8 +13,10 @@ The server **can** see, and this design does not hide:
 - your account email address;
 - how many records you have, roughly how large they are, and when they change;
 - when your devices sync, and their IP addresses (in transit; never stored in the database);
-- when reminders are scheduled to fire and when push notifications are sent;
-- busy blocks you choose to publish to the optional calendar feed.
+- when reminders are scheduled to fire, and who notifies whom and when;
+- your quiet-hours time zone, if you set quiet hours;
+- busy blocks you choose to publish to the optional calendar feed;
+- the address and contents of a calendar you subscribe to by link, while it relays them (never stored).
 
 It also does **not** protect you against:
 
@@ -23,7 +25,9 @@ It also does **not** protect you against:
 
 If you lose all your devices **and** your 12-word recovery phrase, your data cannot be recovered by anyone, including the people running the server.
 
-Full details: [docs/THREAT_MODEL.md](docs/THREAT_MODEL.md).
+Lost a phone? **Privacy → Secure your space** makes new keys so the lost device can't read anything new ([ADR 0013](docs/adr/0013-key-rotation.md)).
+
+Full details: [docs/THREAT_MODEL.md](docs/THREAT_MODEL.md). If something goes wrong on a server: [docs/INCIDENT_RESPONSE.md](docs/INCIDENT_RESPONSE.md).
 
 ## Repository layout
 
@@ -44,7 +48,8 @@ pnpm test            # core + web unit tests
 pnpm test:api        # Worker tests (Miniflare)
 pnpm lint && pnpm typecheck
 pnpm --filter @ours/web dev
-pnpm e2e             # Playwright
+pnpm e2e             # Playwright (demo mode)
+pnpm --filter @ours/web e2e:sync   # two browsers against a local Worker
 ```
 
 ## Running your own

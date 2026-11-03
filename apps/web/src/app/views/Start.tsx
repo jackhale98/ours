@@ -9,7 +9,7 @@ import {
   normalizePhrase,
   pickConfirmationIndices,
 } from '@ours/core/crypto';
-import { useEffect, useState } from 'preact/hooks';
+import { useEffect, useRef, useState } from 'preact/hooks';
 import { ApiError } from '../../account/api';
 import {
   acceptDeviceLink,
@@ -26,6 +26,7 @@ import {
   signInWithPasskey,
   startEmail,
 } from '../../account/session';
+import { mountTurnstile, turnstileEnabled } from '../../account/turnstile';
 import { HAS_API } from '../../config';
 import { Icon, toast } from '../ui';
 
@@ -47,6 +48,23 @@ function SignIn() {
   const [terms, setTerms] = useState(false);
   const [sent, setSent] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [bot, setBot] = useState<string | null>(null);
+  const botEl = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!turnstileEnabled || sent || !botEl.current) return;
+    let remove: (() => void) | undefined;
+    let gone = false;
+    void mountTurnstile(botEl.current, setBot)
+      .then((r) => {
+        if (gone) r();
+        else remove = r;
+      })
+      .catch((err: Error) => toast(err.message));
+    return () => {
+      gone = true;
+      remove?.();
+    };
+  }, [sent]);
   const joining = !!pendingInvite();
   const legal = new URL('legal/', location.href.split('#')[0]).href;
   if (sent) {
@@ -73,7 +91,11 @@ function SignIn() {
             e.preventDefault();
             setBusy(true);
             try {
-              await startEmail(email.trim(), terms);
+              if (turnstileEnabled && !bot) {
+                toast('One moment: checking you’re not a bot.');
+                return;
+              }
+              await startEmail(email.trim(), terms, bot ?? undefined);
               setSent(true);
             } catch (err) {
               toast(errorText(err));
@@ -109,6 +131,7 @@ function SignIn() {
             We email you a one-time link. Your address is the one thing about you we can read;
             everything you plan is encrypted before it leaves your device.
           </p>
+          {turnstileEnabled && <div ref={botEl} />}
           <button class="btn primary big" type="submit" disabled={busy}>
             <Busy busy={busy}>Email me a link</Busy>
           </button>

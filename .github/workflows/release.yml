@@ -1,0 +1,55 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Publishes a GitHub release for a version tag (v1.0.0 …) with the hashes of
+# every file in the production web build, so anyone can check that what
+# GitHub Pages serves is what this commit builds.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm lint && pnpm typecheck && pnpm test && pnpm check:licenses && pnpm check:worker
+      - run: pnpm build
+        env:
+          OURS_BASE: ${{ vars.OURS_BASE || format('/{0}/', github.event.repository.name) }}
+          VITE_API_URL: ${{ vars.API_URL }}
+          VITE_TURNSTILE_SITE_KEY: ${{ vars.TURNSTILE_SITE_KEY }}
+          OURS_OPERATOR: ${{ vars.OURS_OPERATOR }}
+          OURS_CONTACT: ${{ vars.OURS_CONTACT }}
+          OURS_GOVERNING_LAW: ${{ vars.OURS_GOVERNING_LAW }}
+          OURS_REGION: ${{ vars.OURS_REGION }}
+          OURS_EMAIL_PROVIDER: ${{ vars.OURS_EMAIL_PROVIDER }}
+          OURS_LEGAL_DATE: ${{ vars.OURS_LEGAL_DATE }}
+      - name: Build hashes
+        run: |
+          cd apps/web/dist
+          find . -type f -print0 | sort -z | xargs -0 sha256sum > ../../../build-hashes.txt
+          cd ../../..
+          tar -czf web-build.tar.gz -C apps/web dist
+          sha256sum web-build.tar.gz >> build-hashes.txt
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          {
+            echo "Built from ${GITHUB_SHA}."
+            echo
+            echo "To check what your browser runs, compare the files served by GitHub Pages with build-hashes.txt (sha256)."
+            echo "See CHANGELOG.md for what changed."
+          } > notes.md
+          gh release create "$TAG" build-hashes.txt web-build.tar.gz THIRD_PARTY_NOTICES.md \
+            --title "Ours $TAG" --notes-file notes.md --verify-tag

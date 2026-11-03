@@ -1,8 +1,85 @@
 # Self-hosting
 
-> Draft. A complete "deploy in under 15 minutes" guide is a phase 7 deliverable; this page records what is already configurable.
+Run your own Ours: the web app on GitHub Pages and the API on a Cloudflare Worker with a D1 database. Both free tiers are enough for a household. Check Cloudflare's current Workers and D1 free-tier limits on their pricing pages; they change. Allow about 15 minutes.
 
-You need a GitHub account (for Pages) and a Cloudflare account (Workers + D1). Both free tiers are enough for a household. Check current free-tier limits at build time on Cloudflare's pricing pages for Workers and D1; they change.
+You need: a GitHub account, a Cloudflare account, Node 22 with `corepack enable`, and (for real sign-in emails) an account with an email API such as Resend, with a sending domain you control.
+
+## Steps
+
+### 1. Fork and enable Pages (2 min)
+
+1. Fork this repository.
+2. In your fork: **Settings → Pages → Build and deployment → Source: GitHub Actions**.
+3. Clone your fork and run `pnpm install`.
+
+Your app will live at `https://<you>.github.io/<repo>/`. (A custom domain is better for a public instance; see Security notes.)
+
+### 2. Create the database (2 min)
+
+```sh
+cd apps/api
+pnpm exec wrangler login
+pnpm exec wrangler d1 create ours --jurisdiction eu   # or leave out --jurisdiction; see ADR 0006
+```
+
+Copy the printed `database_id` into `apps/api/wrangler.jsonc`.
+
+### 3. Configure the Worker (4 min)
+
+In `apps/api/wrangler.jsonc`, under `vars`, set:
+
+| Var | Value |
+|---|---|
+| `ALLOWED_ORIGINS` | `https://<you>.github.io` |
+| `APP_URL` | `https://<you>.github.io/<repo>/` |
+| `RP_ID` | `<you>.github.io` |
+| `EMAIL_PROVIDER` / `EMAIL_FROM` | `resend` / `Ours <hello@your-domain>` |
+| `VAPID_PUBLIC_KEY` | from the command in "Notifications" below (optional) |
+
+Then the secrets (each prompts for a value):
+
+```sh
+pnpm exec wrangler secret put RATE_LIMIT_SALT     # any long random string: openssl rand -base64 32
+pnpm exec wrangler secret put EMAIL_API_KEY       # from your email provider
+pnpm exec wrangler secret put VAPID_PRIVATE_KEY   # optional, for notifications
+pnpm exec wrangler secret put TURNSTILE_SECRET    # optional, bot check on sign-in
+```
+
+Never put these in `vars`: `pnpm check:worker` fails if you do.
+
+### 4. Deploy the API (2 min)
+
+```sh
+pnpm exec wrangler d1 migrations apply ours --remote
+pnpm exec wrangler deploy
+```
+
+Note the Worker URL it prints, e.g. `https://ours-api.<account>.workers.dev`. Check `https://…workers.dev/health` returns `{"ok":true}`.
+
+### 5. Build the web app against it (3 min)
+
+In your fork: **Settings → Secrets and variables → Actions → Variables**, add:
+
+- `API_URL` = the Worker URL from step 4
+- `OURS_OPERATOR` and `OURS_CONTACT` = who runs it and a contact email (shown on the privacy and terms pages; see the table below for the other legal fields)
+- `TURNSTILE_SITE_KEY` = the Turnstile site key, if you set `TURNSTILE_SECRET`
+
+Commit your `wrangler.jsonc` change and push to `main`, or run **Actions → Deploy web → Run workflow**. Open your Pages URL, choose **Get started**, and sign up.
+
+### 6. Optional: deploy the API from GitHub too
+
+Add repo secrets `CLOUDFLARE_API_TOKEN` (a token with Workers Scripts: Edit and D1: Edit) and `CLOUDFLARE_ACCOUNT_ID`, and the repo variable `CLOUDFLARE_DEPLOY=true`. Every push to `main` that touches the API then applies migrations and deploys.
+
+### 7. Check it
+
+- **Worker logs:** in the Cloudflare dashboard, confirm the Worker's invocation logs are off (they would store client IP addresses). `wrangler.jsonc` sets this; `pnpm check:worker` guards it.
+- **Build hashes:** the Deploy web workflow prints a SHA-256 for every file it publishes. Compare them with what your browser loads if you want to be sure what you are running.
+- **Bot check:** if you configured Turnstile, sign in once and confirm the check appears and passes.
+- Read the privacy policy and terms on your site and make sure they describe your instance.
+
+## Updating
+
+Pull from upstream into your fork and push. Migrations run before the new Worker deploys (step 6, or run step 4 again by hand). Read `docs/adr` and the release notes for anything that needs action.
 
 ## Configuration
 
@@ -20,6 +97,7 @@ You need a GitHub account (for Pages) and a Cloudflare account (Workers + D1). B
 | `wrangler.jsonc` vars | `EMAIL_PROVIDER`, `EMAIL_FROM` | `log` (sends nothing) or `resend`. |
 | `wrangler secret put` | `EMAIL_API_KEY` | Provider API key. |
 | `wrangler secret put` | `TURNSTILE_SECRET` | Cloudflare Turnstile secret; bot checks are skipped if unset. |
+| Web build repo variable `TURNSTILE_SITE_KEY` | `VITE_TURNSTILE_SITE_KEY` | Turnstile site key for the sign-in screen. Set it together with `TURNSTILE_SECRET`: with only the secret, sign-in fails. Adds `https://challenges.cloudflare.com` to the page's CSP. |
 | `wrangler secret put` | `RATE_LIMIT_SALT` | Random string used to hash rate-limit keys. |
 | `wrangler.jsonc` vars | `MAX_SPACES_PER_USER`, `MAX_DEVICES_PER_USER`, `MAX_SPACE_BYTES`, `MAX_PUSHES_PER_MINUTE`, `MAX_PUSHES_PER_HOUR` | Quotas (defaults 3, 10, 20 MB, 120 sync pushes a minute, 60 notifications an hour). |
 | `wrangler.jsonc` vars | `INACTIVE_WARN_DAYS`, `INACTIVE_GRACE_DAYS` | Inactive accounts get a warning email after this many days (default 365) and are deleted this many days later (default 30). Keep the privacy policy in step. |

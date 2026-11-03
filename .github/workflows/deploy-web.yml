@@ -27,6 +27,7 @@ jobs:
           # Override with a repository variable for custom domains (use "/").
           OURS_BASE: ${{ vars.OURS_BASE || format('/{0}/', github.event.repository.name) }}
           VITE_API_URL: ${{ vars.API_URL }}
+          VITE_TURNSTILE_SITE_KEY: ${{ vars.TURNSTILE_SITE_KEY }}
           OURS_OPERATOR: ${{ vars.OURS_OPERATOR }}
           OURS_CONTACT: ${{ vars.OURS_CONTACT }}
           OURS_GOVERNING_LAW: ${{ vars.OURS_GOVERNING_LAW }}

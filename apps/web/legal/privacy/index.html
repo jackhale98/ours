@@ -66,7 +66,7 @@
 
       <h2>What we never do</h2>
       <ul>
-        <li>No analytics, trackers, advertising or third-party scripts. Fonts and code are served from this site.</li>
+        <li>No analytics, trackers or advertising. Fonts and code are served from this site; the only outside script is the optional bot check on the sign-in page.</li>
         <li>No selling or sharing of data. There are no investors to answer to; the software is free.</li>
         <li>Request logs record only the route, status and timing, never IP addresses, request bodies or tokens. The hosting platform's own request logs are switched off.</li>
       </ul>
@@ -77,6 +77,7 @@
         <li><strong>Our email provider</strong> (%OURS_EMAIL_PROVIDER%) sees your email address and when we send you a link.</li>
         <li><strong>Your browser's push service</strong> (Apple, Google or Mozilla) carries encrypted notifications and sees when they are sent.</li>
         <li><strong>GitHub Pages</strong> serves the app's files and sees the usual web request details.</li>
+        <li><strong>Cloudflare Turnstile</strong>, if this instance uses it, checks the sign-in page for bots. It runs only on that page and sees what a web request shows (your IP address and browser); it does not use cookies to track you.</li>
       </ul>
 
       <h2>Your choices and rights</h2>

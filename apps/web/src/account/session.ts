@@ -207,11 +207,20 @@ export async function consumeSignInLink(): Promise<'none' | 'ok' | 'failed'> {
   }
 }
 
-export async function startEmail(email: string, acceptTerms: boolean): Promise<void> {
+export async function startEmail(
+  email: string,
+  acceptTerms: boolean,
+  turnstile?: string,
+): Promise<void> {
   const invite = pendingInviteId();
   await api('/auth/email/start', {
     auth: false,
-    body: { email, accept_terms: acceptTerms, ...(invite ? { invite } : {}) },
+    body: {
+      email,
+      accept_terms: acceptTerms,
+      ...(invite ? { invite } : {}),
+      ...(turnstile ? { turnstile } : {}),
+    },
   });
 }
 

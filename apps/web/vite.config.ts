@@ -15,15 +15,20 @@ export default defineConfig(({ mode }) => {
   const base = env.OURS_BASE ?? '/';
   const api = env.VITE_API_URL || (mode === 'development' ? 'http://localhost:8787' : '');
   const apiOrigin = api ? new URL(api).origin : '';
+  // Optional bot check on sign-in (SELF_HOSTING.md). Widens the CSP for
+  // Cloudflare's challenge host only when a site key is configured.
+  const turnstileKey = env.VITE_TURNSTILE_SITE_KEY ?? '';
+  const challenges = turnstileKey ? ' https://challenges.cloudflare.com' : '';
 
   // GitHub Pages cannot send headers, so the CSP lives in a meta tag.
   const csp = [
     "default-src 'self'",
-    "script-src 'self'",
+    `script-src 'self'${challenges}`,
     "style-src 'self'",
     "img-src 'self' data: blob:",
     "font-src 'self'",
-    `connect-src 'self'${apiOrigin ? ` ${apiOrigin}` : ''}`,
+    `connect-src 'self'${apiOrigin ? ` ${apiOrigin}` : ''}${challenges}`,
+    ...(turnstileKey ? [`frame-src${challenges}`] : []),
     "worker-src 'self'",
     "manifest-src 'self'",
     "object-src 'none'",
@@ -110,7 +115,10 @@ export default defineConfig(({ mode }) => {
         devOptions: { enabled: false },
       }),
     ],
-    define: { __API_URL__: JSON.stringify(api) },
+    define: {
+      __API_URL__: JSON.stringify(api),
+      __TURNSTILE_SITE_KEY__: JSON.stringify(turnstileKey),
+    },
     build: {
       target: 'es2022',
       modulePreload: { polyfill: false },
