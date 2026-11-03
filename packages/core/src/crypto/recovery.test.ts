@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
+import { bytesToHex } from '@noble/hashes/utils.js';
 import { wordlist } from '@scure/bip39/wordlists/english.js';
 import { describe, expect, it } from 'vitest';
 import { CryptoError } from './bytes';
@@ -38,7 +39,7 @@ describe('recovery phrase', () => {
   it('matches the frozen derivation for the BIP39 zero vector', () => {
     // Freezes HKDF(entropy, "ours/recovery/v1"). Changing this breaks every existing backup.
     const key = recoveryKeyFromPhrase(ZERO_PHRASE.split(' '));
-    expect(Buffer.from(key).toString('hex')).toMatchInlineSnapshot(
+    expect(bytesToHex(key)).toMatchInlineSnapshot(
       `"72428c6a0af51b9d61cb653e8d521c43cebe37c74ae06e0724a4c53efb620667"`,
     );
   });

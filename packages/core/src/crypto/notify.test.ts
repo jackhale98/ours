@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
+
 import { xchacha20poly1305 } from '@noble/ciphers/chacha.js';
+import { bytesToHex } from '@noble/hashes/utils.js';
 import { describe, expect, it } from 'vitest';
 import { buildAad } from './aad';
 import { pad } from './aead';
@@ -20,7 +22,7 @@ describe('notifications', () => {
 
   it('is opaque: plaintext text does not appear in ciphertext', () => {
     const sealed = sealNotification(generateKey(), 's', 1, body);
-    expect(Buffer.from(sealed.ciphertext).includes(Buffer.from('Dinner'))).toBe(false);
+    expect(bytesToHex(sealed.ciphertext)).not.toContain(bytesToHex(utf8('Dinner')));
   });
 
   it('drops stale replays', () => {
