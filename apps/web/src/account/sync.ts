@@ -42,7 +42,12 @@ export interface SyncContext {
   deviceId: string;
   spaceId: string;
   slot: Slot;
+  /** Minimum key versions after a rotation, and the revision it happened at (ADR 0013). */
+  floor?: { space: number; personal: number; rotatedRev: number };
 }
+
+/** True when this device lacks the keys the server now requires (ADR 0013). */
+export const needsNewKeys = signal(false);
 
 type Live = Extract<DecodedRecord, { deleted: false }>;
 
@@ -78,8 +83,29 @@ export class SyncEngine implements Backend {
     return ownerUserId === this.ctx.userId ? this.ctx.slot : this.ctx.slot === 'a' ? 'b' : 'a';
   }
 
+  /** The newest key version this device holds for a record's scope. */
+  private latestVersion(scope: 'space' | 'user'): number {
+    const keys =
+      scope === 'user' ? this.ctx.ring.personalKeys() : this.ctx.ring.spaceKeys(this.ctx.spaceId);
+    return Math.max(0, ...keys.map((k) => k.version));
+  }
+
+  /** A record under a key version this device doesn't have yet. */
+  private unknownKey(e: Envelope | EnvelopeInput): boolean {
+    return e.key_version > this.latestVersion(e.scope);
+  }
+
   /** Decrypts and validates an envelope. Null if this device can't or shouldn't show it. */
   private open(e: Envelope | EnvelopeInput): DecodedRecord | null {
+    // After a rotation, old keys are decrypt-only: a record under an old
+    // version that the server says arrived after the rotation is refused
+    // (crypto review 0001, M1).
+    const floor = this.ctx.floor;
+    if (floor && 'rev' in e) {
+      const min = e.scope === 'user' ? floor.personal : floor.space;
+      const own = e.scope === 'space' || e.owner_user_id === this.ctx.userId;
+      if (own && e.key_version < min && e.rev > floor.rotatedRev) return null;
+    }
     try {
       const r = openDecodedRecord(this.ctx.ring, headerOf(e), {
         nonce: fromBase64Url(e.nonce),
@@ -121,6 +147,16 @@ export class SyncEngine implements Backend {
     }
     const entries: Entry[] = [];
     const seen = new Set<string>();
+    for (const [id, o] of pending) {
+      // Written before this device got the new keys: re-seal under them.
+      if (o.envelope.key_version < this.latestVersion(o.envelope.scope)) {
+        const rec = this.open(o.envelope);
+        if (rec) {
+          o.envelope = this.seal(o.envelope, rec);
+          await d.put('outbox', o, id);
+        }
+      }
+    }
     for (const o of pending.values()) {
       seen.add(o.envelope.id);
       const rec = this.open(o.envelope);
@@ -146,11 +182,12 @@ export class SyncEngine implements Backend {
     void this.sync();
   }
 
-  stop(): void {
+  /** `restarting`: a new engine takes over at once, so the app stays in account mode. */
+  stop(restarting = false): void {
     this.stopped = true;
     clearInterval(this.interval);
     clearTimeout(this.pushTimer);
-    setBackend(null);
+    if (!restarting) setBackend(null);
   }
 
   /** Backend: encrypt local changes into the outbox, then push soon. */
@@ -187,6 +224,36 @@ export class SyncEngine implements Backend {
         .put({ envelope, base_rev: existing?.base_rev ?? base?.rev ?? 0 }, id);
     }
     await tx.done;
+  }
+
+  /**
+   * After a rotation: re-seal every record this device can read and write
+   * under the newest keys and push them, so live data no longer depends on
+   * keys a removed device holds (ADR 0013).
+   */
+  async reencryptAll(): Promise<number> {
+    const d = await db();
+    const envelopes = (await d.getAll('envelopes')).filter(
+      (e) =>
+        e.space_id === this.ctx.spaceId &&
+        (e.scope === 'space' || e.owner_user_id === this.ctx.userId) &&
+        e.key_version < this.latestVersion(e.scope),
+    );
+    const tx = d.transaction(['outbox'], 'readwrite');
+    let n = 0;
+    for (const e of envelopes) {
+      const pending = await tx.objectStore('outbox').get(e.id);
+      const source = pending?.envelope ?? e;
+      const rec = this.open(source);
+      if (!rec) continue;
+      await tx
+        .objectStore('outbox')
+        .put({ envelope: this.seal(source, rec), base_rev: pending?.base_rev ?? e.rev }, e.id);
+      n++;
+    }
+    await tx.done;
+    await this.sync();
+    return n;
   }
 
   /** One sync pass (push, then pull). Concurrent calls coalesce. */
@@ -232,6 +299,7 @@ export class SyncEngine implements Backend {
       });
       const remoteUpserts: Entry[] = [];
       const remoteRemoved: string[] = [];
+      let stale = false;
       for (const [i, result] of res.results.entries()) {
         const sent = items[i];
         if (!result || !sent) continue;
@@ -253,6 +321,10 @@ export class SyncEngine implements Backend {
           else if (current) await d.put('outbox', { ...current, base_rev: result.rev }, id);
         } else if (result.status === 'conflict') {
           await this.resolve(id, result.current, current, remoteUpserts, remoteRemoved);
+        } else if (result.reason === 'stale_key') {
+          // Keys were rotated elsewhere. Keep the change: it is re-sealed
+          // once this device has the new keys.
+          stale = true;
         } else {
           // Rejected (quota, not allowed): drop it and fall back to the server's copy.
           await d.delete('outbox', id);
@@ -264,6 +336,10 @@ export class SyncEngine implements Backend {
         }
       }
       applyRemote(remoteUpserts, remoteRemoved);
+      if (stale) {
+        needsNewKeys.value = true;
+        return;
+      }
     }
   }
 
@@ -279,6 +355,12 @@ export class SyncEngine implements Backend {
     const remote = this.open(remoteEnv);
     const baseEnv = await d.get('envelopes', id);
     await d.put('envelopes', remoteEnv, id);
+    if (!remote && this.unknownKey(remoteEnv)) {
+      // Re-encrypted under keys this device doesn't have yet: keep showing
+      // what it has (and any pending change) until the key update arrives.
+      needsNewKeys.value = true;
+      return;
+    }
     if (!remote) {
       if (pending) await d.delete('outbox', id);
       removed.push(id);

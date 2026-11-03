@@ -13,7 +13,8 @@ import {
   sendTest,
   setQuietHours,
 } from '../../account/notify';
-import { linkDevice, me, saveBackup, signOut } from '../../account/session';
+import { linkDevice, me, rotateKeys, saveBackup, signOut } from '../../account/session';
+import { nameOf, partner } from '../model';
 import { Icon, Switch, toast } from '../ui';
 
 const when = (ms: number | null) => (ms ? new Date(ms).toLocaleDateString() : 'never');
@@ -57,8 +58,8 @@ export function DevicesCard() {
         ))}
       </ul>
       <p class="d small">
-        Removing a device signs it out. It may still hold a copy of the keys until key rotation
-        arrives in a later version.
+        Removing a device signs it out. It may still hold a copy of your keys: after removing one
+        you don’t trust, use “Secure your space” below.
       </p>
       {link ? (
         <div class="url">
@@ -294,6 +295,128 @@ export function NotificationsCard() {
             </button>
           </div>
         </>
+      )}
+    </section>
+  );
+}
+
+/**
+ * After losing a device (or a partner leaving): new keys, old ones
+ * decrypt-only, everything re-encrypted (ADR 0013). Then the partner opens a
+ * key update link, and a new recovery phrase replaces the old backup.
+ */
+export function SecureCard() {
+  const [armed, setArmed] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [stage, setStage] = useState<'idle' | 'link' | 'phrase' | 'done'>('idle');
+  const [link, setLink] = useState<string | null>(null);
+  const [words, setWords] = useState<string[] | null>(null);
+  const partnerName = nameOf(partner.value);
+
+  const rotate = async () => {
+    setBusy(true);
+    try {
+      const l = await rotateKeys();
+      setLink(l);
+      setWords(generateRecoveryPhrase());
+      setStage(l ? 'link' : 'phrase');
+      toast('New keys made. Everything is being re-encrypted.');
+    } catch (err) {
+      toast(err instanceof Error ? err.message : 'Couldn’t change the keys. Try again.');
+    } finally {
+      setBusy(false);
+      setArmed(false);
+    }
+  };
+
+  return (
+    <section class="card" aria-labelledby="secure-h">
+      <h2 class="h3" id="secure-h">
+        Secure your space
+      </h2>
+      {stage === 'idle' && (
+        <>
+          <p class="d">
+            Lost a phone, or removed a device you don’t trust? Make new keys. The removed device
+            can’t read anything written from now on. You’ll send {partnerName} a one-time link and
+            write down a new recovery phrase.
+          </p>
+          <button
+            type="button"
+            class={`btn sm${armed ? ' primary' : ''}`}
+            disabled={busy}
+            onClick={() => (armed ? void rotate() : setArmed(true))}
+          >
+            {busy ? 'Making new keys…' : armed ? 'Yes, make new keys' : 'Make new keys'}
+          </button>
+        </>
+      )}
+      {stage === 'link' && link && (
+        <>
+          <p class="d">
+            Send this link to {partnerName}, ideally in person or in a private chat. It works once,
+            for 24 hours. When they open it, compare your safety codes again.
+          </p>
+          <div class="url">
+            <code>{link}</code>
+            <button
+              type="button"
+              class="btn sm"
+              onClick={async () => {
+                if (navigator.share) {
+                  await navigator.share({ url: link }).catch(() => {});
+                } else {
+                  await navigator.clipboard?.writeText(link).catch(() => {});
+                  toast('Link copied.');
+                }
+              }}
+            >
+              Share
+            </button>
+          </div>
+          <button type="button" class="btn sm primary" onClick={() => setStage('phrase')}>
+            Next: new recovery phrase
+          </button>
+        </>
+      )}
+      {stage === 'phrase' && words && (
+        <>
+          <p class="d">
+            Your old recovery phrase can’t restore the new keys. Write these 12 words down instead.
+            Your other devices also need the new keys: link them again from Devices above.
+          </p>
+          <ol class="words" aria-label="New recovery phrase">
+            {words.map((w, i) => (
+              <li key={`${i}-${w}`}>{w}</li>
+            ))}
+          </ol>
+          <button
+            type="button"
+            class="btn primary"
+            disabled={busy}
+            onClick={async () => {
+              setBusy(true);
+              try {
+                await saveBackup(words);
+                setWords(null);
+                setStage('done');
+                toast('Done. Your space has new keys.');
+              } catch (err) {
+                toast(err instanceof ApiError ? err.message : 'Couldn’t save the new phrase.');
+              } finally {
+                setBusy(false);
+              }
+            }}
+          >
+            I’ve written these down
+          </button>
+        </>
+      )}
+      {stage === 'done' && (
+        <p class="d">
+          Your space has new keys. Removed devices can’t read anything new.
+          {link ? ` If ${partnerName} hasn’t opened the link yet, they’ll see a reminder.` : ''}
+        </p>
       )}
     </section>
   );

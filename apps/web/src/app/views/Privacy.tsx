@@ -5,7 +5,13 @@ import { currentSafetyCode } from '../../account/session';
 import { setTheme, type ThemePref, theme } from '../../theme';
 import { mode, names, SPACE_ID, setViewer, spaceKey, viewer } from '../model';
 import { Avatar, Icon, toast } from '../ui';
-import { AccountCard, DevicesCard, NotificationsCard, RecoveryCard } from './AccountCards';
+import {
+  AccountCard,
+  DevicesCard,
+  NotificationsCard,
+  RecoveryCard,
+  SecureCard,
+} from './AccountCards';
 import { CalendarsCard } from './Calendars';
 import { DataCard } from './DataCard';
 
@@ -89,6 +95,7 @@ export function PrivacyView() {
         ) : (
           <>
             <DevicesCard />
+            <SecureCard />
             <NotificationsCard />
           </>
         )}

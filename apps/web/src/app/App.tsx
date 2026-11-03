@@ -4,10 +4,10 @@ import { signal } from '@preact/signals';
 import { lazy, Suspense } from 'preact/compat';
 import { useEffect } from 'preact/hooks';
 import { kvGet, kvSet } from '../account/db';
-import { account, consumeSignInLink, syncNow } from '../account/session';
-import { syncStatus } from '../account/sync';
+import { account, consumeSignInLink, newKeysFrom, syncNow } from '../account/session';
+import { needsNewKeys, syncStatus } from '../account/sync';
 import { LogoMark } from '../Logo';
-import { findEntry, mode, names, partner, viewer } from './model';
+import { findEntry, mode, nameOf, names, partner, viewer } from './model';
 import { now } from './select';
 import { accept, afterAdd, openEvent, openQuick, SheetHost, sheet } from './sheets';
 import { Avatar, Icon, type IconName, ToastHost, toast } from './ui';
@@ -95,6 +95,22 @@ function Nav({ variant }: { variant: 'rail' | 'tabbar' }) {
         </a>
       ))}
     </>
+  );
+}
+
+/** Shown while this device lacks keys that were rotated elsewhere (ADR 0013). */
+function NewKeysBanner() {
+  if (!needsNewKeys.value) return null;
+  const from = newKeysFrom();
+  return (
+    <div class="keybanner" role="status">
+      <Icon name="lock" size={16} />
+      <span>
+        {from === 'my-device'
+          ? 'Your keys were changed on another of your devices. On that device, go to Privacy → Link a new device, and open the link here.'
+          : `${nameOf(partner.value)} changed your shared keys. Open the key update link they sent you. Until then, new plans can’t sync.`}
+      </span>
+    </div>
   );
 }
 
@@ -231,6 +247,7 @@ export function App() {
               <Avatar slot={p} />
             </span>
           </div>
+          <NewKeysBanner />
           <Suspense fallback={<p class="nothing">Loading…</p>}>{content}</Suspense>
         </main>
       </div>

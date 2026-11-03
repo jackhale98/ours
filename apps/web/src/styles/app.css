@@ -1726,3 +1726,21 @@ dialog.sheet::backdrop {
   text-decoration: line-through;
   color: var(--muted);
 }
+
+.keybanner {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  margin: 0 0 16px;
+  padding: 12px 14px;
+  border: 1px solid var(--line-strong);
+  border-left: 4px solid var(--ours);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--ink);
+  font-size: 0.875rem;
+}
+.keybanner svg {
+  flex: none;
+  margin-top: 2px;
+}
