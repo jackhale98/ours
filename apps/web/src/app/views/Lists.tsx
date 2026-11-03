@@ -11,6 +11,8 @@ import {
   itemsOf,
   LIST_TYPES,
   type ListEntry,
+  type PickerKind,
+  pickerKind,
   renameList,
   setListKind,
   setListPrivacy,
@@ -260,11 +262,11 @@ function IdeasList({ list }: { list: ListEntry }) {
 
 /* ---------- create / edit sheets ---------- */
 
-type NewKind = Exclude<ListKind, 'check'>;
+type NewKind = PickerKind;
 const KIND_ORDER = Object.keys(LIST_TYPES) as NewKind[];
 
 function TypePicker({ value, onChange }: { value: ListKind; onChange: (k: NewKind) => void }) {
-  const current = value === 'check' ? 'todo' : value;
+  const current = pickerKind(value);
   return (
     // biome-ignore lint/a11y/useSemanticElements: toggle-button group (aria-pressed), labelled
     <div class="typepick" role="group" aria-labelledby="lt-type">
@@ -283,9 +285,9 @@ const closeSheet = () => {
 };
 
 function NewListSheet() {
-  const [kind, setKind] = useState<NewKind>('shopping');
+  const [kind, setKind] = useState<NewKind>('todo');
   const [name, setName] = useState('');
-  const [priv, setPriv] = useState(LIST_TYPES.shopping.defaultPrivate);
+  const [priv, setPriv] = useState(LIST_TYPES.todo.defaultPrivate);
   const p = nameOf(partner.value);
   const submit = (e: Event) => {
     e.preventDefault();

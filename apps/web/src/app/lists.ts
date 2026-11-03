@@ -15,25 +15,24 @@ export interface ListType {
   defaultPrivate: boolean;
 }
 
-export const LIST_TYPES: Record<Exclude<ListKind, 'check'>, ListType> = {
-  shopping: {
-    label: 'Shopping',
-    blurb: 'Groceries and things to pick up. Tick them off as you go.',
+/**
+ * One general type and three special ones, each with a behaviour the
+ * others don't have. Older 'shopping' and 'check' lists are general lists.
+ */
+export type PickerKind = 'todo' | 'chores' | 'ideas' | 'gifts';
+
+export const LIST_TYPES: Record<PickerKind, ListType> = {
+  todo: {
+    label: 'List',
+    blurb: 'Groceries, to-dos, packing: anything to tick off, together or alone.',
     example: 'Groceries',
     behaviour: 'check',
     defaultPrivate: false,
   },
   chores: {
     label: 'Chores',
-    blurb: 'Jobs around the home, each with an owner. Shows up in the weekly check-in.',
+    blurb: 'Jobs around the home, each with an owner. They come up in the weekly check-in.',
     example: 'Home',
-    behaviour: 'check',
-    defaultPrivate: false,
-  },
-  todo: {
-    label: 'To-dos',
-    blurb: 'Anything else you want to get done, together or alone.',
-    example: 'Trip prep',
     behaviour: 'check',
     defaultPrivate: false,
   },
@@ -53,7 +52,10 @@ export const LIST_TYPES: Record<Exclude<ListKind, 'check'>, ListType> = {
   },
 };
 
-export const typeOf = (kind: ListKind): ListType => LIST_TYPES[kind === 'check' ? 'todo' : kind];
+/** The picker's kind for a stored kind (older shopping and generic lists are general lists). */
+export const pickerKind = (kind: ListKind): PickerKind =>
+  kind === 'shopping' || kind === 'check' ? 'todo' : kind;
+export const typeOf = (kind: ListKind): ListType => LIST_TYPES[pickerKind(kind)];
 
 export function allLists(): ListEntry[] {
   return byKind('list') as ListEntry[];

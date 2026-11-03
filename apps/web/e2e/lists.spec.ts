@@ -28,9 +28,9 @@ async function newList(page: Page, kind: string, name?: string) {
   return dialog;
 }
 
-test('make a shared shopping list and add to it', async ({ page }) => {
+test('make a shared list and add to it', async ({ page }) => {
   await page.goto('/#lists');
-  const dialog = await newList(page, 'Shopping', 'Hardware store');
+  const dialog = await newList(page, 'List', 'Hardware store');
   await expect(dialog.getByRole('switch', { name: /Just for me/ })).not.toBeChecked();
   await dialog.getByRole('button', { name: 'Make list' }).click();
   await expect(page.getByRole('button', { name: /Hardware store/, pressed: true })).toBeVisible();
@@ -69,12 +69,12 @@ test('edit: rename, change kind, make private, delete with undo', async ({ page 
   await dialog.getByRole('textbox', { name: 'Name' }).fill('Food shop');
   await dialog
     .getByRole('group', { name: 'Kind' })
-    .getByRole('button', { name: /^To-dos/ })
+    .getByRole('button', { name: /^Chores/ })
     .click();
   await dialog.getByRole('switch', { name: /Just for me/ }).check();
   await dialog.getByRole('button', { name: 'Done', exact: true }).click();
   await expect(page.getByRole('button', { name: /Private: Food shop/ })).toBeVisible();
-  await expect(page.getByText('To-dos')).toBeVisible();
+  await expect(page.locator('span.small.muted', { hasText: /^Chores$/ })).toBeVisible();
   await expect(page.getByText('Oat milk')).toBeVisible();
 
   await page.getByRole('button', { name: 'Edit list: Food shop' }).click();
@@ -89,4 +89,18 @@ test('edit: rename, change kind, make private, delete with undo', async ({ page 
 test('the check-in uses the chores list', async ({ page }) => {
   await page.goto('/#checkin');
   await expect(page.getByText('Book furnace service')).toBeVisible();
+});
+
+test('one general kind and three special ones; old shopping lists are general lists', async ({
+  page,
+}) => {
+  await page.goto('/#lists');
+  await page.getByRole('button', { name: 'New list' }).click();
+  const kinds = page
+    .getByRole('dialog', { name: 'New list' })
+    .getByRole('group', { name: 'What kind of list?' })
+    .getByRole('button');
+  await expect(kinds).toHaveCount(4);
+  await expect(kinds.nth(0)).toHaveAttribute('aria-pressed', 'true');
+  await expect(kinds.nth(0)).toContainText('List');
 });

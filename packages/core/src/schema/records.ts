@@ -98,11 +98,12 @@ export const BusyStubData = v.pipe(
 );
 
 /**
- * List types. Each sets behaviour in the app:
- * - shopping, todo, check (legacy generic): tick-off lists with assignees
+ * List types. The app offers one general type and three special ones:
+ * - todo: the general list (groceries, to-dos, packing), tick-off with assignees
  * - chores: tick-off with assignees; used by the weekly check-in
  * - ideas: date ideas with "pick one for us" and "plan it"
  * - gifts: tick-off, private by default so surprises stay surprises
+ * 'shopping' and 'check' are older names for the general list and still parse.
  */
 export const LIST_KINDS = ['shopping', 'chores', 'todo', 'ideas', 'gifts', 'check'] as const;
 export type ListKind = (typeof LIST_KINDS)[number];
