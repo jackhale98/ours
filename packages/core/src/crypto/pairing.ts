@@ -12,6 +12,10 @@
  * Kinds:
  *  - 'partner': payload is the space keys; context_id is the space id.
  *  - 'device':  payload is the user's whole key ring; context_id is the user id.
+ *  - 'rekey':   payload is the space keys after a rotation (ADR 0013), for the
+ *               partner who is already a member; context_id is the space id.
+ *               A separate AAD kind, so a key-update link can't be used as a
+ *               first invite and vice versa.
  */
 import { buildAad } from './aad';
 import { open, type Sealed, seal } from './aead';
@@ -26,7 +30,7 @@ import { CryptoError, fromBase64Url, randomBytes, toBase64Url } from './bytes';
 import { deriveKey, LABELS } from './kdf';
 import type { KeyRing } from './keys';
 
-export type InviteKind = 'partner' | 'device';
+export type InviteKind = 'partner' | 'device' | 'rekey';
 
 export const INVITE_SECRET_LENGTH = 32;
 const INVITE_ID = /^[A-Za-z0-9_-]{8,64}$/;
@@ -37,7 +41,8 @@ function inviteKey(secret: Uint8Array): Uint8Array {
 }
 
 function inviteAad(kind: InviteKind, contextId: string): Uint8Array {
-  if (kind !== 'partner' && kind !== 'device') throw new CryptoError('format', 'Bad invite kind');
+  if (kind !== 'partner' && kind !== 'device' && kind !== 'rekey')
+    throw new CryptoError('format', 'Bad invite kind');
   if (!contextId) throw new CryptoError('format', 'Missing invite context');
   return buildAad([LABELS.invite, kind, contextId]);
 }
@@ -49,14 +54,25 @@ export interface CreatedInvite {
   wrapped: Sealed;
 }
 
-export function createPartnerInvite(payload: SpaceKeyPayload): CreatedInvite {
+type SpaceInviteKind = 'partner' | 'rekey';
+
+function createSpaceInvite(payload: SpaceKeyPayload, kind: SpaceInviteKind): CreatedInvite {
   const secret = randomBytes(INVITE_SECRET_LENGTH);
   const wrapped = seal(
     inviteKey(secret),
     serializeSpaceKeys(payload),
-    inviteAad('partner', payload.space_id),
+    inviteAad(kind, payload.space_id),
   );
   return { secret, wrapped };
+}
+
+export function createPartnerInvite(payload: SpaceKeyPayload): CreatedInvite {
+  return createSpaceInvite(payload, 'partner');
+}
+
+/** A key update for the partner after rotation (ADR 0013). */
+export function createRekeyInvite(payload: SpaceKeyPayload): CreatedInvite {
+  return createSpaceInvite(payload, 'rekey');
 }
 
 /**
@@ -69,13 +85,31 @@ export function openPartnerInvite(
   spaceId: string,
   wrapped: Sealed,
 ): SpaceKeyPayload {
+  return openSpaceInvite(secret, spaceId, wrapped, 'partner');
+}
+
+/** Opens a key update link; same checks as a partner invite. */
+export function openRekeyInvite(
+  secret: Uint8Array,
+  spaceId: string,
+  wrapped: Sealed,
+): SpaceKeyPayload {
+  return openSpaceInvite(secret, spaceId, wrapped, 'rekey');
+}
+
+function openSpaceInvite(
+  secret: Uint8Array,
+  spaceId: string,
+  wrapped: Sealed,
+  kind: SpaceInviteKind,
+): SpaceKeyPayload {
   let plaintext: Uint8Array;
   try {
     plaintext = open(
       inviteKey(secret),
       wrapped.nonce,
       wrapped.ciphertext,
-      inviteAad('partner', spaceId),
+      inviteAad(kind, spaceId),
     );
   } catch (e) {
     throw asInviteError(e);

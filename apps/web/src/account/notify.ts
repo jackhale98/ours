@@ -206,15 +206,22 @@ type Recipient = 'partner' | 'me' | 'reminder';
  * key; reminders use the personal key. The recipient's user id is bound in.
  */
 function sealFor(input: NotificationInput, recipient: Recipient) {
-  if (!ctx) return null;
-  const to = recipient === 'partner' ? ctx.partnerId() : ctx.userId;
+  return ctx ? sealWith(ctx, input, recipient) : null;
+}
+
+/** Exported for tests: reminders must never use the shared space key (review 0003, H1). */
+export function sealWith(
+  c: Pick<Context, 'ring' | 'spaceId' | 'userId' | 'partnerId'>,
+  input: NotificationInput,
+  recipient: Recipient,
+) {
+  const to = recipient === 'partner' ? c.partnerId() : c.userId;
   if (!to) return null;
   const scope = recipient === 'reminder' ? 'user' : 'space';
-  const key =
-    scope === 'user' ? ctx.ring.currentPersonalKey() : ctx.ring.currentSpaceKey(ctx.spaceId);
+  const key = scope === 'user' ? c.ring.currentPersonalKey() : c.ring.currentSpaceKey(c.spaceId);
   const s = sealNotification(
     key.key,
-    { space_id: ctx.spaceId, scope, recipient: to },
+    { space_id: c.spaceId, scope, recipient: to },
     key.version,
     input,
   );
@@ -338,16 +345,14 @@ function scheduleReminders(): void {
   reminderTimer = setTimeout(() => void syncReminders(), 1500);
 }
 
-/** Replaces the server's list when this device's planned reminders changed. */
-export async function syncReminders(): Promise<void> {
-  const c = ctx;
-  if (!c || pushState.value !== 'on') return;
-  const planned = plannedReminders();
-  const sig = JSON.stringify(planned.map((p) => [p.fire_at, p.title, p.body, p.record_id]));
-  lastReminderSig ??= (await kvGet<string | null>('reminders-sig')) ?? null;
-  if (sig === lastReminderSig) return;
-  const items = planned.flatMap((p) => {
-    const sealed = sealFor(
+/** Seals planned reminders for the server: personal key, for this person only. */
+export function reminderItems(
+  c: Pick<Context, 'ring' | 'spaceId' | 'userId' | 'partnerId'>,
+  planned: readonly Planned[],
+) {
+  return planned.flatMap((p) => {
+    const sealed = sealWith(
+      c,
       {
         title: truncate(p.title, 120),
         body: truncate(p.body, 400),
@@ -360,6 +365,17 @@ export async function syncReminders(): Promise<void> {
     );
     return sealed ? [{ fire_at: p.fire_at, ...sealed }] : [];
   });
+}
+
+/** Replaces the server's list when this device's planned reminders changed. */
+export async function syncReminders(): Promise<void> {
+  const c = ctx;
+  if (!c || pushState.value !== 'on') return;
+  const planned = plannedReminders();
+  const sig = JSON.stringify(planned.map((p) => [p.fire_at, p.title, p.body, p.record_id]));
+  lastReminderSig ??= (await kvGet<string | null>('reminders-sig')) ?? null;
+  if (sig === lastReminderSig) return;
+  const items = reminderItems(c, planned);
   try {
     await api('/push/reminders', { method: 'PUT', body: { space_id: c.spaceId, items } });
     lastReminderSig = sig;

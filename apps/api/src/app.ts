@@ -120,7 +120,7 @@ export async function cleanup(env: Env, now = Date.now()): Promise<void> {
     env.DB.prepare('DELETE FROM sessions WHERE expires_at < ?').bind(now),
     // Push subscriptions of devices that are no longer signed in (review L4).
     env.DB.prepare(
-      'DELETE FROM push_subs WHERE device_id IS NULL OR device_id NOT IN (SELECT device_id FROM sessions WHERE expires_at > ?)',
+      'DELETE FROM push_subs WHERE device_id IS NULL OR NOT EXISTS (SELECT 1 FROM sessions s WHERE s.device_id = push_subs.device_id AND s.expires_at > ?)',
     ).bind(now),
     env.DB.prepare('DELETE FROM rate_limits WHERE window_start < ?').bind(
       Math.floor(now / 1000) - 86_400,

@@ -80,6 +80,13 @@ sync.post('/push', async (c) => {
     .bind(...ids)
     .all<Row>();
   const byId = new Map(existing.results.map((r) => [r.id, r]));
+  // Minimum key versions after a rotation (ADR 0013): old keys are decrypt-only.
+  const floors = await c.env.DB.prepare(
+    `SELECT (SELECT key_version FROM spaces WHERE id = ?1) AS space,
+            (SELECT personal_key_version FROM users WHERE id = ?2) AS personal`,
+  )
+    .bind(req.space_id, uid)
+    .first<{ space: number; personal: number }>();
 
   const results = new Map<string, PushResult>();
   const accepted: {
@@ -93,6 +100,11 @@ sync.post('/push', async (c) => {
     const e = item.envelope;
     if (e.scope === 'user' && e.owner_user_id !== uid) {
       results.set(e.id, { status: 'rejected', id: e.id, reason: 'not_owner' });
+      continue;
+    }
+    const floor = e.scope === 'user' ? (floors?.personal ?? 1) : (floors?.space ?? 1);
+    if (e.key_version < floor) {
+      results.set(e.id, { status: 'rejected', id: e.id, reason: 'stale_key' });
       continue;
     }
     const nonce = fromB64Url(e.nonce);

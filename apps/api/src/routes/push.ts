@@ -15,7 +15,7 @@
 import { Hono } from 'hono';
 import * as v from 'valibot';
 import { type AppEnv, requireAuth } from '../auth/session';
-import { num } from '../env';
+import { type Env, num } from '../env';
 import { fromB64Url, newId } from '../lib/crypto';
 import { body, HttpError } from '../lib/http';
 import { requireMember } from '../lib/members';
@@ -62,6 +62,24 @@ function isTimeZone(tz: string): boolean {
   } catch {
     return false;
   }
+}
+
+/** After a rotation, payloads under old key versions are refused (ADR 0013). */
+async function requireCurrentKey(
+  env: Env,
+  scope: 'space' | 'user',
+  id: string,
+  version: number,
+): Promise<void> {
+  const row = await env.DB.prepare(
+    scope === 'space'
+      ? 'SELECT key_version AS v FROM spaces WHERE id = ?'
+      : 'SELECT personal_key_version AS v FROM users WHERE id = ?',
+  )
+    .bind(id)
+    .first<{ v: number }>();
+  if (row && version < row.v)
+    throw new HttpError(409, 'stale_key', 'This device needs the new keys.');
 }
 
 export const push = new Hono<AppEnv>();
@@ -168,6 +186,7 @@ push.post('/notify', async (c) => {
     }),
   );
   await requireMember(c.env, input.space_id, uid);
+  await requireCurrentKey(c.env, 'space', input.space_id, input.key_version);
   await rateLimit(c.env, `notify:${uid}`, num(c.env.MAX_PUSHES_PER_HOUR, 60), 3600);
   if (!vapidKeys(c.env)) return c.json({ sent: 0, deferred: 0 });
   const payload = pack(input.payload);
@@ -250,6 +269,7 @@ push.put('/reminders', async (c) => {
     }),
   );
   await requireMember(c.env, input.space_id, uid);
+  for (const item of input.items) await requireCurrentKey(c.env, 'user', uid, item.key_version);
   await rateLimit(c.env, `reminders:${uid}`, 120, 3600);
   const now = Date.now();
   for (const item of input.items) {

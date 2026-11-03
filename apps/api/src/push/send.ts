@@ -53,6 +53,20 @@ export function wrap(message: Sealed): Uint8Array {
   );
 }
 
+/**
+ * One VAPID JWT per push-service origin, reused for an hour (it is valid for
+ * 12): signing is the costly part of a send (review 0003, N4).
+ */
+const vapidCache = new Map<string, { header: string; until: number }>();
+async function cachedVapid(endpoint: string, keys: VapidKeys, now: number): Promise<string> {
+  const origin = `${keys.publicKey}|${new URL(endpoint).origin}`;
+  const hit = vapidCache.get(origin);
+  if (hit && hit.until > now) return hit.header;
+  const header = await vapidAuthorization(endpoint, keys, now);
+  vapidCache.set(origin, { header, until: now + 3_600_000 });
+  return header;
+}
+
 interface SubRow {
   id: string;
   endpoint: string;
@@ -114,7 +128,7 @@ export async function deliver(
         const res = await fetch(sub.endpoint, {
           method: 'POST',
           headers: {
-            Authorization: await vapidAuthorization(sub.endpoint, keys, now),
+            Authorization: await cachedVapid(sub.endpoint, keys, now),
             'Content-Encoding': 'aes128gcm',
             'Content-Type': 'application/octet-stream',
             TTL: String(Math.max(0, Math.floor(opts.ttlSeconds))),
@@ -225,7 +239,8 @@ export async function sendDue(env: Env, now = Date.now()): Promise<number> {
          FROM reminders r
         WHERE fire_at <= ?1 AND (claimed_at IS NULL OR claimed_at < ?2)
      ) WHERE n <= ?3
-     ORDER BY fire_at
+     -- Everyone's first due row before anyone's second (review 0003, N1).
+     ORDER BY n, fire_at
      LIMIT ?4`,
   )
     .bind(now, now - CLAIM_MS, PER_USER_PER_RUN, ROWS_PER_RUN)

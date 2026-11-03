@@ -54,11 +54,13 @@ export {
   type CreatedInvite,
   createDeviceInvite,
   createPartnerInvite,
+  createRekeyInvite,
   formatInviteFragment,
   INVITE_SECRET_LENGTH,
   type InviteKind,
   openDeviceInvite,
   openPartnerInvite,
+  openRekeyInvite,
   parseInviteFragment,
 } from './pairing';
 export {

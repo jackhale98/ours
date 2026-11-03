@@ -10,15 +10,18 @@ export const me = new Hono<AppEnv>();
 me.get('/me', requireAuth, async (c) => {
   const user = c.var.user;
   const [profile, devices, spaces, passkeys] = await c.env.DB.batch([
-    c.env.DB.prepare('SELECT id, email, created_at FROM users WHERE id = ?').bind(user.id),
+    c.env.DB.prepare(
+      'SELECT id, email, created_at, personal_key_version FROM users WHERE id = ?',
+    ).bind(user.id),
     c.env.DB.prepare(
       'SELECT id, label, created_at, last_seen FROM devices WHERE user_id = ? ORDER BY created_at',
     ).bind(user.id),
     c.env.DB.prepare(
-      `SELECT m.space_id, m.role, m.joined_at,
+      `SELECT m.space_id, m.role, m.joined_at, s.key_version, s.rotated_rev,
               (SELECT json_group_array(json_object('user_id', o.user_id, 'role', o.role, 'joined_at', o.joined_at))
                  FROM memberships o WHERE o.space_id = m.space_id) AS members
-         FROM memberships m WHERE m.user_id = ? ORDER BY m.joined_at`,
+         FROM memberships m JOIN spaces s ON s.id = m.space_id
+        WHERE m.user_id = ? ORDER BY m.joined_at`,
     ).bind(user.id),
     c.env.DB.prepare('SELECT COUNT(*) AS n FROM passkeys WHERE user_id = ?').bind(user.id),
   ]);

@@ -7,9 +7,11 @@ import { generateKey, KeyRing } from './keys';
 import {
   createDeviceInvite,
   createPartnerInvite,
+  createRekeyInvite,
   formatInviteFragment,
   openDeviceInvite,
   openPartnerInvite,
+  openRekeyInvite,
   parseInviteFragment,
 } from './pairing';
 import { safetyCode } from './safety';
@@ -93,6 +95,30 @@ describe('partner invite', () => {
     expect(() => openPartnerInvite(secret, SPACE, wrapped)).toThrow(
       expect.objectContaining({ code: 'invite' }),
     );
+  });
+});
+
+describe('key update link (rotation, ADR 0013)', () => {
+  const payload = () => ({
+    space_id: SPACE,
+    keys: [
+      { version: 1, key: generateKey() },
+      { version: 2, key: generateKey() },
+    ],
+  });
+
+  it('carries the new space keys to the partner', () => {
+    const p = payload();
+    const { secret, wrapped } = createRekeyInvite(p);
+    expect(openRekeyInvite(secret, SPACE, wrapped).keys).toEqual(p.keys);
+  });
+
+  it('is not interchangeable with a first invite, in either direction', () => {
+    const rekey = createRekeyInvite(payload());
+    expect(() => openPartnerInvite(rekey.secret, SPACE, rekey.wrapped)).toThrow(CryptoError);
+    const first = createPartnerInvite(payload());
+    expect(() => openRekeyInvite(first.secret, SPACE, first.wrapped)).toThrow(CryptoError);
+    expect(() => openRekeyInvite(rekey.secret, 'other-space', rekey.wrapped)).toThrow(CryptoError);
   });
 });
 

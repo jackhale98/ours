@@ -7,6 +7,10 @@
  * account to fetch an invite claims it and nobody else can fetch it; the
  * wrapped blob is erased when the invite is accepted; invites expire in 24 h;
  * creating a new invite replaces the creator's previous unused one.
+ *
+ * Kinds: 'partner' (first invite: joins the space), 'device' (link another of
+ * my devices), 'rekey' (new space keys for my partner after a rotation, ADR
+ * 0013: only the other member of the space can claim it; nobody joins).
  */
 import { Hono } from 'hono';
 import * as v from 'valibot';
@@ -58,6 +62,7 @@ invites.post('/', async (c) => {
     v.variant('kind', [
       v.strictObject({ kind: v.literal('partner'), space_id: v.string(), wrapped: Wrapped }),
       v.strictObject({ kind: v.literal('device'), wrapped: Wrapped }),
+      v.strictObject({ kind: v.literal('rekey'), space_id: v.string(), wrapped: Wrapped }),
     ]),
   );
   await rateLimit(c.env, `invite:${uid}`, 20, 86_400);
@@ -71,6 +76,16 @@ invites.post('/', async (c) => {
       .first<{ n: number }>();
     if ((members?.n ?? 0) >= 2)
       throw new HttpError(409, 'space_full', 'This space already has two people.');
+    spaceId = input.space_id;
+  }
+  if (input.kind === 'rekey') {
+    await requireMember(c.env, input.space_id, uid);
+    const members = await c.env.DB.prepare(
+      'SELECT COUNT(*) AS n FROM memberships WHERE space_id = ?',
+    )
+      .bind(input.space_id)
+      .first<{ n: number }>();
+    if ((members?.n ?? 0) < 2) throw new HttpError(409, 'no_partner');
     spaceId = input.space_id;
   }
   const raw = newId();
@@ -102,12 +117,15 @@ invites.get('/:id', async (c) => {
   const row = await c.env.DB.prepare(
     `UPDATE invites SET claimed_by = ?1
       WHERE id = ?2 AND used_at IS NULL AND expires_at > ?3 AND (claimed_by IS NULL OR claimed_by = ?1)
-        AND ((kind = 'device' AND created_by = ?1) OR (kind = 'partner' AND created_by != ?1))
+        AND ((kind = 'device' AND created_by = ?1)
+          OR (kind = 'partner' AND created_by != ?1)
+          OR (kind = 'rekey' AND created_by != ?1
+              AND EXISTS (SELECT 1 FROM memberships WHERE space_id = invites.space_id AND user_id = ?1)))
       RETURNING kind, space_id, wrapped, created_by, expires_at`,
   )
     .bind(uid, idHash, Date.now())
     .first<{
-      kind: 'partner' | 'device';
+      kind: 'partner' | 'device' | 'rekey';
       space_id: string | null;
       wrapped: ArrayBuffer;
       created_by: string;
@@ -140,7 +158,7 @@ invites.post('/:id/accept', async (c) => {
     'SELECT kind, space_id FROM invites WHERE id = ? AND claimed_by = ? AND used_at IS NULL AND expires_at > ?',
   )
     .bind(idHash, uid, Date.now())
-    .first<{ kind: 'partner' | 'device'; space_id: string | null }>();
+    .first<{ kind: 'partner' | 'device' | 'rekey'; space_id: string | null }>();
   if (!row) throw new HttpError(404, 'not_found');
   const now = Date.now();
   // The invite is consumed (and its key blob erased) only if the join itself
@@ -148,7 +166,7 @@ invites.post('/:id/accept', async (c) => {
   const statements = [
     c.env.DB.prepare(
       `UPDATE invites SET used_at = ?1, wrapped = x''
-        WHERE id = ?2 AND (kind = 'device' OR EXISTS (SELECT 1 FROM memberships WHERE space_id = ?3 AND user_id = ?4))`,
+        WHERE id = ?2 AND (kind IN ('device', 'rekey') OR EXISTS (SELECT 1 FROM memberships WHERE space_id = ?3 AND user_id = ?4))`,
     ).bind(now, idHash, row.space_id, uid),
   ];
   if (row.kind === 'partner' && row.space_id) {

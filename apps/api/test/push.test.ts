@@ -609,4 +609,49 @@ describe('push routes', () => {
     await call(`/spaces/${spaceId}/membership`, { token: sam.token, method: 'DELETE' });
     expect(await count()).toBe(0);
   });
+
+  it('serves everyone’s first reminder before anyone’s second (review N1)', async () => {
+    const now = Date.now() + 120_000; // after the slow setup below
+    const busy = [];
+    for (let i = 0; i < 9; i++) busy.push(await couple());
+    const victim = await couple();
+    const victimPhone = await browser();
+    await call('/push/subscription', {
+      token: victim.sam.token,
+      method: 'PUT',
+      body: victimPhone.subscription,
+    });
+    for (const b of busy) {
+      const phone = await browser();
+      await call('/push/subscription', {
+        token: b.sam.token,
+        method: 'PUT',
+        body: phone.subscription,
+      });
+      await call('/push/reminders', {
+        token: b.sam.token,
+        method: 'PUT',
+        body: {
+          space_id: b.spaceId,
+          items: Array.from({ length: 5 }, (_, i) => ({
+            fire_at: now + 1000 + i,
+            key_version: 1,
+            payload: sealed(b.spaceId, `b${i}`),
+          })),
+        },
+      });
+    }
+    // The victim's reminder is due last of all.
+    await call('/push/reminders', {
+      token: victim.sam.token,
+      method: 'PUT',
+      body: {
+        space_id: victim.spaceId,
+        items: [{ fire_at: now + 2000, key_version: 1, payload: sealed(victim.spaceId, 'v') }],
+      },
+    });
+    const sent = capturePushes();
+    await sendDue(env, now + 3000);
+    expect(sent.filter((x) => x.url === victimPhone.endpoint)).toHaveLength(1);
+  });
 });
