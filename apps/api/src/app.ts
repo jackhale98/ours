@@ -1,8 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 import { Hono } from 'hono';
+import type { AppEnv } from './auth/session';
 import type { Env } from './env';
-
-export type AppEnv = { Bindings: Env };
+import { HttpError } from './lib/http';
+import { auth } from './routes/auth';
+import { invites } from './routes/invites';
+import { keys } from './routes/keys';
+import { me } from './routes/me';
+import { spaces } from './routes/spaces';
+import { sync } from './routes/sync';
 
 const SECURITY_HEADERS: Record<string, string> = {
   'Content-Security-Policy': "default-src 'none'; frame-ancestors 'none'",
@@ -44,7 +50,7 @@ export function createApp() {
     }
   });
 
-  // Security headers and coarse logging: route, status, latency. Never bodies.
+  // Security headers and coarse logging: route, method, status, latency. Never bodies, tokens or ids.
   app.use('*', async (c, next) => {
     const started = Date.now();
     await next();
@@ -60,9 +66,36 @@ export function createApp() {
   });
 
   app.get('/health', (c) => c.json({ ok: true }));
+  app.route('/auth', auth);
+  app.route('/', me);
+  app.route('/spaces', spaces);
+  app.route('/invites', invites);
+  app.route('/keys', keys);
+  app.route('/sync', sync);
 
   app.notFound((c) => c.json({ error: 'not_found' }, 404));
-  app.onError((_err, c) => c.json({ error: 'internal' }, 500));
+  app.onError((err, c) => {
+    if (err instanceof HttpError)
+      return c.json({ error: err.code, message: err.message }, err.status);
+    console.error(JSON.stringify({ route: c.req.routePath, error: 'internal' }));
+    return c.json({ error: 'internal' }, 500);
+  });
 
   return app;
+}
+
+/** Hourly housekeeping: expired tokens, challenges, invites, sessions, old rate-limit windows. */
+export async function cleanup(env: Env, now = Date.now()): Promise<void> {
+  await env.DB.batch([
+    env.DB.prepare('DELETE FROM email_tokens WHERE expires_at < ?').bind(now - 86_400_000),
+    env.DB.prepare('DELETE FROM auth_challenges WHERE expires_at < ?').bind(now),
+    env.DB.prepare('DELETE FROM invites WHERE expires_at < ? OR used_at < ?').bind(
+      now,
+      now - 86_400_000,
+    ),
+    env.DB.prepare('DELETE FROM sessions WHERE expires_at < ?').bind(now),
+    env.DB.prepare('DELETE FROM rate_limits WHERE window_start < ?').bind(
+      Math.floor(now / 1000) - 86_400,
+    ),
+  ]);
 }

@@ -50,6 +50,12 @@ Every stored field (keep in sync with `apps/api/migrations` and the privacy poli
 | push_subs | id, user_id, device_id, endpoint, p256dh, auth, created_at, last_ok, failures | Web Push delivery |
 | feed_tokens | token_hash, user_id, created_at, revoked_at | Calendar feed |
 | feed_busy | user_id, start_utc, end_utc | **Plaintext** busy blocks, only if the user opts in to the calendar feed |
+| users (added) | last_active | Inactive-account policy (warn at 12 months, delete at 13) |
+| spaces (added) | bytes | Storage quota (total ciphertext size per space) |
+| invites (added) | claimed_by | The first account to fetch an invite claims it; blob erased on accept |
+| email_tokens | token_hash, email, created_at, expires_at, used_at | Magic links; deleted a day after expiry |
+| auth_challenges | id, user_id, challenge, purpose, expires_at | Passkey ceremonies; single use, 5 minutes |
+| rate_limits | key (salted hash, no IP or email), window_start, count | Abuse protection; deleted after a day |
 
 **Imported calendars (opt-in):** when a user adds a calendar by subscription link, each refresh is relayed by the Worker, which sees the subscription URL and that calendar's contents **in transit** (not stored, not logged). The URL itself is stored only inside an encrypted record. File imports never reach the server. See ADR 0011.
 

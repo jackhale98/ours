@@ -13,7 +13,7 @@ export function randomBytes(length: number): Uint8Array {
 }
 
 const encoder = new TextEncoder();
-const decoder = new TextDecoder('utf-8', { fatal: true });
+const decoder = new TextDecoder('utf-8', { fatal: true, ignoreBOM: false });
 
 export function utf8(text: string): Uint8Array {
   return encoder.encode(text);

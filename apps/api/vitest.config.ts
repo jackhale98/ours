@@ -10,6 +10,9 @@ export default defineConfig({
         bindings: {
           TEST_MIGRATIONS: await readD1Migrations('./migrations'),
           ALLOWED_ORIGINS: 'https://app.example',
+          ALLOW_SIGNUPS: 'open',
+          RP_ID: 'app.example',
+          MAX_SPACE_BYTES: '200000',
         },
       },
     })),

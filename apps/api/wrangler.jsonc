@@ -10,7 +10,17 @@
     // Comma-separated origins of the web app allowed by CORS.
     "ALLOWED_ORIGINS": "http://localhost:5173,http://localhost:4173",
     // open | invite_only | closed
-    "ALLOW_SIGNUPS": "open"
+    "ALLOW_SIGNUPS": "open",
+    // Public URL of the web app (magic links) and the passkey relying party.
+    "APP_URL": "http://localhost:5173/",
+    "RP_ID": "localhost",
+    "RP_NAME": "Ours",
+    // 'log' sends nothing (development). Set 'resend' + EMAIL_FROM and the EMAIL_API_KEY secret in production.
+    "EMAIL_PROVIDER": "log",
+    "MAX_SPACES_PER_USER": "3",
+    "MAX_DEVICES_PER_USER": "10",
+    "MAX_SPACE_BYTES": "20971520",
+    "MAX_PUSHES_PER_MINUTE": "120"
   },
   "d1_databases": [
     {

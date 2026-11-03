@@ -55,7 +55,7 @@ Timed events store wall-clock `start`/`end` (`YYYY-MM-DDTHH:mm`) plus an IANA zo
 |---|---|---|
 | 0 | Scaffold, CI, docs, ADRs | Done (pending owner decisions in ADRs 0001, 0006) |
 | 1 | Core library | Done; independent crypto review signed off with conditions (`docs/reviews/0001-core-crypto.md`) |
-| 2 | API: auth, spaces, invites, backups, sync, quotas | Not started |
+| 2 | API: auth, spaces, invites, backups, sync, quotas | Built and tested (42 Worker tests incl. real passkey ceremonies); independent review pending; not deployed (needs Cloudflare account + email provider) |
 | 3 | App shell, PWA, local store, onboarding, demo mode, policy pages | In progress: app shell and demo mode live at the Pages URL (local store in `apps/web/src/app/model.ts`, writes validated with the same schema and scope policy as encrypted sync); PWA, IndexedDB, outbox, onboarding and policy pages to do |
 | 4 | MVP features | UI built against the demo store: plan, quick add, proposals, event sheet with notes, lists with assignees, private lists, busy-only events, undo toasts, check-in; E2E + axe in CI. Needs sync to be real |
 | 5 | Notifications | Not started |
