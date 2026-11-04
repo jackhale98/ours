@@ -8,7 +8,8 @@
   - export/import: `packages/core/src/crypto/export.ts`, `kdf.ts`, `apps/web/src/app/export.ts`, `views/DataCard.tsx`, `packages/core/src/ics/write.ts`
 - Verdict: **No sign-off yet.** Conditions: fix H1 and M1–M2; address or explicitly accept the Lows.
 - Re-review (commit c001131): **Sign-off with conditions.** H1, M2, L2, L5, L7 and the Info items are fixed; M1, L1, L3, L4 and L6 are fixed in part. Two conditions remain before public launch: (A) import must wait for a completed sync; (B) recurrence work must be bounded, not just impossible rules rejected. See the re-review section at the end.
-- Fixes for A, B, R3, R4 and R5: see "Fixes after the re-review" at the end. Awaiting the reviewer's check.
+- Fixes for A, B, R3, R4 and R5: see "Fixes after the re-review" at the end.
+- Check of the fixes (commit 8ff1899): **Sign-off with conditions.** A and R4 are fixed. B is fixed for rules without COUNT, but a COUNT rule can still take 2.5 s to expand, so condition B is not met yet. R3 and R5 are fixed in part. Conditions before public launch: bound COUNT work (N1) and fix the date shift for pre-1970 starts (N2). See "Check of the fixes" at the end.
 
 Findings were confirmed with throwaway probe tests (run against the repo from a scratch vitest config, then deleted) or by reading, as marked.
 
