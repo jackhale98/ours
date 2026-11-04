@@ -91,11 +91,12 @@ function Result({ hit }: { hit: Hit }) {
     }
     case 'list':
       return (
-        <a
+        <button
+          type="button"
           class="find-row"
-          href="#lists"
           onClick={() => {
             currentList.value = hit.id;
+            location.hash = 'lists';
           }}
         >
           <Icon name="list" size={16} />
@@ -105,7 +106,7 @@ function Result({ hit }: { hit: Hit }) {
               {hit.list.rec.data.private ? 'Just for you' : `Shared with ${nameOf(partner.value)}`}
             </span>
           </span>
-        </a>
+        </button>
       );
     case 'import':
       return (
@@ -147,6 +148,7 @@ export function SearchView() {
           <h1>Search</h1>
         </div>
       </header>
+      {/* biome-ignore lint/a11y/useSemanticElements: <search> isn't in Preact's JSX types yet; role=search is the equivalent landmark */}
       <form role="search" class="find-form" onSubmit={(e) => e.preventDefault()}>
         <label class="sr" for="find-q">
           Search plans, lists and notes

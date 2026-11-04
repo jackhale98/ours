@@ -51,12 +51,12 @@ export function terms(query: string): string[] {
   return fold(query).split(/\s+/).filter(Boolean).slice(0, 8);
 }
 
-const escape = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 /** Every word starts a word somewhere in the fields: "din" finds "dinner", not "wedding". */
 export function matches(words: string[], ...fields: (string | null | undefined)[]): boolean {
   const hay = fold(fields.filter(Boolean).join(' \u0001 '));
-  return words.every((w) => new RegExp(`(^|[^\\p{L}\\p{N}])${escape(w)}`, 'u').test(hay));
+  return words.every((w) => new RegExp(`(^|[^\\p{L}\\p{N}])${escapeRegExp(w)}`, 'u').test(hay));
 }
 
 /** When a plan next happens (or last happened), and that day's original start. */

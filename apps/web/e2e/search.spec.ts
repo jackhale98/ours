@@ -37,7 +37,7 @@ test('search finds plans, list items and lists, and opens them', async ({ page }
   await page.getByRole('dialog').getByRole('button', { name: 'Close' }).click();
 
   await box.fill('gift');
-  await page.getByRole('link', { name: /Gift ideas/ }).click();
+  await page.getByRole('button', { name: /Gift ideas/ }).click();
   await expect(page).toHaveURL(/#lists$/);
   await expect(
     page.getByRole('group', { name: 'Lists' }).getByRole('button', { name: /Gift ideas/ }),

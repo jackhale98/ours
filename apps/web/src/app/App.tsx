@@ -133,7 +133,7 @@ function SearchLink({ variant }: { variant: 'rail' | 'top' }) {
       {variant === 'rail' && (
         <>
           Search
-          <kbd aria-hidden="true">/</kbd>
+          <kbd>/</kbd>
         </>
       )}
     </a>

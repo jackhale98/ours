@@ -183,7 +183,7 @@ test('sign up, pair, compare safety codes, and sync plans both ways', async ({ b
   for (const page of [sam, alex]) {
     await page.getByRole('button', { name: 'Done' }).click();
     await page.getByRole('button', { name: 'Not now' }).click();
-    await expect(page.getByRole('heading', { name: 'This week' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'This week', exact: true })).toBeVisible();
     // No sample data in a real account.
     await expect(page.getByText('Late shift')).toHaveCount(0);
   }
