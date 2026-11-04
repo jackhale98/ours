@@ -57,7 +57,7 @@
         "RP_ID": "ourplanner.app",
         "RP_NAME": "Ours",
         "EMAIL_PROVIDER": "resend",
-        "EMAIL_FROM": "Ours <hello@ourplanner.app>",
+        "EMAIL_FROM": "Ours <hello@mail.ourplanner.app>",
         "MAX_SPACES_PER_USER": "3",
         "MAX_DEVICES_PER_USER": "10",
         "MAX_SPACE_BYTES": "20971520",
