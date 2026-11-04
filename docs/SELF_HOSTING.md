@@ -2,9 +2,16 @@
 
 Run your own Ours: the web app on GitHub Pages and the API on a Cloudflare Worker with a D1 database. Both free tiers are enough for a household. Check Cloudflare's current Workers and D1 free-tier limits on their pricing pages; they change. Allow about 15 minutes.
 
-You need: a GitHub account, a Cloudflare account, Node 22 with `corepack enable`, and (for real sign-in emails) an account with an email API such as Resend, with a sending domain you control.
+You need: a GitHub account, a Cloudflare account, and (for real sign-in emails) an account with an email API such as Resend, with a sending domain you control.
 
-## Steps
+There are two ways to run it:
+
+- **Everything on Cloudflare, set up in the browser** (recommended; ADR 0014). The app gets its own domain and real security headers, and no terminal is needed. See [All on Cloudflare](#all-on-cloudflare-no-terminal) below.
+- **App on GitHub Pages, API on Cloudflare**, set up from a terminal with Node 22 (`corepack enable`). The steps follow.
+
+The live API settings are in the `env.production` block of `apps/api/wrangler.jsonc`; the top level is for local development and tests. Every `wrangler` command for the live instance takes `--env production`.
+
+## Steps (GitHub Pages and a terminal)
 
 ### 1. Fork and enable Pages (2 min)
 
@@ -22,11 +29,11 @@ pnpm exec wrangler login
 pnpm exec wrangler d1 create ours --jurisdiction eu   # or leave out --jurisdiction; see ADR 0006
 ```
 
-Copy the printed `database_id` into `apps/api/wrangler.jsonc`.
+Copy the printed `database_id` into `env.production` in `apps/api/wrangler.jsonc`.
 
 ### 3. Configure the Worker (4 min)
 
-In `apps/api/wrangler.jsonc`, under `vars`, set:
+In `apps/api/wrangler.jsonc`, under `env.production`, set the `routes` to your API's domain (or remove them to use `workers.dev`), and under its `vars`:
 
 | Var | Value |
 |---|---|
@@ -34,15 +41,15 @@ In `apps/api/wrangler.jsonc`, under `vars`, set:
 | `APP_URL` | `https://<you>.github.io/<repo>/` |
 | `RP_ID` | `<you>.github.io` |
 | `EMAIL_PROVIDER` / `EMAIL_FROM` | `resend` / `Ours <hello@your-domain>` |
-| `VAPID_PUBLIC_KEY` | from the command in "Notifications" below (optional) |
 
 Then the secrets (each prompts for a value):
 
 ```sh
-pnpm exec wrangler secret put RATE_LIMIT_SALT     # any long random string: openssl rand -base64 32
-pnpm exec wrangler secret put EMAIL_API_KEY       # from your email provider
-pnpm exec wrangler secret put VAPID_PRIVATE_KEY   # optional, for notifications
-pnpm exec wrangler secret put TURNSTILE_SECRET    # optional, bot check on sign-in
+pnpm exec wrangler secret put RATE_LIMIT_SALT --env production     # any long random string: openssl rand -base64 32
+pnpm exec wrangler secret put EMAIL_API_KEY --env production       # from your email provider
+pnpm exec wrangler secret put VAPID_PUBLIC_KEY --env production    # optional, for notifications ("Notifications" below)
+pnpm exec wrangler secret put VAPID_PRIVATE_KEY --env production   # optional, for notifications
+pnpm exec wrangler secret put TURNSTILE_SECRET --env production    # optional, bot check on sign-in
 ```
 
 Never put these in `vars`: `pnpm check:worker` fails if you do.
@@ -50,8 +57,8 @@ Never put these in `vars`: `pnpm check:worker` fails if you do.
 ### 4. Deploy the API (2 min)
 
 ```sh
-pnpm exec wrangler d1 migrations apply ours --remote
-pnpm exec wrangler deploy
+pnpm exec wrangler d1 migrations apply ours --remote --env production
+pnpm exec wrangler deploy --env production
 ```
 
 Note the Worker URL it prints, e.g. `https://ours-api.<account>.workers.dev`. Check `https://…workers.dev/health` returns `{"ok":true}`.
@@ -68,7 +75,7 @@ Commit your `wrangler.jsonc` change and push to `main`, or run **Actions → Dep
 
 ### 6. Optional: deploy the API from GitHub too
 
-Add repo secrets `CLOUDFLARE_API_TOKEN` (a token with Workers Scripts: Edit and D1: Edit) and `CLOUDFLARE_ACCOUNT_ID`, and the repo variable `CLOUDFLARE_DEPLOY=true`. Every push to `main` that touches the API then applies migrations and deploys.
+Add repo secrets `CLOUDFLARE_API_TOKEN` (a token with Workers Scripts: Edit, D1: Edit, and Zone → Workers Routes: Edit on your domain if the Worker has custom-domain routes) and `CLOUDFLARE_ACCOUNT_ID`, and the repo variable `CLOUDFLARE_DEPLOY=true`. Every push to `main` that touches the API then applies migrations and deploys.
 
 ### 7. Check it
 
@@ -76,6 +83,20 @@ Add repo secrets `CLOUDFLARE_API_TOKEN` (a token with Workers Scripts: Edit and 
 - **Build hashes:** the Deploy web workflow prints a SHA-256 for every file it publishes. Compare them with what your browser loads if you want to be sure what you are running.
 - **Bot check:** if you configured Turnstile, sign in once and confirm the check appears and passes.
 - Read the privacy policy and terms on your site and make sure they describe your instance.
+
+## All on Cloudflare (no terminal)
+
+Everything below happens in the Cloudflare dashboard, GitHub and your email provider's site.
+
+1. **Domain.** Register one in Cloudflare (**Domain Registration**) or add an existing one as a zone. In the repo, set it in `apps/web/wrangler.jsonc` (`routes`) and in `env.production` of `apps/api/wrangler.jsonc` (`routes` for `api.<domain>`, `ALLOWED_ORIGINS`, `APP_URL`, `RP_ID`, `EMAIL_FROM`). Edit the files on github.com if you have no local copy.
+2. **Database.** **Storage & databases → D1 → Create**, named `ours`, choosing a location or jurisdiction. Copy its **Database ID** into `env.production` → `d1_databases` → `database_id`.
+3. **Deploy token.** **My Profile → API Tokens → Create Token → Custom token**: Account → **Workers Scripts: Edit**, Account → **D1: Edit**, Zone → **Workers Routes: Edit** for your domain. In GitHub (**Settings → Secrets and variables → Actions**) add the secrets `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` (shown on the **Workers & Pages** overview), and the variables `CLOUDFLARE_DEPLOY=true` and `WEB_HOST=cloudflare`.
+4. **Deploy the API.** **Actions → Deploy API → Run workflow.** It creates the tables, deploys the Worker and attaches its domain.
+5. **Random secrets.** **Actions → Create Worker secrets → Run workflow.** It stores `RATE_LIMIT_SALT` and the notification key pair in Cloudflare without showing them.
+6. **Service secrets.** In Cloudflare, **Workers & Pages → ours-api → Settings → Variables and Secrets → Add**, type **Secret**: `EMAIL_API_KEY` (your email provider's key) and, with Turnstile, `TURNSTILE_SECRET`.
+7. **Build settings.** In GitHub, add the variables `API_URL` (`https://api.<domain>`), `OURS_OPERATOR`, `OURS_CONTACT` and the other legal fields (table below), and `TURNSTILE_SITE_KEY` if used.
+8. **Deploy the app.** **Actions → Deploy web → Run workflow.** It builds the app with real security headers and attaches your domain.
+9. **Check it.** `https://api.<domain>/health` returns `{"ok":true}`; sign up at `https://<domain>`. Keep sign-up `open` until your account exists, then switch `ALLOW_SIGNUPS` to `invite_only` if you want: invite-only refuses anyone without an invite, the first person included.
 
 ## Updating
 
@@ -101,8 +122,9 @@ Pull from upstream into your fork and push. Migrations run before the new Worker
 | `wrangler secret put` | `RATE_LIMIT_SALT` | Random string used to hash rate-limit keys. |
 | `wrangler.jsonc` vars | `MAX_SPACES_PER_USER`, `MAX_DEVICES_PER_USER`, `MAX_SPACE_BYTES`, `MAX_PUSHES_PER_MINUTE`, `MAX_PUSHES_PER_HOUR` | Quotas (defaults 3, 10, 20 MB, 120 sync pushes a minute, 60 notifications an hour). |
 | `wrangler.jsonc` vars | `INACTIVE_WARN_DAYS`, `INACTIVE_GRACE_DAYS` | Inactive accounts get a warning email after this many days (default 365) and are deleted this many days later (default 30). Keep the privacy policy in step. |
-| `wrangler.jsonc` vars | `VAPID_PUBLIC_KEY`, `VAPID_SUBJECT` | Web Push public key and contact (`mailto:` or https; defaults to `APP_URL`). Empty key = notifications off. |
-| `wrangler secret put` | `VAPID_PRIVATE_KEY` | Web Push private key. See "Notifications" below. |
+| `wrangler.jsonc` vars | `VAPID_SUBJECT` | Web Push contact (`mailto:` or https; defaults to `APP_URL`). |
+| Secrets | `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` | Web Push key pair. None set = notifications off. See "Notifications" below. |
+| Repo variable | `WEB_HOST` | `cloudflare` deploys the web app with `apps/web/wrangler.jsonc` instead of GitHub Pages (ADR 0014). |
 | Repo secrets | `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID` | For `deploy-api.yml`. Set repo variable `CLOUDFLARE_DEPLOY=true` to enable it. |
 
 ## Notifications
@@ -113,7 +135,7 @@ Generate a VAPID key pair once (any machine with Node 20+):
 node -e '(async()=>{const k=await crypto.subtle.generateKey({name:"ECDSA",namedCurve:"P-256"},true,["sign"]);console.log("VAPID_PUBLIC_KEY="+Buffer.from(await crypto.subtle.exportKey("raw",k.publicKey)).toString("base64url"));console.log("VAPID_PRIVATE_KEY="+(await crypto.subtle.exportKey("jwk",k.privateKey)).d)})()'
 ```
 
-Put the public key in `wrangler.jsonc` and store the private key with `wrangler secret put VAPID_PRIVATE_KEY`. Changing the key pair later invalidates every device's subscription; people turn notifications on again in Privacy. On iPhone and iPad, Web Push works only once Ours is added to the Home Screen (iOS 16.4+).
+Store both as secrets: `wrangler secret put VAPID_PUBLIC_KEY --env production` and `wrangler secret put VAPID_PRIVATE_KEY --env production`. The app fetches the public key from the API. Without a terminal, the **Create Worker secrets** workflow does this for you. Changing the key pair later invalidates every device's subscription; people turn notifications on again in Privacy. On iPhone and iPad, Web Push works only once Ours is added to the Home Screen (iOS 16.4+).
 
 ## Backups
 

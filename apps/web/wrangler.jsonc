@@ -1,0 +1,24 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// The web app on Cloudflare: an assets-only Worker serving the built files
+// with real security headers from dist/_headers (ADR 0014). Deployed by
+// .github/workflows/deploy-web.yml when the repository variable
+// WEB_HOST is "cloudflare"; otherwise the app goes to GitHub Pages.
+// Self-hosting on Cloudflare: change the domain below to yours.
+{
+  "$schema": "../api/node_modules/wrangler/config-schema.json",
+  "name": "ours-web",
+  "compatibility_date": "2026-10-01",
+  "assets": {
+    "directory": "./dist",
+    "html_handling": "auto-trailing-slash",
+    "not_found_handling": "none"
+  },
+  // Serve only on the real domain: a second address would be a second origin
+  // that the API refuses anyway.
+  "workers_dev": false,
+  "preview_urls": false,
+  "routes": [{ "pattern": "ourplanner.app", "custom_domain": true }],
+  // No logs: an assets-only Worker has nothing worth recording, and request
+  // logs would hold visitors' IP addresses.
+  "observability": { "enabled": false }
+}

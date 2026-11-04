@@ -24,8 +24,9 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
         env:
-          # Override with a repository variable for custom domains (use "/").
-          OURS_BASE: ${{ vars.OURS_BASE || format('/{0}/', github.event.repository.name) }}
+          # GitHub Pages serves the app under /<repo>/; Cloudflare (WEB_HOST) and
+          # custom domains at the root. A repository variable overrides both.
+          OURS_BASE: ${{ vars.OURS_BASE || (vars.WEB_HOST == 'cloudflare' && '/' || format('/{0}/', github.event.repository.name)) }}
           VITE_API_URL: ${{ vars.API_URL }}
           VITE_TURNSTILE_SITE_KEY: ${{ vars.TURNSTILE_SITE_KEY }}
           OURS_OPERATOR: ${{ vars.OURS_OPERATOR }}
@@ -40,13 +41,24 @@ jobs:
           find . -type f -print0 | sort -z | xargs -0 sha256sum > ../build-hashes.txt
           cat ../build-hashes.txt
           cp ../build-hashes.txt ./build-hashes.txt
-      - uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
-      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+      # Cloudflare (ADR 0014): an assets-only Worker with real security headers.
+      - name: Deploy to Cloudflare
+        if: vars.WEB_HOST == 'cloudflare'
+        working-directory: apps/api
+        run: pnpm exec wrangler deploy --config ../web/wrangler.jsonc
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      - if: vars.WEB_HOST != 'cloudflare'
+        uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
+      - if: vars.WEB_HOST != 'cloudflare'
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:
           path: apps/web/dist
 
   deploy:
     needs: build
+    if: vars.WEB_HOST != 'cloudflare'
     runs-on: ubuntu-latest
     permissions:
       pages: write

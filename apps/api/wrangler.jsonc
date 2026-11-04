@@ -1,4 +1,7 @@
 // Ours API Worker. See docs/SELF_HOSTING.md.
+// The top level is for local development and tests. `env.production` is the
+// live instance at api.ourplanner.app (deployed with `--env production`);
+// self-hosters change its domain, origins and database id to their own.
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "ours-api",
@@ -23,10 +26,9 @@
     "MAX_DEVICES_PER_USER": "10",
     "MAX_SPACE_BYTES": "20971520",
     "MAX_PUSHES_PER_MINUTE": "120",
-    "MAX_PUSHES_PER_HOUR": "60",
-    // Web Push: set VAPID_PUBLIC_KEY here and `wrangler secret put VAPID_PRIVATE_KEY`
-    // (see docs/SELF_HOSTING.md). Empty = notifications off.
-    "VAPID_PUBLIC_KEY": ""
+    "MAX_PUSHES_PER_HOUR": "60"
+    // Web Push is off locally: VAPID_PUBLIC_KEY and VAPID_PRIVATE_KEY are
+    // secrets (docs/SELF_HOSTING.md); tests pass their own.
   },
   "d1_databases": [
     {
@@ -37,5 +39,43 @@
       "migrations_dir": "migrations"
     }
   ],
-  "triggers": { "crons": ["* * * * *"] }
+  "triggers": { "crons": ["* * * * *"] },
+  "env": {
+    "production": {
+      // Without this the Worker would be called "ours-api-production".
+      "name": "ours-api",
+      "workers_dev": false,
+      "preview_urls": false,
+      "routes": [{ "pattern": "api.ourplanner.app", "custom_domain": true }],
+      "observability": { "enabled": true, "logs": { "invocation_logs": false } },
+      "vars": {
+        "ALLOWED_ORIGINS": "https://ourplanner.app",
+        // "open" until the first account exists: invite_only refuses anyone
+        // without an invite, the very first person included.
+        "ALLOW_SIGNUPS": "open",
+        "APP_URL": "https://ourplanner.app/",
+        "RP_ID": "ourplanner.app",
+        "RP_NAME": "Ours",
+        "EMAIL_PROVIDER": "resend",
+        "EMAIL_FROM": "Ours <hello@ourplanner.app>",
+        "MAX_SPACES_PER_USER": "3",
+        "MAX_DEVICES_PER_USER": "10",
+        "MAX_SPACE_BYTES": "20971520",
+        "MAX_PUSHES_PER_MINUTE": "120",
+        "MAX_PUSHES_PER_HOUR": "60"
+        // VAPID_PUBLIC_KEY and VAPID_PRIVATE_KEY are secrets here, made by the
+        // "Create Worker secrets" workflow; a var of the same name would clash.
+      },
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "ours",
+          // From `wrangler d1 create ours`.
+          "database_id": "00000000-0000-0000-0000-000000000000",
+          "migrations_dir": "migrations"
+        }
+      ],
+      "triggers": { "crons": ["* * * * *"] }
+    }
+  }
 }

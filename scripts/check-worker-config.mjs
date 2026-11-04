@@ -4,18 +4,29 @@
 // they must stay off; the app logs route/status/latency itself.
 import { readFileSync } from 'node:fs';
 
-const text = readFileSync(new URL('../apps/api/wrangler.jsonc', import.meta.url), 'utf8')
-  .replace(/\/\*[\s\S]*?\*\//g, '')
-  .replace(/(^|[^:])\/\/.*$/gm, '$1');
-const config = JSON.parse(text);
-const problems = [];
-const obs = config.observability;
-if (obs?.enabled && obs?.logs?.invocation_logs !== false) {
-  problems.push(
-    'observability.logs.invocation_logs must be false (it would store client IPs and invite URLs)',
+const read = (path) =>
+  JSON.parse(
+    readFileSync(new URL(path, import.meta.url), 'utf8')
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/(^|[^:])\/\/.*$/gm, '$1'),
   );
+const config = read('../apps/api/wrangler.jsonc');
+const problems = [];
+// The API at the top level and in each environment, and the web app's Worker
+// (ADR 0014): none may keep request logs.
+const observed = [
+  ['api', config.observability],
+  ...Object.entries(config.env ?? {}).map(([name, e]) => [`api env.${name}`, e?.observability]),
+  ['web', read('../apps/web/wrangler.jsonc').observability],
+];
+for (const [where, obs] of observed) {
+  if (obs?.enabled && obs?.logs?.invocation_logs !== false) {
+    problems.push(
+      `${where}: observability.logs.invocation_logs must be false (it would store client IPs and invite URLs)`,
+    );
+  }
+  if (obs?.traces?.enabled) problems.push(`${where}: observability.traces must stay disabled`);
 }
-if (obs?.traces?.enabled) problems.push('observability.traces must stay disabled');
 // Every vars block: top level and each environment (security review 0003, I5).
 const varBlocks = [
   ['vars', config.vars],

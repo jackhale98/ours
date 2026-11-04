@@ -29,15 +29,22 @@ jobs:
           node-version-file: .nvmrc
       - run: corepack enable
       - run: pnpm install --frozen-lockfile
+      - name: Check the production config is filled in
+        working-directory: apps/api
+        run: |
+          if grep -q '"database_id": "00000000-0000-0000-0000-000000000000"' <(sed -n '/"production"/,$p' wrangler.jsonc); then
+            echo "::error::Set env.production's database_id in apps/api/wrangler.jsonc (wrangler d1 create ours)."
+            exit 1
+          fi
       - name: Apply D1 migrations
         working-directory: apps/api
-        run: pnpm exec wrangler d1 migrations apply ours --remote
+        run: pnpm exec wrangler d1 migrations apply ours --remote --env production
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       - name: Deploy Worker
         working-directory: apps/api
-        run: pnpm exec wrangler deploy
+        run: pnpm exec wrangler deploy --env production
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}

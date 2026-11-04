@@ -20,7 +20,8 @@ export default defineConfig(({ mode }) => {
   const turnstileKey = env.VITE_TURNSTILE_SITE_KEY ?? '';
   const challenges = turnstileKey ? ' https://challenges.cloudflare.com' : '';
 
-  // GitHub Pages cannot send headers, so the CSP lives in a meta tag.
+  // The CSP goes in a meta tag on every page (GitHub Pages can't send headers)
+  // and, for hosts that can (Cloudflare), in a `_headers` file as real headers.
   const csp = [
     "default-src 'self'",
     `script-src 'self'${challenges}`,
@@ -56,6 +57,31 @@ export default defineConfig(({ mode }) => {
       : '      <p class="note"><strong>Preview instance.</strong> Accounts are not open here yet; the demo keeps everything in your browser and sends nothing to a server.</p>',
   };
 
+  // Real response headers, for hosts that read a `_headers` file (Cloudflare
+  // Workers static assets; ADR 0014). A meta tag can't carry frame-ancestors,
+  // so only a header stops other sites framing the app to trick clicks.
+  const headers = [
+    '/*',
+    `  Content-Security-Policy: ${csp}; frame-ancestors 'none'`,
+    '  X-Frame-Options: DENY',
+    '  Strict-Transport-Security: max-age=31536000; includeSubDomains',
+    '  X-Content-Type-Options: nosniff',
+    '  Referrer-Policy: no-referrer',
+    '  Cross-Origin-Opener-Policy: same-origin',
+    '  Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=(), usb=()',
+    // Hashed file names: safe to keep for a year.
+    `${base}assets/*`,
+    '  Cache-Control: public, max-age=31536000, immutable',
+    '',
+  ].join('\n');
+  const headersPlugin: Plugin = {
+    name: 'ours-headers',
+    apply: 'build',
+    generateBundle() {
+      this.emitFile({ type: 'asset', fileName: '_headers', source: headers });
+    },
+  };
+
   const cspPlugin: Plugin = {
     name: 'ours-csp',
     apply: 'build',
@@ -78,6 +104,7 @@ export default defineConfig(({ mode }) => {
     plugins: [
       preact(),
       cspPlugin,
+      headersPlugin,
       devCspPlugin,
       legalPlugin,
       VitePWA({
