@@ -127,10 +127,17 @@ async function issueLink(
   if (!existing && !mayCreate) return;
   const token = newToken();
   const now = Date.now();
+  // The invite presented now is the one opening the link uses (review 0007, I11).
   await env.DB.prepare(
-    'INSERT INTO email_tokens (token_hash, email, created_at, expires_at) VALUES (?, ?, ?, ?)',
+    'INSERT INTO email_tokens (token_hash, email, created_at, expires_at, invite_hash) VALUES (?, ?, ?, ?, ?)',
   )
-    .bind(await hashToken(token), input.email, now, now + EMAIL_TOKEN_MINUTES * 60_000)
+    .bind(
+      await hashToken(token),
+      input.email,
+      now,
+      now + EMAIL_TOKEN_MINUTES * 60_000,
+      input.invite ? await hashToken(input.invite) : null,
+    )
     .run();
   const app = (env.APP_URL ?? rp(env, undefined).origin).replace(/\/?$/, '/');
   await sendEmail(env, {
@@ -180,10 +187,10 @@ auth.post('/email/verify', async (c) => {
   const row = await c.env.DB.prepare(
     `UPDATE email_tokens SET used_at = ?1
       WHERE token_hash = ?2 AND used_at IS NULL AND expires_at > ?1
-      RETURNING email`,
+      RETURNING email, invite_hash`,
   )
     .bind(Date.now(), await hashToken(input.token))
-    .first<{ email: string }>();
+    .first<{ email: string; invite_hash: string | null }>();
   if (!row) throw new HttpError(400, 'link_invalid', 'That link has expired or was already used.');
 
   let user = await c.env.DB.prepare('SELECT id, email FROM users WHERE email = ?')
@@ -195,13 +202,16 @@ auth.post('/email/verify', async (c) => {
     if (c.env.ALLOW_SIGNUPS !== 'open') {
       // Invite-gated sign-up: claim the invite for this one new account,
       // atomically, so one invite can create at most one account.
-      if (!input.invite) throw new HttpError(403, 'signups_closed');
+      // The invite presented when the link was asked for; else (older
+      // links) the one this device sends.
+      const invite = row.invite_hash ?? (input.invite ? await hashToken(input.invite) : null);
+      if (!invite) throw new HttpError(403, 'signups_closed');
       const claimed = await c.env.DB.prepare(
         `UPDATE invites SET claimed_by = ?1
           WHERE id = ?2 AND kind = 'partner' AND used_at IS NULL AND expires_at > ?3 AND claimed_by IS NULL
           RETURNING id`,
       )
-        .bind(id, await hashToken(input.invite), Date.now())
+        .bind(id, invite, Date.now())
         .first();
       if (!claimed) throw new HttpError(403, 'signups_closed');
     }

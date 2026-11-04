@@ -60,7 +60,10 @@ export async function call(
 }
 
 /** Signs up (or in) by magic link; returns the session token and user id. */
-export async function signIn(email: string, opts: { invite?: string; acceptTerms?: boolean } = {}) {
+export async function signIn(
+  email: string,
+  opts: { invite?: string; acceptTerms?: boolean; inviteAtVerify?: boolean } = {},
+) {
   const before = outbox.length;
   const start = await call('/auth/email/start', {
     body: {
@@ -82,7 +85,11 @@ export async function signIn(email: string, opts: { invite?: string; acceptTerms
   }
   if (!token) throw new Error('no email sent');
   const verify = await call('/auth/email/verify', {
-    body: { token, device_label: 'Test', ...(opts.invite ? { invite: opts.invite } : {}) },
+    body: {
+      token,
+      device_label: 'Test',
+      ...(opts.invite && opts.inviteAtVerify !== false ? { invite: opts.invite } : {}),
+    },
   });
   if (verify.status !== 200)
     throw new Error(`verify ${verify.status} ${JSON.stringify(verify.json)}`);

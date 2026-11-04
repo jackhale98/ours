@@ -36,6 +36,7 @@ import { mountTurnstile, turnstileEnabled } from '../../account/turnstile';
 import { HAS_API } from '../../config';
 import { type PastedLink, PasteLink } from '../pastelink';
 import { PhraseWords } from '../phrase';
+import { ScanLink } from '../scan';
 import { Icon, toast } from '../ui';
 
 const errorText = (err: unknown) =>
@@ -441,8 +442,8 @@ function RestoreKeys() {
       <p class="d">
         This device doesn’t have your keys yet.
         {canUnlock ? ' Unlock them with your passkey, ' : ' '}
-        Open or paste a link from another of your devices (Privacy → Link a new device), or enter
-        your recovery phrase.
+        Scan the code or open the link from another of your devices (Privacy → Link a new device),
+        or enter your recovery phrase.
       </p>
       {canUnlock && (
         <button
@@ -478,6 +479,18 @@ function RestoreKeys() {
           Use the device link
         </button>
       )}
+      <ScanLink
+        label="Scan a code"
+        accept={['join']}
+        onLink={async (link) => {
+          if (link.kind !== 'join') return;
+          try {
+            await acceptDeviceLink(link.fragment);
+          } catch (err) {
+            toast(errorText(err));
+          }
+        }}
+      />
       <PasteLink
         label="Paste a device link"
         hint={`Make one on a device that's already set up: Privacy → Link a new device. ${PASTE_HINT}`}

@@ -33,7 +33,7 @@ async function setUp(records: number) {
   });
   const id = inv.json.id as string;
   expect((await call(`/invites/${id}`, { token: kim.token })).status).toBe(200);
-  const accept = (leave: { space_id: string; records: number }) =>
+  const accept = (leave: { space_id: string; records: number; ids?: string[] }) =>
     call(`/invites/${id}/accept`, { token: kim.token, body: { leave } });
   const spacesOf = async () =>
     (await call('/me', { token: kim.token })).json.spaces.map(
@@ -95,6 +95,32 @@ describe('joining with an existing account', () => {
       .bind(t.own)
       .first();
     expect(space).toEqual({ x: 1 });
+  });
+
+  it('changes nothing if a record outside those shown is live, whatever the count (I9)', async () => {
+    const t = await setUp(2);
+    const shown = (
+      await call(`/sync/pull?space_id=${t.own}&since=0`, { token: t.kim.token })
+    ).json.envelopes.map((e: { id: string }) => e.id) as string[];
+    expect(shown).toHaveLength(2);
+    // The right number, but one of them isn't what was shown.
+    const res = await t.accept({ space_id: t.own, records: 2, ids: [shown[0] ?? '', 'other'] });
+    expect(res.status).toBe(409);
+    expect(res.json.error).toBe('space_changed');
+    expect(await t.spacesOf()).toEqual([t.own]);
+    expect((await t.accept({ space_id: t.own, records: 2, ids: shown })).status).toBe(200);
+    expect(await t.spacesOf()).toEqual([t.theirs]);
+  });
+
+  it('an opened invite can be let go of, for the right person to use (I8)', async () => {
+    const t = await setUp(0);
+    const other = await signIn(uniqueEmail('lee'));
+    expect((await call(`/invites/${t.id}`, { token: other.token })).status).toBe(404);
+    // Only the account that opened it can let it go.
+    await call(`/invites/${t.id}/release`, { token: other.token, body: {} });
+    expect((await call(`/invites/${t.id}`, { token: other.token })).status).toBe(404);
+    await call(`/invites/${t.id}/release`, { token: t.kim.token, body: {} });
+    expect((await call(`/invites/${t.id}`, { token: other.token })).status).toBe(200);
   });
 
   it('can’t be used to leave someone else’s space', async () => {

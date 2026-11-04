@@ -54,6 +54,7 @@ import {
 import { needsNewKeys } from '../../account/sync';
 import { nameOf, partner, settings, updateSettings, viewer } from '../model';
 import { PhraseWords } from '../phrase';
+import { QrCode } from '../qr';
 import { Icon, Switch, toast } from '../ui';
 
 const when = (ms: number | null) => (ms ? new Date(ms).toLocaleDateString() : 'never');
@@ -101,18 +102,28 @@ export function DevicesCard() {
         already downloaded.
       </p>
       {link ? (
-        <div class="url">
-          <code>{link}</code>
-          <button
-            type="button"
-            class="btn sm"
-            onClick={async () => {
-              await navigator.clipboard?.writeText(link).catch(() => {});
-              toast('Link copied. Open it on your new device within 24 hours.');
-            }}
-          >
-            Copy
-          </button>
+        <div class="stack gap">
+          <div class="qrbox">
+            <QrCode text={link} label="QR code of the device link" />
+            <p class="d small">
+              On your new device, sign in, then choose <b>Scan a code</b> on the Welcome back
+              screen, or point its camera here. Only your own account can use it, once, within 24
+              hours. Don’t show it to anyone else.
+            </p>
+          </div>
+          <div class="url">
+            <code>{link}</code>
+            <button
+              type="button"
+              class="btn sm"
+              onClick={async () => {
+                await navigator.clipboard?.writeText(link).catch(() => {});
+                toast('Link copied. Open it on your new device within 24 hours.');
+              }}
+            >
+              Copy
+            </button>
+          </div>
         </div>
       ) : (
         <button

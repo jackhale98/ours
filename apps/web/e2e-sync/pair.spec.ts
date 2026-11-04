@@ -4,9 +4,11 @@
  * safety codes, and a plan created on one device appears on the other.
  * Private plans reach the partner only as "Busy".
  */
-import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { type Browser, expect, type Page, test } from '@playwright/test';
+import { type Browser, chromium, expect, type Page, test } from '@playwright/test';
+import { encode } from 'uqr';
 
 const STATE_DIR = new URL('../../api/.wrangler/state/e2e', import.meta.url).pathname;
 
@@ -833,4 +835,78 @@ test('an invite kept for one address isn’t offered to someone else on the same
   await signUp(other, `ash-${stamp}@example.com`);
   await expect(other.getByRole('heading', { name: 'Set up your space' })).toBeVisible();
   expect(await other.evaluate(() => localStorage.getItem('ours-pending-invite'))).toBeNull();
+});
+
+/**
+ * A fake camera for Chromium: a short video (Y4M) showing this text's QR
+ * code, dark on white, as a phone camera would see it on a screen.
+ */
+function qrVideo(text: string): string {
+  const W = 640;
+  const H = 480;
+  const qr = encode(text, { ecc: 'M', border: 4 });
+  const scale = Math.floor(400 / qr.size);
+  const x0 = Math.floor((W - qr.size * scale) / 2);
+  const y0 = Math.floor((H - qr.size * scale) / 2);
+  const y = Buffer.alloc(W * H, 235);
+  for (let r = 0; r < qr.size; r++)
+    for (let c = 0; c < qr.size; c++)
+      if (qr.data[r]?.[c])
+        for (let dy = 0; dy < scale; dy++)
+          y.fill(
+            16,
+            (y0 + r * scale + dy) * W + x0 + c * scale,
+            (y0 + r * scale + dy) * W + x0 + (c + 1) * scale,
+          );
+  const uv = Buffer.alloc((W / 2) * (H / 2) * 2, 128);
+  const frame = Buffer.concat([Buffer.from('FRAME\n'), y, uv]);
+  const file = join(tmpdir(), `ours-qr-${Date.now()}.y4m`);
+  writeFileSync(
+    file,
+    Buffer.concat([
+      Buffer.from(`YUV4MPEG2 W${W} H${H} F5:1 Ip A1:1 C420jpeg\n`),
+      ...Array(10).fill(frame),
+    ]),
+  );
+  return file;
+}
+
+test('a new device scans the device link’s code with its camera', async ({ browser }) => {
+  const email = `scan-${Date.now()}@example.com`;
+  const jo = await newPage(browser);
+  await jo.goto('/#start');
+  await signUp(jo, email);
+  await jo.getByRole('textbox', { name: 'Your first name' }).fill('Jo');
+  await jo.getByRole('button', { name: 'Create our space' }).click();
+  await recoveryPhrase(jo);
+  await jo.getByRole('button', { name: 'Do this later' }).click();
+  await jo.getByRole('button', { name: 'Not now' }).click();
+  await jo.goto('/#privacy');
+  await jo.getByRole('button', { name: 'Link a new device' }).click();
+  const card = jo.locator('section', { has: jo.getByRole('button', { name: 'Copy' }) }).first();
+  await expect(card.getByRole('img', { name: 'QR code of the device link' })).toBeVisible();
+  const link = (await card.locator('.url code').textContent()) ?? '';
+
+  // The new device: its camera sees the code on Jo's screen.
+  const cam = await chromium.launch({
+    args: [
+      '--use-fake-ui-for-media-stream',
+      '--use-fake-device-for-media-stream',
+      `--use-file-for-fake-video-capture=${qrVideo(link)}`,
+    ],
+  });
+  try {
+    const ctx = await cam.newContext({ baseURL: 'http://localhost:4174' });
+    await ctx.grantPermissions(['camera'], { origin: 'http://localhost:4174' });
+    const phone = await ctx.newPage();
+    await phone.goto('/#start');
+    await signUp(phone, email);
+    await expect(phone.getByRole('heading', { name: 'Welcome back' })).toBeVisible();
+    await phone.getByRole('button', { name: 'Scan a code' }).click();
+    await expect(phone.getByRole('heading', { name: 'You’re all set' })).toBeVisible({
+      timeout: 20_000,
+    });
+  } finally {
+    await cam.close();
+  }
 });

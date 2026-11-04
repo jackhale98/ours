@@ -161,7 +161,9 @@ describe('sign-up policy', () => {
     (env as { ALLOW_SIGNUPS: string }).ALLOW_SIGNUPS = 'closed';
     try {
       await expect(signIn(uniqueEmail())).rejects.toThrow('no email sent');
-      const alex = await signIn(uniqueEmail(), { invite: inv });
+      // The invite given when asking for the link is the one used: the
+      // device needn't send it again when opening the link (review 0007, I11).
+      const alex = await signIn(uniqueEmail(), { invite: inv, inviteAtVerify: false });
       expect(alex.token).toHaveLength(43);
       // Existing accounts can still sign in.
       expect((await call('/me', { token: sam.token })).status).toBe(200);

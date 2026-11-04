@@ -116,7 +116,9 @@ describe('sessions', () => {
 describe('cleanup', () => {
   it('removes expired tokens and sessions', async () => {
     const { cleanup } = await import('../src/app');
-    await env.DB.prepare("INSERT INTO email_tokens VALUES ('x', 'a@b.c', 1, 2, NULL)").run();
+    await env.DB.prepare(
+      "INSERT INTO email_tokens (token_hash, email, created_at, expires_at) VALUES ('x', 'a@b.c', 1, 2)",
+    ).run();
     await cleanup(env, Date.now());
     expect(
       await env.DB.prepare("SELECT 1 FROM email_tokens WHERE token_hash = 'x'").first(),

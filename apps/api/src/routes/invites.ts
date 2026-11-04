@@ -226,6 +226,13 @@ invites.post('/:id/accept', async (c) => {
         v.object({
           space_id: v.pipe(v.string(), v.minLength(1), v.maxLength(64)),
           records: v.pipe(v.number(), v.integer(), v.minValue(0), v.maxValue(1_000_000)),
+          // Which records those are: every live one must be among them (I9).
+          ids: v.optional(
+            v.pipe(
+              v.array(v.pipe(v.string(), v.minLength(1), v.maxLength(64))),
+              v.maxLength(20_000),
+            ),
+          ),
         }),
       ),
     }),
@@ -247,18 +254,21 @@ invites.post('/:id/accept', async (c) => {
     ).bind(now, idHash, row.space_id, uid),
   ];
   const leave = row.kind === 'partner' ? input.leave : undefined;
+  // With ids, nothing outside them may be live; without (older apps), a count.
+  const leaveIds = leave?.ids ? JSON.stringify(leave.ids) : null;
   if (leave) {
     // Friendly answers first; the batch below checks the same atomically.
     const own = await c.env.DB.prepare(
       `SELECT (SELECT COUNT(*) FROM memberships WHERE space_id = ?1) AS members,
               (SELECT COUNT(*) FROM memberships WHERE space_id = ?1 AND user_id = ?2) AS mine,
-              (SELECT COUNT(*) FROM records WHERE space_id = ?1 AND deleted = 0) AS live`,
+              (SELECT COUNT(*) FROM records WHERE space_id = ?1 AND deleted = 0
+                 AND (?3 IS NULL OR id NOT IN (SELECT value FROM json_each(?3)))) AS live`,
     )
-      .bind(leave.space_id, uid)
+      .bind(leave.space_id, uid, leaveIds)
       .first<{ members: number; mine: number; live: number }>();
     if (!own?.mine || own.members !== 1)
       throw new HttpError(409, 'not_alone', 'Someone else is in your space now.');
-    if (own.live > leave.records)
+    if (leaveIds ? own.live > 0 : own.live > leave.records)
       throw new HttpError(
         409,
         'space_changed',
@@ -292,9 +302,11 @@ invites.post('/:id/accept', async (c) => {
           `INSERT INTO quota_guard (x) SELECT NULL WHERE
              (SELECT COUNT(*) FROM memberships WHERE space_id = ?1) != 1
              OR NOT EXISTS (SELECT 1 FROM memberships WHERE space_id = ?1 AND user_id = ?2)
-             OR (SELECT COUNT(*) FROM records WHERE space_id = ?1 AND deleted = 0) > ?3`,
+             OR (SELECT COUNT(*) FROM records WHERE space_id = ?1 AND deleted = 0
+                   AND (?4 IS NULL OR id NOT IN (SELECT value FROM json_each(?4))))
+                > (CASE WHEN ?4 IS NULL THEN ?3 ELSE 0 END)`,
         )
-        .bind(leave.space_id, uid, leave.records),
+        .bind(leave.space_id, uid, leave.records, leaveIds),
     );
     statements.push(
       // Joined, or nothing at all (a full space, too many spaces).
@@ -327,6 +339,21 @@ invites.post('/:id/accept', async (c) => {
     );
   }
   return c.json({ ok: true, space_id: row.space_id, role: row.kind === 'partner' ? 'b' : null });
+});
+
+/**
+ * Lets go of a partner invite this account opened but didn't use ("Keep my
+ * space"), so the inviter's link still works for the right person (review
+ * 0007, I8). Only the claimer can, and only while it's unused.
+ */
+invites.post('/:id/release', async (c) => {
+  const idHash = await hashToken(inviteId(c.req.param('id')));
+  await c.env.DB.prepare(
+    "UPDATE invites SET claimed_by = NULL WHERE id = ? AND claimed_by = ? AND kind = 'partner' AND used_at IS NULL",
+  )
+    .bind(idHash, c.var.user.id)
+    .run();
+  return c.json({ ok: true });
 });
 
 invites.delete('/:id', async (c) => {

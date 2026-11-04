@@ -7,6 +7,7 @@ import { kvGet, kvSet } from '../account/db';
 import {
   account,
   consumeSignInLink,
+  declineJoinOffer,
   finishJoinedFlow,
   joinedWithAccount,
   joinInsteadOffer,
@@ -305,7 +306,9 @@ function JoinInsteadPrompt() {
         </p>
         {made > 0 && (
           <p class="small">
-            Your space has {made} {made === 1 ? 'thing' : 'things'} in it, which will be deleted.
+            Your space has {made} {made === 1 ? 'thing' : 'things'} in it
+            {offer.unreadable > 0 ? ` (${offer.unreadable} this device can’t open)` : ''}, which
+            will be deleted.
           </p>
         )}
         <div class="btnrow">
@@ -333,7 +336,7 @@ function JoinInsteadPrompt() {
             type="button"
             class="btn sm ghost"
             onClick={() => {
-              joinInsteadOffer.value = null;
+              void declineJoinOffer(offer);
               toast('Not used. Open the link again if you change your mind.');
             }}
           >

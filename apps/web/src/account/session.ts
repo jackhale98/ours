@@ -203,6 +203,15 @@ function claimKeptInvite(email: string): void {
  * A kept one counts here, before signing in, since the email link may open
  * in another tab; its secret stays put unless the address matches.
  */
+const tabInviteId = () => {
+  const f = pendingInvite();
+  if (!f) return undefined;
+  try {
+    return parseInviteFragment(f).inviteId;
+  } catch {
+    return undefined;
+  }
+};
 const pendingInviteId = () => {
   const f = pendingInvite() ?? keptInvite()?.fragment;
   if (!f) return undefined;
@@ -252,7 +261,8 @@ async function refresh(session: Session): Promise<void> {
   let joinedNow: Joining | null = null;
   if (joining) {
     if (info.spaces.some((x) => x.space_id === joining.space)) joinedNow = joining;
-    else {
+    // Not yet: it may still be on its way from another tab of this app.
+    else if (Date.now() - (joining.at ?? 0) > 2 * 60_000) {
       // It didn't happen: drop the keys it brought.
       ring = ring ?? (await loadRing());
       if (ring && joining.space !== info.spaces[0]?.space_id) {
@@ -405,7 +415,9 @@ export async function startEmail(
 }
 
 export async function verifyEmail(token: string): Promise<{ newUser: boolean }> {
-  const invite = pendingInviteId();
+  // Only this tab's invite: the server uses the one given when the link was
+  // asked for, so one kept for someone else's address is never sent (I11).
+  const invite = tabInviteId();
   const res = await api<Session & { new_user: boolean; expires_at: number }>('/auth/email/verify', {
     auth: false,
     body: { token, device_label: deviceLabel(), ...(invite ? { invite } : {}) },
@@ -1165,10 +1177,19 @@ export class JoinInsteadError extends Error {
   }
 }
 
-/** Live records in this account's space, and how many are more than its settings. */
-function ownSpaceCounts(): { live: number; made: number } {
-  const live = store.value.entries.filter((e) => !e.rec.deleted);
-  return { live: live.length, made: live.filter((e) => e.rec.kind !== 'settings').length };
+/**
+ * What leaving this account's space deletes: every live record's id, how
+ * many of them are more than its settings, and how many this device can't
+ * open (they're deleted too, and counted, so they never block joining for
+ * good; review 0007, I10).
+ */
+async function ownSpaceRecords(): Promise<{ ids: string[]; made: number; unreadable: number }> {
+  const ids = (await engine?.liveIds()) ?? [];
+  const shown = store.value.entries.filter((e) => !e.rec.deleted);
+  const readable = new Set(shown.map((e) => e.id));
+  const unreadable = ids.filter((id) => !readable.has(id)).length;
+  const made = shown.filter((e) => e.rec.kind !== 'settings').length + unreadable;
+  return { ids: [...new Set([...ids, ...readable])], made, unreadable };
 }
 
 /**
@@ -1191,6 +1212,8 @@ interface Joining {
   old: string;
   /** The name to add to the shared settings. */
   name: string;
+  /** When it was sent, so another tab doesn't call it off while it's in flight (I12). */
+  at?: number;
 }
 
 /** A partner invite, opened and checked, waiting for "Join" (ADR 0016). */
@@ -1200,6 +1223,10 @@ export interface JoinOffer {
   inviter: string | null;
   /** Things in this account's own space that joining deletes. */
   made: number;
+  /** Of those, how many this device can't open. */
+  unreadable: number;
+  /** The ids of every record shown as deleted with the space (I9). */
+  ids: string[];
 }
 export const joinInsteadOffer = signal<JoinOffer | null>(null);
 
@@ -1223,7 +1250,15 @@ export async function openJoinOffer(fragment: string): Promise<JoinOffer> {
     nonce: fromBase64Url(inv.wrapped.nonce),
     ciphertext: fromBase64Url(inv.wrapped.ciphertext),
   });
-  return { fragment, inviter: payload.inviter_name ?? null, made: ownSpaceCounts().made };
+  const own = await ownSpaceRecords();
+  return { fragment, inviter: payload.inviter_name ?? null, ...own };
+}
+
+/** "Keep my space": let go of the invite, so it still works for the right person (I8). */
+export async function declineJoinOffer(offer: JoinOffer): Promise<void> {
+  joinInsteadOffer.value = null;
+  const { inviteId } = parseInviteFragment(offer.fragment);
+  await api(`/invites/${inviteId}/release`, { body: {} }).catch(() => {});
 }
 
 /**
@@ -1253,23 +1288,25 @@ export async function joinWithThisAccount(offer: JoinOffer): Promise<void> {
     ciphertext: fromBase64Url(inv.wrapped.ciphertext),
   });
   await syncNow()?.catch(() => {});
-  const { live, made } = ownSpaceCounts();
-  // More than the person was shown: ask again rather than delete it.
-  if (made > offer.made) {
-    joinInsteadOffer.value = { ...offer, made };
+  const own = await ownSpaceRecords();
+  // Anything the person wasn't shown: ask again rather than delete it.
+  const agreed = new Set(offer.ids);
+  if (own.ids.some((id) => !agreed.has(id))) {
+    joinInsteadOffer.value = { ...offer, ...own };
     throw new Error('Your space has more in it than shown. Check again before joining.');
   }
   const joining: Joining = {
     space: payload.space_id,
     old: state.spaceId,
     name: settings.value.members?.[state.slot]?.name ?? '',
+    at: Date.now(),
   };
   for (const k of payload.keys) r.addSpaceKey(payload.space_id, k);
   await saveRing(r);
   await kvSet('joining', joining);
   try {
     await api(`/invites/${inviteId}/accept`, {
-      body: { leave: { space_id: state.spaceId, records: live } },
+      body: { leave: { space_id: state.spaceId, records: own.ids.length, ids: own.ids } },
     });
   } catch (err) {
     // A clear "no" from the server: nothing changed. No answer (offline, a

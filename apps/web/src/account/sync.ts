@@ -101,6 +101,20 @@ export class SyncEngine implements Backend {
     return ids;
   }
 
+  /**
+   * Ids of every record of this space that isn't deleted, as far as this
+   * device knows: synced ones (readable or not) and unsent ones.
+   */
+  async liveIds(): Promise<string[]> {
+    const d = await db();
+    const ids = new Set<string>();
+    for (const e of await d.getAll('envelopes'))
+      if (e.space_id === this.ctx.spaceId && !e.deleted) ids.add(e.id);
+    for (const o of await d.getAll('outbox'))
+      if (o.envelope.space_id === this.ctx.spaceId && !o.envelope.deleted) ids.add(o.envelope.id);
+    return [...ids];
+  }
+
   private cursorKey() {
     return `cursor:${this.ctx.spaceId}`;
   }

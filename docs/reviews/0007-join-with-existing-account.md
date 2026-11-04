@@ -327,3 +327,13 @@ C2 and I8–I12 are recommended, not conditions. Once conditions 1–4 are met, 
 - C3: `joined-flow` is kept on the device until the safety code step is done; after a reload with the phrase saved, the flow goes straight to the code. The two-browser test reloads there.
 - C4: recorded as accepted in THREAT_MODEL.
 - C5: `dropOtherSpaces` deletes envelopes and outbox entries whose `space_id` isn't the space in use, before the engine starts; the `local-space` marker is gone.
+
+## Recommendations addressed (author's note)
+
+- I8: `POST /invites/:id/release` lets go of a claimed, unused partner invite; "Keep my space" calls it. Tested in `join.test.ts`.
+- I9: `leave.ids` lists every record shown as deleted; the server's pre-check and the batch's guard refuse if any other record in the old space is live (`json_each`). Older apps without ids keep the count check. Tested in `join.test.ts`.
+- I10: the device counts records it holds but can't open (`SyncEngine.liveIds`), shows them in the prompt ("N this device can't open") and sends their ids, so they're deleted with the space instead of blocking the join.
+- I11: `email_tokens.invite_hash` (migration 0012) keeps the invite given at `/auth/email/start`; `/auth/email/verify` uses it, and the app sends only its own tab's invite. Tested in `spaces.test.ts`.
+- I12: `joining.at`; another tab drops a join's keys as "didn't happen" only after two minutes.
+
+Also in this change, QR codes for device links and "Scan a code" (camera allowed for this site only); see THREAT_MODEL.

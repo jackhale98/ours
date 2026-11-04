@@ -68,7 +68,8 @@ export default defineConfig(({ mode }) => {
     '  X-Content-Type-Options: nosniff',
     '  Referrer-Policy: no-referrer',
     '  Cross-Origin-Opener-Policy: same-origin',
-    '  Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=(), usb=()',
+    // The camera only for "Scan a code" (a device link's QR code), on this site.
+    '  Permissions-Policy: camera=(self), microphone=(), geolocation=(), payment=(), usb=()',
     // Hashed file names: safe to keep for a year.
     `${base}assets/*`,
     '  Cache-Control: public, max-age=31536000, immutable',
