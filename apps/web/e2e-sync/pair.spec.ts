@@ -324,7 +324,9 @@ test('sign up, pair, compare safety codes, and sync plans both ways', async ({ b
   // Sam sees the yes.
   await sam.reload();
   await expect(sam.getByText('Waiting on Alex')).toHaveCount(0, { timeout: 15_000 });
-  await expect(sam.getByRole('button', { name: /Dinner/ })).toBeVisible();
+  await expect(sam.locator('.ev', { hasText: 'Dinner' }).first()).toBeVisible();
+  // Alex's yes is listed among what's new from Alex.
+  await expect(sam.locator('section[aria-labelledby="news-h"]')).toContainText('Dinner');
 
   // End-to-end encryption: the server's database files contain none of the
   // plaintext (titles, place, names), only ciphertext.
