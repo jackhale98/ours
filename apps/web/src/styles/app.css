@@ -339,6 +339,11 @@ kbd {
   margin-block: -2px;
 }
 
+/* Focusable so keys can scroll it; after a touch or click, no keyboard outline. */
+:root[data-input="pointer"] .cd-wrap:focus-visible {
+  outline: none;
+}
+
 .cd-wrap::-webkit-scrollbar {
   display: none;
 }

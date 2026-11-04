@@ -80,3 +80,21 @@ test('date and time fields never overlap', async ({ page }) => {
     }
   }
 });
+
+test('tapping a milestone leaves no keyboard outline around the strip', async ({ page }) => {
+  await page.goto('/#plan');
+  const strip = page.locator('.cd-wrap');
+  // iPhone Safari hands focus back to the strip after a milestone's sheet
+  // closes, and shows it as keyboard focus. Put it in that state here:
+  await page.keyboard.press('Shift');
+  await strip.focus();
+  expect(await strip.evaluate((el) => el.matches(':focus-visible'))).toBe(true);
+  await expect(strip).not.toHaveCSS('outline-style', 'none');
+  // After a touch, no outline, even though it still has focus...
+  await page.locator('h1').dispatchEvent('pointerdown');
+  await expect(strip).toBeFocused();
+  await expect(strip).toHaveCSS('outline-style', 'none');
+  // ...and keys bring it back.
+  await page.keyboard.press('ArrowRight');
+  await expect(strip).not.toHaveCSS('outline-style', 'none');
+});

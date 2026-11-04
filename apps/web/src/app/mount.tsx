@@ -22,7 +22,22 @@ import { toast } from './ui';
 /** Gives the browser a chance to handle input between chunks of start-up work. */
 const yieldToBrowser = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
 
+/**
+ * Whether the last input was a touch or click, or keys: the milestone strip
+ * is focusable so keys can scroll it, and a tap (or closing a plan opened
+ * from it) gives it focus too, which shouldn't draw the keyboard outline.
+ */
+function trackInput(): void {
+  const html = document.documentElement;
+  const set = (v: string) => () => {
+    if (html.dataset.input !== v) html.dataset.input = v;
+  };
+  addEventListener('pointerdown', set('pointer'), { capture: true, passive: true });
+  addEventListener('keydown', set('keys'), { capture: true });
+}
+
 export async function mountApp(root: HTMLElement): Promise<void> {
+  trackInput();
   // Restore a signed-in account first, so demo data can never be written into it.
   await restore().catch(() => {
     account.value = { status: 'none' };
