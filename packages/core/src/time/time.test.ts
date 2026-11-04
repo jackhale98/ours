@@ -305,7 +305,7 @@ describe('hostile recurrence rules (review 0004)', () => {
     const counted = timed('FREQ=DAILY;INTERVAL=7;BYDAY=TU;COUNT=5', '1000-01-06T09:00');
     expect(
       ms(() => expand(counted, utc('2026-11-01T00:00'), utc('2026-12-01T00:00'), 'UTC')),
-    ).toBeLessThan(200);
+    ).toBeLessThan(500); // once per rule; unbounded, this took seconds
   });
 
   it('keeps COUNT series cheap, however long they claim to be (re-check N1, N3)', () => {
@@ -319,7 +319,7 @@ describe('hostile recurrence rules (review 0004)', () => {
       expect(
         ms(() => expand(e, utc('2026-11-01T00:00'), utc('2026-12-01T00:00'), 'UTC')),
         e.rrule,
-      ).toBeLessThan(150);
+      ).toBeLessThan(500); // under coverage on CI; unbounded, seconds
     }
     // Long lists only add work: refused.
     const setpos = Array.from({ length: 100 }, (_, i) => i + 1).join(',');

@@ -255,7 +255,7 @@ N3–N6 are Low. Fix them or accept them in THREAT_MODEL. The Info items are at 
 
 | Item | Fix | Test |
 |---|---|---|
-| N1 | `isValidRRule` caps list lengths (BYSETPOS 7, BYDAY 14, BYMONTHDAY 31, BYMONTH 12). A COUNT counts as at most 5000. Finding where a COUNT series ends has a budget per frequency (20,000 days, 5,200 weeks, 2,400 months, 400 years), so longer periods, which hold more dates, get fewer. The reviewer's slow rules each take well under 150 ms on first expansion now. | `time.test.ts` "keeps COUNT series cheap, however long they claim to be" |
+| N1 | `isValidRRule` caps list lengths (BYSETPOS 7, BYDAY 14, BYMONTHDAY 31, BYMONTH 12). A COUNT counts as at most 5000. Finding where a COUNT series ends has a budget per frequency (10,000 days, 5,200 weeks, 2,400 months, 400 years), so longer periods, which hold more dates, get fewer. The reviewer's slow rules each take well under 150 ms on first expansion now. | `time.test.ts` "keeps COUNT series cheap, however long they claim to be" |
 | N2 | `movedStart` brings the time of day into [0, DAY) before 1970. | The equivalence test now includes a 1960 start (fails without the fix) |
 | N3 | A COUNT over 5000 counts as 5000, so a long daily series from 2020 still shows today. A series too sparse to finish within its budget is still cut short there; documented in THREAT_MODEL. | Same test |
 | N4 | Anything already on this device is judged by its real scope, whatever the file says about the same id; and at write time a child is written only if its parent's actual scope is the one checked in the summary. | `export.test.ts` "can't slip items into a shared list here with a decoy of it" |

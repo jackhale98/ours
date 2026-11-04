@@ -205,7 +205,7 @@ const MIN_PERIOD: Record<number, number> = {
   [RRule.DAILY]: DAY,
 };
 /**
- * Periods walked, at most, to find where a COUNT series ends: about 55
+ * Periods walked, at most, to find where a COUNT series ends: about 27
  * years of days, 100 of weeks, 200 of months, 400 of years. Longer periods
  * hold more candidate dates each, so they get fewer (N1).
  */
@@ -213,7 +213,7 @@ const COUNT_BUDGET: Record<number, number> = {
   [RRule.YEARLY]: 400,
   [RRule.MONTHLY]: 2400,
   [RRule.WEEKLY]: 5200,
-  [RRule.DAILY]: 20_000,
+  [RRule.DAILY]: 10_000,
 };
 
 const OVER_BUDGET = new Error('recurrence work budget spent');
