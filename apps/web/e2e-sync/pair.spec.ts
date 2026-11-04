@@ -8,7 +8,6 @@ import { readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { type Browser, chromium, expect, type Page, test } from '@playwright/test';
-import { encode } from 'uqr';
 
 const STATE_DIR = new URL('../../api/.wrangler/state/e2e', import.meta.url).pathname;
 
@@ -838,26 +837,43 @@ test('an invite kept for one address isn’t offered to someone else on the same
 });
 
 /**
- * A fake camera for Chromium: a short video (Y4M) showing this text's QR
- * code, dark on white, as a phone camera would see it on a screen.
+ * A fake camera for Chromium: a short video (Y4M) of the QR code exactly as
+ * the page drew it (its SVG, rendered by the browser), as a phone camera
+ * would see it on the other device's screen.
  */
-function qrVideo(text: string): string {
+async function screenVideo(page: Page, selector: string): Promise<string> {
   const W = 640;
   const H = 480;
-  const qr = encode(text, { ecc: 'M', border: 4 });
-  const scale = Math.floor(400 / qr.size);
-  const x0 = Math.floor((W - qr.size * scale) / 2);
-  const y0 = Math.floor((H - qr.size * scale) / 2);
-  const y = Buffer.alloc(W * H, 235);
-  for (let r = 0; r < qr.size; r++)
-    for (let c = 0; c < qr.size; c++)
-      if (qr.data[r]?.[c])
-        for (let dy = 0; dy < scale; dy++)
-          y.fill(
-            16,
-            (y0 + r * scale + dy) * W + x0 + c * scale,
-            (y0 + r * scale + dy) * W + x0 + (c + 1) * scale,
-          );
+  const luma = await page.evaluate(
+    async ({ selector, W, H }) => {
+      const svg = document.querySelector(selector) as SVGSVGElement;
+      const src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(new XMLSerializer().serializeToString(svg))}`;
+      const img = new Image();
+      await new Promise((ok, fail) => {
+        img.onload = ok;
+        img.onerror = fail;
+        img.src = src;
+      });
+      const c = document.createElement('canvas');
+      c.width = W;
+      c.height = H;
+      const ctx = c.getContext('2d') as CanvasRenderingContext2D;
+      ctx.fillStyle = '#fff';
+      ctx.fillRect(0, 0, W, H);
+      ctx.imageSmoothingEnabled = false;
+      ctx.drawImage(img, (W - 400) / 2, (H - 400) / 2, 400, 400);
+      const px = ctx.getImageData(0, 0, W, H).data;
+      const out: number[] = [];
+      for (let i = 0; i < px.length; i += 4)
+        out.push(
+          Math.round(0.299 * (px[i] ?? 0) + 0.587 * (px[i + 1] ?? 0) + 0.114 * (px[i + 2] ?? 0)),
+        );
+      return out;
+    },
+    { selector, W, H },
+  );
+  // Full-range grey to video range.
+  const y = Buffer.from(luma.map((v) => Math.round(16 + (v * 219) / 255)));
   const uv = Buffer.alloc((W / 2) * (H / 2) * 2, 128);
   const frame = Buffer.concat([Buffer.from('FRAME\n'), y, uv]);
   const file = join(tmpdir(), `ours-qr-${Date.now()}.y4m`);
@@ -885,14 +901,13 @@ test('a new device scans the device link’s code with its camera', async ({ bro
   await jo.getByRole('button', { name: 'Link a new device' }).click();
   const card = jo.locator('section', { has: jo.getByRole('button', { name: 'Copy' }) }).first();
   await expect(card.getByRole('img', { name: 'QR code of the device link' })).toBeVisible();
-  const link = (await card.locator('.url code').textContent()) ?? '';
 
   // The new device: its camera sees the code on Jo's screen.
   const cam = await chromium.launch({
     args: [
       '--use-fake-ui-for-media-stream',
       '--use-fake-device-for-media-stream',
-      `--use-file-for-fake-video-capture=${qrVideo(link)}`,
+      `--use-file-for-fake-video-capture=${await screenVideo(jo, '.qr')}`,
     ],
   });
   try {

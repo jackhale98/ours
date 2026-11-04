@@ -198,22 +198,9 @@ function claimKeptInvite(email: string): void {
     // ignore
   }
 }
-/**
- * The invite's id (not its secret) for sign-up when sign-ups need an invite.
- * A kept one counts here, before signing in, since the email link may open
- * in another tab; its secret stays put unless the address matches.
- */
+/** This tab's invite's id (not its secret), sent when opening a sign-in link. */
 const tabInviteId = () => {
   const f = pendingInvite();
-  if (!f) return undefined;
-  try {
-    return parseInviteFragment(f).inviteId;
-  } catch {
-    return undefined;
-  }
-};
-const pendingInviteId = () => {
-  const f = pendingInvite() ?? keptInvite()?.fragment;
   if (!f) return undefined;
   try {
     return parseInviteFragment(f).inviteId;
@@ -401,7 +388,17 @@ export async function startEmail(
   acceptTerms: boolean,
   turnstile?: string,
 ): Promise<void> {
-  const invite = pendingInviteId();
+  // This tab's invite, or one kept for this same address; never one kept for
+  // someone else's, which the server would tie to this link (review 0007, Q1).
+  const kept = keptInvite();
+  const own =
+    pendingInvite() ?? (kept && kept.email === email.trim().toLowerCase() ? kept.fragment : null);
+  let invite: string | undefined;
+  try {
+    invite = own ? parseInviteFragment(own).inviteId : undefined;
+  } catch {
+    invite = undefined;
+  }
   keepInviteFor(email);
   await api('/auth/email/start', {
     auth: false,
@@ -1235,9 +1232,18 @@ export const joinInsteadOffer = signal<JoinOffer | null>(null);
  * who it's from and what joining deletes (review 0007, L1). Syncs first so
  * the count includes what's on the server (M2).
  */
+/**
+ * Joining deletes what's in this account's space, including records this
+ * device can't open. Those must only be old ones it never could: with keys
+ * changed on another device since, they could be the newest plans (Q2).
+ */
+const MISSING_KEYS =
+  'This device doesn’t have your latest keys, so it can’t show everything in your space yet. Link it from your other device first (Privacy → Link a new device), then open the invite again.';
+
 export async function openJoinOffer(fragment: string): Promise<JoinOffer> {
   const state = account.value;
   if (state.status !== 'ready' || !ring) throw new Error('Not ready');
+  if (needsNewKeys.value) throw new Error(MISSING_KEYS);
   await syncNow()?.catch(() => {});
   const { inviteId, secret } = parseInviteFragment(fragment);
   const inv = await api<{
@@ -1275,6 +1281,7 @@ export async function joinWithThisAccount(offer: JoinOffer): Promise<void> {
   const state = account.value;
   if (state.status !== 'ready' || !ring || state.partnerJoined) throw new Error('Not available');
   if (rotation.value) throw new Error('Finish changing your keys first (see the banner).');
+  if (needsNewKeys.value) throw new Error(MISSING_KEYS);
   const r = ring;
   const { inviteId, secret } = parseInviteFragment(offer.fragment);
   const inv = await api<{

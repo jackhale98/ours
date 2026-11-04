@@ -337,3 +337,107 @@ C2 and I8–I12 are recommended, not conditions. Once conditions 1–4 are met, 
 - I12: `joining.at`; another tab drops a join's keys as "didn't happen" only after two minutes.
 
 Also in this change, QR codes for device links and "Scan a code" (camera allowed for this site only); see THREAT_MODEL.
+
+## QR codes and cleanup check (commit f2cf403)
+
+- Date: 2026-11-04. Scope: `git diff 3d17015 f2cf403`, read with the current files:
+  - QR codes and the camera: `app/qr.tsx`, `app/scan.tsx`, `AccountCards.tsx` (`DevicesCard`), `Start.tsx` (`RestoreKeys`), `pastelink.tsx` (`parseLink`), `vite.config.ts` (Permissions-Policy), the new dependencies;
+  - I8–I12: `routes/invites.ts` (accept, release), `routes/auth.ts` with migration 0012, `session.ts` (`ownSpaceRecords`, `openJoinOffer`, `declineJoinOffer`, `joinWithThisAccount`, `startEmail`, `verifyEmail`, `refresh`), `sync.ts` (`liveIds`);
+  - docs and tests.
+- Suites: `pnpm test:api` passes (115 tests, including the new I8 and I9 tests in `join.test.ts`). `e2e:sync` was not run. Its QR test was read. No probes were written.
+
+### Verified correct
+
+- **A scanned code can do no more than a pasted link.**
+  - `ScanLink` passes the text through `parseLink`. Only the `join` kind is accepted, and it goes to `acceptDeviceLink`.
+  - That works only in "needs keys". `GET` serves a device link only to its creator, and `openDeviceInvite` binds the AAD to the signed-in user. So a code from someone else can't put their keys on this device.
+  - Nothing navigates to the scanned text, so a code can't open a URL or a page.
+  - A partner invite's code gets claimed and then fails to open, which is exactly what pasting it does.
+- **The camera.**
+  - It starts only after "Scan a code" is tapped. Its tracks are stopped on success, on close, and when the camera arrives after the sheet has closed.
+  - Frames go only to `BarcodeDetector` or to jsQR, which is bundled from this site (pinned, with integrity hashes in the lockfile, and listed in `THIRD_PARTY_NOTICES`).
+  - `camera=(self)` leaves out the Turnstile iframe.
+  - The privacy policy says what the camera does.
+- **The QR code** is drawn on the device from the link, and nothing extra is sent. It is as secret as the link, which the card shows next to it anyway. It is useless to another account. The card says not to show it to anyone.
+- **Release can't be abused.** `UPDATE … SET claimed_by = NULL WHERE claimed_by = caller AND kind = 'partner' AND used_at IS NULL`:
+  - only the claimer can let go;
+  - nobody can take over someone else's claim, or reset a used invite or a device link or key update link;
+  - after release, the first fetch claims it again, as before.
+
+  The API test checks that another account's release does nothing.
+- **The `json_each` SQL.**
+  - Both the pre-check and the guard bind the same JSON string, or `NULL`.
+  - In the guard, `?4` is the ids and `?3` the count. The limit `CASE WHEN ?4 IS NULL THEN ?3 ELSE 0 END` matches the pre-check `leaveIds ? live > 0 : live > records`.
+  - The ids are validated strings of 1–64 characters, so `NOT IN` never meets a `NULL`.
+  - `[]` means "only an empty space".
+  - Older apps without ids keep the count check.
+  - The values are bound, never interpolated.
+  - The size (at most 20,000 ids of 64 characters, about 1.3 MB) is within D1's limits for a value. See I14.
+- **Nothing of anyone else's can be deleted.**
+  - The old space has only this account in it (the guard checks), so every record in it is the person's own.
+  - With ids, the server refuses if any live record isn't listed. So records not synced to this device still block the join.
+  - The client asks again if the set grew after it was shown.
+  - The I10 change only adds ids of records this device holds but can't open (Q2).
+- **Swapping a sign-in link's invite (I11).**
+  - A token issued with an invite uses that invite. What the device sends at verify is then ignored. So a link asked for with invite X can't be used to claim invite Y, and an invalid X doesn't fall back to anything.
+  - A token issued without one falls back to the device's, as before this change. When sign-ups are closed, such a token is issued to a new address only if sign-ups were open when it was asked for (`issueLink` returns early otherwise), within its 15 minutes. It can be removed after one release.
+  - Someone who asks for a link for a victim's address with their own invite only lets the victim's sign-up claim that invite. Nobody joins anything.
+- **The I12 window.**
+  - A note younger than two minutes is neither finished nor dropped. The device stays on its old space, and the new keys stay in the ring until a later start drops them, which is harmless.
+  - C2's retry at 15 s finishes a join that landed, and otherwise leaves the note.
+  - A second "Join" overwrites the note.
+  - Notes from 0c1387f, which have no `at`, are dropped as before.
+
+### Findings
+
+**Q1 (Low): I11 isn't fixed where it matters, when the link is asked for.**
+- `startEmail` still sends `pendingInviteId()`, which falls back to `keptInvite()`, even when that was kept for another address.
+- The server now stores that invite with the new token (`invite_hash`) and prefers it at verify. So the change to `verifyEmail` (`tabInviteId`) has no effect.
+- On an invite-gated instance, a second person asking for a link on that browser still has their sign-up claim the first person's invite. The first person then gets "This invite has expired, was used, or isn't for you".
+- The secret is never sent. Production has sign-ups open, so production is not affected.
+- **Fix:** in `startEmail`, send the tab's invite, or the kept one only when `kept.email` equals the address typed.
+- **Test:** API or e2e, with sign-ups closed. A kept invite for another address isn't sent at start, or isn't claimed.
+
+**Q2 (Low): records this device can't open are deleted on the strength of a count.**
+- I10 now deletes them, shown only as "(N this device can't open)". That includes records under keys this device doesn't have.
+- For example, another device of the account changed keys (this device has `needsNewKeys`) and wrote plans since. Those are the person's newest plans, and this device can't show any of them.
+- `rotation.value` only blocks a key change made on this device.
+- **Fix:** when `needsNewKeys` is set, refuse ("Get the current keys first: Privacy → …"), and keep the counted deletion for records from a newer build only. Or say plainly that these may be recent plans from another device.
+- **Test:** web unit test of `ownSpaceRecords` with `needsNewKeys`.
+
+**Q3 (Info): camera access is now open to the site's own scripts.**
+- With `camera=()`, even injected script couldn't use the camera. With `camera=(self)`, once the person has allowed it, a browser or installed app that remembers the choice lets script on this origin start the camera without asking again. Only the camera indicator would show it.
+- Script injection already exposes keys and plaintext. But this is a new kind of harm, so it belongs in THREAT_MODEL's residual risks.
+- The CSP (`script-src 'self'`) is the main defence.
+
+**Q4 (Info): the QR test doesn't read the drawn code.**
+- The e2e test encodes the link itself with uqr for the fake camera, so it proves the scanner and `acceptDeviceLink`, not that `QrCode`'s SVG can be read.
+- Screenshot the `.qr` element into the fake video instead, or run jsQR on that screenshot in the test.
+
+### Info
+
+- **I13:** `declineJoinOffer` is fire-and-forget. Closing the page instead of tapping "Keep my space" leaves the invite claimed, as before I8. That's acceptable: the inviter can make a new one.
+- **I14:** a space with more than 20,000 live records can't be joined from. The ids fail validation, and the 400 is shown as a plain refusal. That's acceptable at this scale. Say "too many things to delete this way" if it ever happens.
+- **I15:** within I12's window, a fetch stalled for over two minutes while another tab starts can still drop keys just before a late commit. That's very narrow. It would be closed by settling only notes whose request has ended, for example a `sent: true` set after the response, or after the failure handler runs.
+
+### Verdict
+
+**Sign-off with conditions.**
+- The QR codes and the camera expose nothing a device link didn't already, and a scanned code can do no more than a pasted link.
+- Release can't be abused.
+- The `json_each` checks are correct in both places and backwards compatible.
+- I9 and I12 are correctly done.
+
+Conditions, with tests:
+1. Q1: `startEmail` must not send an invite kept for another address.
+2. Q2: refuse when `needsNewKeys` (or say what the unreadable records may be).
+3. Q3: one line in THREAT_MODEL.
+
+Q4 and I13–I15 are recommended. With conditions 1–3 met, this can go to main without another check.
+
+### Conditions met (author's note)
+
+- Q1: `startEmail` sends this tab's invite, or one kept for the same address being typed; never one kept for another address.
+- Q2: joining with an existing account is refused while this device lacks the account's latest keys (`needsNewKeys`), with a message saying to link it first.
+- Q3: recorded as accepted in THREAT_MODEL.
+- Q4 (recommended): the two-browser test now scans the code drawn on the screen (rendered from the page's SVG), not a copy encoded by the test.
