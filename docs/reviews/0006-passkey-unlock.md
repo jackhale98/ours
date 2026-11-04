@@ -8,7 +8,8 @@
   - client: `apps/web/src/account/session.ts` (`signInWithPasskey`, `prfRequest`, `takePrf`, `unlockCeremony`, `unlockWith`, `unlockThisDevice`, `enablePasskeyUnlock`, `disablePasskeyUnlock`, `removePasskey`, `loadPasskeys`, `addPasskey`, `commitStaged`, `refresh`), `app/views/AccountCards.tsx` (`PasskeysCard`), `app/views/Start.tsx` (`RestoreKeys`)
   - docs: ADR 0015, THREAT_MODEL, `apps/web/legal/privacy/index.html`
   - tests: `apps/api/test/unlock.test.ts`, the last test in `apps/web/e2e-sync/pair.spec.ts`
-- Verdict: **Sign-off with conditions.** Fix M1 and M2, L1 and L4, and the docs in L5, with tests. Fix L2 and L3 or record them in THREAT_MODEL. Until then `PASSKEY_UNLOCK` stays `off` in production. See "Sign-off" at the end.
+- Verdict (check of the fixes, commit fb1e20e, 2026-11-04): **Sign-off with conditions.** All six conditions are met. The fixes add one small regression (N1: "Confirm it's you" now fails for passkeys that skip user verification) and leave new stored data out of the docs (N2). Fix both, then `PASSKEY_UNLOCK` can be turned on in production. See "Check of the fixes" at the end.
+- First verdict (2026-11-04): sign-off with conditions. Fix M1 and M2, L1 and L4, and the docs in L5, with tests. Fix L2 and L3 or record them in THREAT_MODEL. Until then `PASSKEY_UNLOCK` stays `off` in production.
 
 The reviewer ran the existing suites, all green: `pnpm test:api` (104 tests), `TZ=UTC pnpm test` (688) and `e2e:sync` (3, including the passkey test). Two throwaway probes ran and were then deleted:
 
@@ -203,3 +204,77 @@ Conditions, with tests:
 | L5 | ADR 0015, THREAT_MODEL, the Passkeys card and the privacy policy ("What we cannot see") corrected as listed. The end-to-end test now also checks the requests made when setting it up. | E2E |
 | I1, I2 | Recorded in THREAT_MODEL. | — |
 | I5 | A copy that won't open says so in words and points to a device link or the phrase. | Reading |
+
+## Check of the fixes (commit fb1e20e)
+
+- Date: 2026-11-04. Scope: `git show fb1e20e`, read against the table above, which was treated as claims to check.
+- Suites at HEAD, all green: `pnpm test:api` (105), `TZ=UTC pnpm test` (691), `e2e:sync` (3). The other browser e2e projects were not run again.
+- One throwaway API probe ran and was deleted. It is called R1–R3 below:
+  - R1: a rotation, then a lost phone that signs in again;
+  - R2: two fetches of a copy within one hour;
+  - R3: a copy replaced by one with lower versions.
+
+### Items
+
+| Item | Verdict | Notes |
+|---|---|---|
+| M1 | **Fixed** | The rotate batch sets `users.keys_changed_at` (`spaces.ts:91`), inside the guarded batch. `PUT` refuses a passkey added before it with 409 `passkey_too_old` (`keys.ts:164–175`). `/auth/passkeys` returns `can_unlock` and `aaguid`. R1: after a rotation, a session with no passkey gets 403. A session signed in with the old passkey gets 409. So the lost phone can no longer re-create a copy. `unlockStatus` offers "Update" only when this device recorded the copy's `created_at`. A copy made elsewhere is "behind-elsewhere", and no button is shown for it. The advice about the Apple, Google or password manager account is in the card, ADR 0015 and THREAT_MODEL. The author blocked old passkeys on the server instead of asking for a confirmation. That is stronger for old passkeys. For new passkeys, see N3. |
+| M2 | **Fixed** | The UV flag (`authenticatorData[32] & 0x04`) is checked before the PRF output is used: at sign-in (`session.ts:319`), on Welcome back (`:1215`) and when setting up (`:1297`). Set-up also asks for `'required'`, and `/auth/passkey/reauth/verify` now verifies with `requireUserVerification: true`. Unit test of `userVerified`. **New:** see N1. |
+| L1 | **Fixed** | `requireOn` guards `GET /unlocks`, `GET /unlock/:id` and `PUT`. `DELETE` still works. The client skips the list, the fetch and the sign-in unlock when `/me` says off. API test. Sign-in still asks the passkey for a PRF output when off, but it is discarded, so this is harmless. |
+| L2 | **Fixed** | `sessions.passkey_id` is set at passkey sign-in and at confirmation. `PUT` needs that passkey, with sign-in or confirmation in the last 10 minutes (`keys.ts:161`). R1 and the API tests confirm it. `DELETE` emails the owner. Turning a copy off from a stolen session is recorded as accepted in THREAT_MODEL. |
+| L3 | **Fixed, one gap** | The wording is now "A device asked to unlock…", and it says the server can't tell whether the copy opened. Each kind of notice is capped at one per user per hour. The cap can hide a second fetch made in the same hour (N4). |
+| L4 | **Fixed** | Each copy stores `space_version` and `personal_version`. They are listed and compared with this device's versions on every device. "Update" passes the one passkey (`only`) in `allowCredentials`. Note: the versions come from the client, and a copy can be replaced by an older one (R3, I8). |
+| L5 | **Mostly fixed** | ADR 0015, THREAT_MODEL, the Passkeys card and the privacy policy's "What we cannot see" now say what the code does: the rotator's copies, UV, emails, password managers, the lost-phone step. The e2e test now records the set-up requests, checks that one carries `space_version`, and checks that none carries `"prf"` or `"results"`. Still missing: the privacy policy doesn't say that the server sees when a copy is fetched. The data tables leave out the new columns (N2). |
+| I1, I2 | **Recorded** | In THREAT_MODEL's residual risks. |
+| I5 | **Fixed** | A copy that won't open now says so in words and points to a device link or the phrase. |
+
+### New findings
+
+**N1 (Low, regression): "Confirm it's you" now fails for passkeys that skip user verification.**
+
+- Location: `auth.ts:401` (`/passkey/reauth/options` still asks for `userVerification: 'preferred'`); `auth.ts:411` (verify now requires UV); `confirmItsYou` (`session.ts:774`), which passes the server's options unchanged.
+- What happens: `confirmItsYou` is used before changing keys, before saving a new phrase, and before adding a passkey (`AccountCards.tsx:309, :573, :600`). Two kinds of passkey can now answer without UV under `'preferred'`:
+  - a security key with no PIN;
+  - a provider that skips UV when it is asked only to prefer it.
+
+  Their answer is then refused with `passkey_invalid`, where it used to work. The person gets an unclear error during a security action. They can still sign in again by email.
+- Fix: ask for `userVerification: 'required'` in `/passkey/reauth/options`, so the browser asks for face, fingerprint or PIN, or says it can't. Show "This passkey can't confirm with face, fingerprint or PIN; sign in again by email instead" when the check fails.
+
+**N2 (Low, docs): new stored data is missing from THREAT_MODEL and the privacy policy.**
+
+- The migration adds four columns:
+  - `passkeys.aaguid`: which provider holds each passkey, such as iCloud Keychain, Google Password Manager or 1Password;
+  - `sessions.passkey_id`: which passkey each session used;
+  - `users.keys_changed_at`;
+  - `key_unlocks.space_version` and `personal_version`.
+- THREAT_MODEL's table (lines 41, 42 and 48) and the privacy policy's "Passkey public keys" row don't list them.
+- The AAGUID is collected at every passkey registration, whether or not unlocking is switched on. It is new information about the person (their password manager).
+- Also add the L5 item: the server sees when a copy is fetched.
+
+**N3 (Low): the age check is about time, not about who added the passkey.**
+
+- R1: a lost phone that signs in again with its old passkey can still start adding a new passkey (`register/options` 200). A passkey the person adds while the lost phone is still in their Apple or Google account also syncs to the phone.
+- Either kind passes `can_unlock`. Then only the advice text protects the person: it is shown on the card, but nothing stops them at the moment they add a passkey or turn unlocking on. The thief still needs the owner to seal the new keys under that passkey, and the owner gets "A passkey was added" by email.
+- Fix (recommended, not a condition): after a rotation, the first "Add a passkey" and "Let a passkey unlock my keys" ask once: "Is the lost device out of your Apple, Google or password manager account?" Also consider stopping passkeys added before the rotation from adding new ones.
+
+**N4 (Low): the hourly notice cap can hide a second fetch.**
+
+- Location: `notice` (`keys.ts:108–115`): one email per kind per user per fixed hour.
+- R2: the owner fetched the copy, and then another session fetched it. Both fetches returned 200, but only one email was sent. So a thief who unlocks within the same hour as the owner, or just after another notice of the same kind, goes unnoticed. That weakens "so an unlock someone else tried doesn't go unnoticed".
+- Fix: cap per kind *and* session or device (so a different device always gets its own email), or allow a few an hour and fold the rest into "and N more". THREAT_MODEL's "at most once an hour" should say what the cap can hide.
+
+### Info
+
+- **I7:** `passkeys.ts` names providers only from a short built-in AAGUID list. Some providers send an all-zero AAGUID, which falls back to "Passkey N". That is fine, but people won't always see a name.
+- **I8:** `PUT` accepts a copy whose versions are lower than the copy it replaces (R3). A behind device can overwrite a newer copy made elsewhere: "Choose a passkey" offers every eligible passkey, including ones that already have a copy. This only gets in the way: the new device then needs keys. It isn't a leak. The server could refuse lower versions. Also, "behind-elsewhere" says "older keys" even when the copy is newer than this device's keys.
+- **I9:** confirming with a passkey to set up unlocking also sets `reauth_at`. So it opens the 10-minute window for changing keys and adding passkeys too. That is acceptable, because it is a UV-checked passkey check, but it is worth knowing.
+
+### Verdict
+
+**Sign-off with conditions.** All six conditions from the first review are met, and the new tests and probes support the author's table, apart from the gaps noted above.
+
+Conditions:
+1. N1: `'required'` in `/passkey/reauth/options`, with a test that a reauth answer without UV is refused with a clear message. This one also matters with the switch off: `ROTATION` is on in production, so it affects changing keys today.
+2. N2: list the new columns in THREAT_MODEL and the privacy policy, and say there that fetches are seen.
+
+When both are done, **`PASSKEY_UNLOCK` can be turned on in production.** A check of those two changes is enough. N3, N4 and I7–I9 are recommended, not required.
