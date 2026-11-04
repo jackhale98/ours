@@ -477,7 +477,7 @@ test('sign up, pair, compare safety codes, and sync plans both ways', async ({ b
   await fresh.getByRole('button', { name: 'Unlock' }).click();
   await fresh.goto('/#lists');
   await expect(fresh.getByText('Picture hooks (brass)')).toBeVisible({ timeout: 20_000 });
-  await expect(fresh.locator('.keybanner')).not.toContainText('changed', { timeout: 20_000 });
+  await expect(fresh.getByText(/changed your shared keys|keys were changed/)).toHaveCount(0);
   await fresh.context().close();
 
   // Both see the same new safety code; Sam stops being offered the link (M3).

@@ -375,7 +375,8 @@ describe('hostile recurrence rules (review 0004)', () => {
         }
       }
     }
-  });
+    // The reference (plain rrule from the original start) is slow for old starts.
+  }, 30_000);
 });
 
 describe('next due date for repeating tasks', () => {

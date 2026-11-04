@@ -385,3 +385,18 @@ Before turning on `VITE_ROTATION`, also:
 A re-review can be limited to the N1 fix and its test, plus the THREAT_MODEL changes.
 
 **Crypto review 0001 M1: not closed yet.** Its four requirements now hold at HEAD and are tested on the server: live records are re-encrypted, old versions are decrypt-only, new ciphertexts under old versions are refused, and notifications go only under the current version. Close it together with the sign-off of this review, once N1 is fixed.
+
+## Fixes after the re-review
+
+| Item | Fix | Test |
+|---|---|---|
+| N1 | A 409 `rotation_conflict` from `/rotate` now refreshes from `/me` and runs the staged check (`stagedOutcome`) before anything is dropped: if the server's fingerprints are the staged keys, the rotation is committed. A second press when the backup is already saved goes through the same check first. Presses while a call runs join it (`oneAtATime`). | E2E: the first `/rotate` answer is dropped after the server rotated; pressing again commits ("Your space has new keys"). Web `rotation.test.ts` "a rotation whose answer was lost" (landed, retry, drop) |
+| N2 | When the check finds the rotation landed while an engine runs, that engine is stopped and a new one starts with the new ring (and notifications restart). | Same E2E (sync, re-encryption and the link work after the retry) |
+| N3 | `prepareRotation` checks the keys again after the full sync and a fresh `/me`, and refuses unless this device holds the versions being rotated from. | Reading |
+| N4 | The stage is marked `tried` before the backup is saved. If the rotation is then dropped, the card says the new phrase is now the one that restores the keys ("Got it" to dismiss). | Reading |
+| N5 | THREAT_MODEL reworded: fingerprints don't bind the server. A device link that changes the shared key also shows the safety code before it's used. A key a link replaces is kept in a separate slot ("aside"), never deleted. | Web "replaces this device's orphan key…" (kept aside) |
+| N6 | `resolve` holds a record that won't open with a key the device holds: the base and any unsynced change stay, and the push loop stops that pass instead of resending. Deletions open as deletions, so they still apply. | Reading; E2E unchanged |
+| H2 | The restore test asked for: after the rotation, a new device signs in, restores from the new phrase alone, and shows the shared item renamed after the rotation. | E2E |
+| L1 | The immediate-notification race is recorded in THREAT_MODEL. | — |
+| L7 | The feed link is replaced whenever the rotation is committed, on either path. | Reading |
+| Info | Backdating and the stuck re-encrypting step are recorded in THREAT_MODEL. The server now has a `ROTATION` switch, "off" in production, for the rotate route and key update links. | API "refuses rotating and key update links when switched off" |
