@@ -144,7 +144,7 @@ a {
   max-width: 52ch;
 }
 
-/* Logo: two overlapping circles, one per person. */
+/* Logo: two interlocking rings, one per person. */
 .logo {
   display: inline-flex;
   align-items: center;
@@ -157,13 +157,18 @@ a {
   text-decoration: none;
 }
 
+.logo-a,
+.logo-b {
+  fill: none;
+  stroke-width: 5;
+}
+
 .logo-a {
-  fill: var(--person-a);
+  stroke: var(--person-a);
 }
 
 .logo-b {
-  fill: var(--person-b);
-  fill-opacity: 0.82;
+  stroke: var(--person-b);
 }
 
 .btn {
