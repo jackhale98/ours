@@ -2592,7 +2592,7 @@ fieldset.reminders > legend {
   padding: 0 6px;
   border-radius: 999px;
   background: var(--ours);
-  color: #fff;
+  color: var(--paper);
   font-size: 0.75rem;
   font-weight: 700;
   display: inline-grid;

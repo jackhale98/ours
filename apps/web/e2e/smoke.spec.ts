@@ -34,3 +34,21 @@ test('join page reports a damaged link', async ({ page }) => {
   await page.goto('/join/#broken');
   await expect(page.getByRole('alert')).toBeVisible();
 });
+
+test('landing sells the app first, then explains privacy', async ({ page }) => {
+  await page.goto('/');
+  for (const h of [
+    'Everything a couple plans, together',
+    'Find the time, without the back and forth',
+    'Lists you both keep, and some you don’t',
+    'A ten-minute weekly check-in',
+    'Your plans are yours. Not even we can read them.',
+  ]) {
+    await expect(page.getByRole('heading', { name: h })).toBeVisible();
+  }
+  // Every call to action leads into the app.
+  const ctas = page.getByRole('link', { name: 'Try the demo' });
+  expect(await ctas.count()).toBeGreaterThanOrEqual(2);
+  await ctas.last().click();
+  await expect(page.getByRole('heading', { name: 'This week', exact: true })).toBeVisible();
+});

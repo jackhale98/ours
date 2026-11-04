@@ -28,7 +28,7 @@ test.beforeEach(async ({ page }) => {
 
 test('landing links to the demo', async ({ page }) => {
   await page.goto('/');
-  await page.getByRole('link', { name: 'Try the demo' }).click();
+  await page.getByRole('link', { name: 'Try the demo' }).first().click();
   await expect(page.getByRole('heading', { name: 'This week', exact: true })).toBeVisible();
 });
 
