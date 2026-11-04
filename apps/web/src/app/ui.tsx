@@ -32,6 +32,7 @@ const PATHS = {
   next: '<path d="M9.5 6l6 6-6 6"/>',
   inbox:
     '<path d="M3.5 13.5 6 5.5h12l2.5 8v5a1.5 1.5 0 0 1-1.5 1.5H5a1.5 1.5 0 0 1-1.5-1.5z"/><path d="M3.5 13.5h5l1.5 2.5h4l1.5-2.5h5"/>',
+  search: '<circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/>',
   flag: '<path d="M6 21V4.5M6 5h11l-2.5 4 2.5 4H6"/>',
 } as const;
 export type IconName = keyof typeof PATHS;

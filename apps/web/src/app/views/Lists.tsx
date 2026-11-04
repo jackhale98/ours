@@ -10,6 +10,7 @@ import {
   allLists,
   completeItem,
   createList,
+  currentList,
   deleteList,
   dueText,
   type ItemEntry,
@@ -30,7 +31,6 @@ import { nextFreeEvening, relDay, repeatText, today } from '../select';
 import { openQuick } from '../sheets';
 import { CloseButton, colorVar, Icon, Sheet, Switch, toast } from '../ui';
 
-const currentList = signal<string | null>(null);
 const showDone = signal(false);
 const picked = signal<string | null>(null);
 const listSheet = signal<{ type: 'new' } | { type: 'edit'; id: string } | null>(null);

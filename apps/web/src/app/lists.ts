@@ -2,6 +2,7 @@
 /** List types and list operations (create, rename, retype, privacy, delete). */
 import type { ListKind } from '@ours/core/schema';
 import { nextDueDate } from '@ours/core/time';
+import { signal } from '@preact/signals';
 import { byKind, type Entry, findEntry, other, put, remove, store, update } from './model';
 import { relDay, today } from './select';
 
@@ -23,6 +24,9 @@ export interface ListType {
  * whether a list comes up in the weekly check-in is its own switch.
  */
 export type PickerKind = 'todo' | 'ideas' | 'gifts';
+
+/** The list shown on the Lists screen (the first one if null). */
+export const currentList = signal<string | null>(null);
 
 export const LIST_TYPES: Record<PickerKind, ListType> = {
   todo: {

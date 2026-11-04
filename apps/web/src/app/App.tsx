@@ -18,6 +18,7 @@ import { PlanView } from './views/Plan';
 
 const ListsView = lazy(() => import('./views/Lists').then((m) => ({ default: m.ListsView })));
 const CheckinView = lazy(() => import('./views/Checkin').then((m) => ({ default: m.CheckinView })));
+const SearchView = lazy(() => import('./views/Search').then((m) => ({ default: m.SearchView })));
 const InboxView = lazy(() => import('./views/Inbox').then((m) => ({ default: m.InboxView })));
 const PrivacyView = lazy(() => import('./views/Privacy').then((m) => ({ default: m.PrivacyView })));
 const StartView = lazy(() => import('./views/Start').then((m) => ({ default: m.StartView })));
@@ -25,14 +26,15 @@ const StartView = lazy(() => import('./views/Start').then((m) => ({ default: m.S
 /** Show onboarding (sign-in, setup) instead of the tabs. */
 export const startRequested = signal(location.hash === '#start');
 
-export type Tab = 'plan' | 'lists' | 'checkin' | 'privacy' | 'inbox';
+export type Tab = 'plan' | 'lists' | 'checkin' | 'privacy' | 'inbox' | 'search';
 const TABS: [Tab, string, IconName][] = [
   ['plan', 'Plan', 'cal'],
   ['lists', 'Lists', 'list'],
   ['checkin', 'Check-in', 'rings'],
   ['privacy', 'Privacy', 'shield'],
 ];
-export const isTab = (h: string): h is Tab => h === 'inbox' || TABS.some(([t]) => t === h);
+export const isTab = (h: string): h is Tab =>
+  h === 'inbox' || h === 'search' || TABS.some(([t]) => t === h);
 
 export const tab = signal<Tab>('plan');
 /**
@@ -112,6 +114,32 @@ function Nav({ variant }: { variant: 'rail' | 'tabbar' }) {
   );
 }
 
+/** Search: a rail entry (with its shortcut) on desktop, a header button on phones. */
+function SearchLink({ variant }: { variant: 'rail' | 'top' }) {
+  const target: Tab = 'search';
+  return (
+    <a
+      href={`#${target}`}
+      class={variant === 'rail' ? 'navbtn' : 'iconbtn wo-top'}
+      aria-current={tab.value === 'search' ? 'page' : undefined}
+      aria-label={variant === 'top' ? 'Search' : undefined}
+      aria-keyshortcuts="/"
+      onClick={(e) => {
+        e.preventDefault();
+        go(target);
+      }}
+    >
+      <Icon name="search" size={20} />
+      {variant === 'rail' && (
+        <>
+          Search
+          <kbd aria-hidden="true">/</kbd>
+        </>
+      )}
+    </a>
+  );
+}
+
 /** "Waiting on you", with how many: a rail entry on desktop, a header button on phones. */
 function WaitingLink({ variant }: { variant: 'rail' | 'top' }) {
   const n = waiting.value.length;
@@ -178,6 +206,10 @@ export function App() {
         e.preventDefault();
         openQuick();
       }
+      if (e.key === '/') {
+        e.preventDefault();
+        go('search');
+      }
     };
     // Keep "today" correct across midnight and long-lived tabs.
     const tick = setInterval(() => {
@@ -217,6 +249,7 @@ export function App() {
     checkin: CheckinView,
     privacy: PrivacyView,
     inbox: InboxView,
+    search: SearchView,
   }[tab.value];
   // Render the element directly (not a new component each render) so the
   // onboarding state, like a generated recovery phrase, survives re-renders.
@@ -255,6 +288,7 @@ export function App() {
           </a>
           <Nav variant="rail" />
           <WaitingLink variant="rail" />
+          <SearchLink variant="rail" />
           <button type="button" class="btn primary newbtn" onClick={() => openQuick()}>
             <span class="row">
               <Icon name="plus" />
@@ -288,6 +322,7 @@ export function App() {
             <span class="demo" role={demo ? undefined : 'status'}>
               {statusText}
             </span>
+            <SearchLink variant="top" />
             <WaitingLink variant="top" />
             <span class="pair">
               <Avatar slot={me} />

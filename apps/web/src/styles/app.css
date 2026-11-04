@@ -2622,10 +2622,10 @@ fieldset.reminders > legend {
   padding: 0 4px;
 }
 .mtop .wo-top {
-  margin-left: auto;
-}
-.mtop .demo + .wo-top {
   margin-left: 0;
+}
+.mtop .demo {
+  margin-left: auto;
 }
 .wo-card {
   gap: 8px;
@@ -2769,5 +2769,67 @@ fieldset.reminders > legend {
   }
   .row3 > .field:first-child {
     grid-column: 1 / -1;
+  }
+}
+
+/* ---------- search ---------- */
+
+.navbtn kbd {
+  margin-left: auto;
+  color: var(--muted);
+}
+.find-form {
+  position: relative;
+}
+.find-form > .ic {
+  position: absolute;
+  left: 14px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--muted);
+  pointer-events: none;
+}
+.find-form .txt {
+  padding-left: 42px;
+  height: 50px;
+  border-radius: 14px;
+}
+.find-group ul {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+}
+.find-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 56px;
+  padding: 8px 10px;
+  border-radius: 12px;
+  text-align: left;
+  color: var(--muted);
+  text-decoration: none;
+}
+.find-row > span {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.find-row b {
+  color: var(--ink);
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.find-row b.done {
+  text-decoration: line-through;
+  color: var(--faint);
+}
+.find-row:hover {
+  background: var(--sunk);
+}
+@media (min-width: 880px) {
+  main.v-search {
+    max-width: 760px;
   }
 }
