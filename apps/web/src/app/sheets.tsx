@@ -4,6 +4,7 @@ import { parseQuickAdd } from '@ours/core/parse';
 import { addDays, addWallMinutes } from '@ours/core/time';
 import { signal } from '@preact/signals';
 import { useState } from 'preact/hooks';
+import { FreeTimeSheet } from './freetime';
 import {
   addComment,
   commentsFor,
@@ -42,6 +43,8 @@ export interface QuickPreset {
   time?: string;
   who?: 'me' | 'ours' | 'partner';
   placeholder?: string;
+  /** How long, when it's known (a date idea's rough length); otherwise an hour. */
+  minutes?: number;
 }
 
 export type SheetState =
@@ -49,6 +52,7 @@ export type SheetState =
   | { type: 'event'; id: string; occ?: string | null }
   | { type: 'edit'; id: string | null; draft?: Draft }
   | { type: 'import'; row: Row; date: string }
+  | { type: 'free'; date: string }
   | null;
 export const sheet = signal<SheetState>(null);
 export const openQuick = (preset: QuickPreset = {}) => {
@@ -57,6 +61,10 @@ export const openQuick = (preset: QuickPreset = {}) => {
 /** A plan's sheet. `occ` names the day it was opened from, for a repeating plan. */
 export const openEvent = (id: string, occ?: string | null) => {
   sheet.value = { type: 'event', id, occ: occ ?? null };
+};
+/** Time you're both free on a day, and date ideas that fit it. */
+export const openFreeTime = (date: string) => {
+  sheet.value = { type: 'free', date };
 };
 /** The full form: edit a plan, or make one with every option. */
 export const openPlanForm = (id: string | null, draft?: Draft) => {
@@ -77,6 +85,7 @@ export function SheetHost() {
   if (!s) return null;
   if (s.type === 'quick') return <QuickAdd key="quick" preset={s.preset} />;
   if (s.type === 'import') return <ImportSheet key={s.row.key} row={s.row} date={s.date} />;
+  if (s.type === 'free') return <FreeTimeSheet key={s.date} date={s.date} />;
   if (s.type === 'edit')
     return <PlanForm key={s.id ?? 'new'} id={s.id} {...(s.draft ? { draft: s.draft } : {})} />;
   return <EventSheet key={`${s.id}:${s.occ ?? ''}`} id={s.id} occ={s.occ ?? null} />;
@@ -115,7 +124,7 @@ function QuickAdd({ preset }: { preset: QuickPreset }) {
     if (!title) return;
     const owner: Slot | 'both' = who === 'me' ? me : who === 'partner' ? p : 'both';
     const start = time ? `${date}T${time}` : date;
-    let end = time ? addWallMinutes(start, 60) : addDays(date, 1);
+    let end = time ? addWallMinutes(start, preset.minutes ?? 60) : addDays(date, 1);
     if (time && parsed.endTime && !timeOverride) {
       end = `${date}T${parsed.endTime}`;
       if (end <= start) end = `${addDays(date, 1)}T${parsed.endTime}`;

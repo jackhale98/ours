@@ -24,7 +24,7 @@ import {
   weekStartsOn,
   zone,
 } from '../select';
-import { openEvent, openQuick } from '../sheets';
+import { openEvent, openFreeTime, openQuick } from '../sheets';
 import { Icon, Marker } from '../ui';
 import { EventRow } from './Plan';
 
@@ -191,7 +191,11 @@ function DayPanel({ day }: { day: Day }) {
         ))}
         {!day.rows.length && <p class="nothing">Nothing planned</p>}
         {day.bothFree && day.date >= today.value && (
-          <p class="small muted">You’re both free this evening.</p>
+          <button type="button" class="free" onClick={() => openFreeTime(day.date)}>
+            <Marker owner="both" mode="dash" />
+            Both free this evening
+            <span class="free-cta">See ideas</span>
+          </button>
         )}
       </div>
       <button
@@ -383,6 +387,13 @@ function DayDrawer({ day }: { day: Day }) {
           <EventRow key={row.key} row={row} date={day.date} />
         ))}
         {!day.rows.length && <p class="nothing">Nothing planned</p>}
+        {day.bothFree && day.date >= today.value && (
+          <button type="button" class="free" onClick={() => openFreeTime(day.date)}>
+            <Marker owner="both" mode="dash" />
+            Both free this evening
+            <span class="free-cta">See ideas</span>
+          </button>
+        )}
         <button
           type="button"
           class="btn sm"

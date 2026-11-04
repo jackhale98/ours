@@ -5,6 +5,7 @@ import type { ListKind } from '@ours/core/schema';
 import { keyBetween } from '@ours/core/schema';
 import { signal } from '@preact/signals';
 import { useRef, useState } from 'preact/hooks';
+import { LENGTH_LABEL } from '../freetime';
 import { itemSheet } from '../itemsheet';
 import {
   allLists,
@@ -289,7 +290,10 @@ function IdeasList({ list }: { list: ListEntry }) {
       <ul class="items">
         {items.map((i) => (
           <li class="it" key={i.id}>
-            <span class="it-t grow">{i.rec.data.text}</span>
+            <span class="it-t grow">
+              {i.rec.data.text}
+              {i.rec.data.length && <span class="it-sub">{LENGTH_LABEL[i.rec.data.length]}</span>}
+            </span>
             <button
               type="button"
               class="btn sm"
@@ -297,6 +301,16 @@ function IdeasList({ list }: { list: ListEntry }) {
               onClick={() => planIdea(i.rec.data.text)}
             >
               Plan it
+            </button>
+            <button
+              type="button"
+              class="iconbtn it-more"
+              aria-label={`Details: ${i.rec.data.text}`}
+              onClick={() => {
+                itemSheet.value = i.id;
+              }}
+            >
+              <Icon name="next" size={16} />
             </button>
             <button
               type="button"

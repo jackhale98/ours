@@ -21,7 +21,7 @@ import {
   today,
   whenText,
 } from '../select';
-import { accept, decline, openEvent, openImport, openPlanForm, openQuick } from '../sheets';
+import { accept, decline, openEvent, openFreeTime, openImport, openPlanForm } from '../sheets';
 import { Icon, Marker, MarkerKey } from '../ui';
 import { MonthView, ViewSwitch, WeekView } from './Calendar';
 
@@ -332,18 +332,7 @@ export function PlanView() {
                     ))}
                     {!day.rows.length && !day.bothFree && <p class="nothing">Nothing planned</p>}
                     {day.bothFree && (
-                      <button
-                        type="button"
-                        class="free"
-                        onClick={() =>
-                          openQuick({
-                            date: day.date,
-                            time: '19:00',
-                            who: 'ours',
-                            placeholder: 'Date night',
-                          })
-                        }
-                      >
+                      <button type="button" class="free" onClick={() => openFreeTime(day.date)}>
                         <Marker owner="both" mode="dash" />
                         {i === 0 ? 'Both free tonight' : 'Both free this evening'}
                         <span class="free-cta">Plan something</span>

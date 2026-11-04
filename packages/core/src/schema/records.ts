@@ -171,6 +171,15 @@ export const ListData = v.strictObject({
   checkin: v.optional(v.boolean()),
 });
 
+/** Rough lengths for date ideas, with the minutes each needs free. */
+export const IDEA_LENGTHS = {
+  short: 90,
+  evening: 180,
+  half: 300,
+  day: 600,
+} as const;
+export type IdeaLength = keyof typeof IDEA_LENGTHS;
+
 export const ItemData = v.strictObject({
   list_id: RefId,
   text: NonEmpty(500),
@@ -187,6 +196,8 @@ export const ItemData = v.strictObject({
   rotate: v.optional(v.boolean()),
   /** When a repeating task was last done. */
   last_done: v.optional(v.nullable(LocalDate)),
+  /** Date ideas: roughly how long it takes, if anyone said (see IDEA_LENGTHS). */
+  length: v.optional(v.nullable(v.picklist(['short', 'evening', 'half', 'day']))),
 });
 
 export const CommentData = v.strictObject({

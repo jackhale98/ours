@@ -368,6 +368,30 @@ function isEveningFree(date: string, rows: Row[]): boolean {
   return free.length === 1 && free[0]?.start === window.start && free[0]?.end === window.end;
 }
 
+/** The part of the day we suggest time together in. */
+export const DAYTIME = { start: '08:00', end: '22:00' } as const;
+
+/**
+ * Stretches of a day when you're both free (between 8 AM and 10 PM, at least
+ * an hour long), as instants. Nothing if either of you is away. Today's
+ * start from the next half hour.
+ */
+export function freeStretches(date: string): Interval[] {
+  const day = agendaFrom(date, 1)[0];
+  if (!day || day.rows.some((r) => r.allDay && r.away)) return [];
+  let start = toInstant(`${date}T${DAYTIME.start}`, zone);
+  const end = toInstant(`${date}T${DAYTIME.end}`, zone);
+  if (date === today.value) {
+    const half = 30 * 60_000;
+    start = Math.max(start, Math.ceil(now.value / half) * half);
+  }
+  if (start >= end) return [];
+  const busy = day.rows
+    .filter((r) => !r.allDay && !r.free && r.status !== 'declined')
+    .map((r) => ({ start: r.occStart, end: Math.max(r.occEnd, r.occStart + 60_000) }));
+  return freeWithin({ start, end }, busy).filter((w) => w.end - w.start >= 60 * 60_000);
+}
+
 export function freeEvenings(days: number): string[] {
   return agenda(days)
     .filter((d) => d.bothFree)

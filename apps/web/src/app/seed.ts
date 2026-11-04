@@ -12,6 +12,7 @@ import {
   replaceAll,
   type Slot,
   setViewer,
+  store,
   update,
 } from './model';
 import { dow, today, zone } from './select';
@@ -198,14 +199,27 @@ function seedAll(): void {
     ],
     'a',
   );
-  list('Date ideas', 'ideas', [
+  const ideas = list('Date ideas', 'ideas', [
     ['Pottery class', null],
     ['Night walk and dumplings', null],
     ['Board game café', null],
     ['Try the new Georgian place', null],
     ['Sunrise at the pier', null],
     ['Cook a three-course dinner', null],
+    ['Day trip to the coast', null],
   ]);
+  // Some ideas say roughly how long they take; the rest fit whenever.
+  const lengths: Record<string, 'short' | 'evening' | 'half' | 'day'> = {
+    'Pottery class': 'short',
+    'Night walk and dumplings': 'evening',
+    'Cook a three-course dinner': 'evening',
+    'Day trip to the coast': 'day',
+  };
+  for (const e of store.value.entries) {
+    if (e.rec.kind !== 'item' || e.rec.data.list_id !== ideas) continue;
+    const len = lengths[e.rec.data.text];
+    if (len) update<'item'>(e.id, { length: len });
+  }
 
   // The weekly check-in shares out what's open on the Home list.
   update<'list'>(home, { checkin: true });

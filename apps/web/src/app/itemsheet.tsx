@@ -3,9 +3,12 @@
  * An item's details: name, due date, repeat, who's on it and taking turns.
  * Opened from any list row (Lists and the weekly check-in).
  */
+
+import type { IdeaLength } from '@ours/core/schema';
 import { signal } from '@preact/signals';
 import { useState } from 'preact/hooks';
-import type { ItemEntry } from './lists';
+import { LENGTH_LABEL } from './freetime';
+import { type ItemEntry, typeOf } from './lists';
 import { findEntry, nameOf, partner, remove, type Slot, update, viewer } from './model';
 import { REPEAT_CHOICES } from './planform';
 import { fmtLong, relDay, repeatText, today } from './select';
@@ -31,6 +34,9 @@ function ItemSheet({ item }: { item: ItemEntry }) {
   const me = viewer.value;
   const p = partner.value;
   const shared = item.scope === 'space';
+  const list = findEntry(d.list_id);
+  const isIdea = list?.rec.kind === 'list' && typeOf(list.rec.data.kind).behaviour === 'ideas';
+  const [length, setLength] = useState<IdeaLength | null>(d.length ?? null);
   const [text, setText] = useState(d.text);
   const [due, setDue] = useState(d.due ?? '');
   const [repeat, setRepeat] = useState(d.repeat ?? '');
@@ -47,6 +53,12 @@ function ItemSheet({ item }: { item: ItemEntry }) {
     const name = text.trim();
     if (!name) return setError('Give it a name.');
     const assignee: Slot | null = who === 'me' ? me : who === 'partner' ? p : null;
+    if (isIdea) {
+      update<'item'>(item.id, { text: name.slice(0, 500), length });
+      close();
+      toast('Saved.');
+      return;
+    }
     update<'item'>(item.id, {
       text: name.slice(0, 500),
       // A repeating task needs a date to count from: today if none was given.
@@ -81,43 +93,67 @@ function ItemSheet({ item }: { item: ItemEntry }) {
             autocomplete="off"
           />
         </div>
-        <div class="row2">
+        {isIdea && (
           <div class="field">
-            <label for="is-due">
-              Due <span class="opt">optional</span>
-            </label>
-            <input
-              id="is-due"
-              class="txt"
-              type="date"
-              value={due}
-              onInput={(e) => setDue(e.currentTarget.value)}
-            />
-          </div>
-          <div class="field">
-            <label for="is-rep">Repeats</label>
-            <select
-              id="is-rep"
-              class="txt"
-              value={repeat}
-              onChange={(e) => setRepeat(e.currentTarget.value)}
-            >
-              {REPEAT_CHOICES.map(([v, label]) => (
-                <option key={v} value={v}>
-                  {label}
-                </option>
+            <span class="lbl" id="is-len">
+              How long <span class="opt">optional</span>
+            </span>
+            {/* biome-ignore lint/a11y/useSemanticElements: toggle-button group (aria-pressed), labelled; fieldset/legend breaks the chip layout */}
+            <div class="chips" role="group" aria-labelledby="is-len">
+              {([null, 'short', 'evening', 'half', 'day'] as (IdeaLength | null)[]).map((k) => (
+                <button
+                  type="button"
+                  key={k ?? 'none'}
+                  class="chip"
+                  aria-pressed={length === k}
+                  onClick={() => setLength(k)}
+                >
+                  {k ? LENGTH_LABEL[k] : 'Not sure'}
+                </button>
               ))}
-              {custom && <option value={repeat}>{repeatText(repeat)}</option>}
-            </select>
+            </div>
+            <p class="small muted">Helps pick ideas that fit when you’re both free.</p>
           </div>
-        </div>
+        )}
+        {!isIdea && (
+          <div class="row2">
+            <div class="field">
+              <label for="is-due">
+                Due <span class="opt">optional</span>
+              </label>
+              <input
+                id="is-due"
+                class="txt"
+                type="date"
+                value={due}
+                onInput={(e) => setDue(e.currentTarget.value)}
+              />
+            </div>
+            <div class="field">
+              <label for="is-rep">Repeats</label>
+              <select
+                id="is-rep"
+                class="txt"
+                value={repeat}
+                onChange={(e) => setRepeat(e.currentTarget.value)}
+              >
+                {REPEAT_CHOICES.map(([v, label]) => (
+                  <option key={v} value={v}>
+                    {label}
+                  </option>
+                ))}
+                {custom && <option value={repeat}>{repeatText(repeat)}</option>}
+              </select>
+            </div>
+          </div>
+        )}
         {repeat && (
           <p class="small muted">
             Ticking it moves it to the next date instead of finishing it.
             {d.last_done ? ` Last done ${relDay(d.last_done).toLowerCase()}.` : ''}
           </p>
         )}
-        {shared && (
+        {shared && !isIdea && (
           <div class="field">
             <span class="lbl" id="is-who">
               Who’s on it
