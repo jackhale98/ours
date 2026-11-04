@@ -227,7 +227,8 @@ auth.post('/logout', requireAuth, async (c) => {
 auth.post('/passkey/register/options', requireAuth, async (c) => {
   const user = c.var.user;
   await rateLimit(c.env, `passkey-register:${user.id}`, 20, 3600);
-  if (Date.now() - c.var.session.created_at > RECENT_SIGNIN_MS) {
+  const signedIn = Math.max(c.var.session.created_at, c.var.session.reauth_at ?? 0);
+  if (Date.now() - signedIn > RECENT_SIGNIN_MS) {
     throw new HttpError(403, 'reauth_required', 'Sign in again to add a passkey.');
   }
   const { rpID, rpName } = rp(c.env, c.req.header('Origin'));
@@ -281,8 +282,8 @@ auth.post('/passkey/register/verify', requireAuth, async (c) => {
   if (!verification.verified) throw new HttpError(400, 'passkey_invalid');
   const cred = verification.registrationInfo.credential;
   const inserted = await c.env.DB.prepare(
-    `INSERT INTO passkeys (id, user_id, public_key, counter, transports, created_at)
-     VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO NOTHING`,
+    `INSERT INTO passkeys (id, user_id, public_key, counter, transports, created_at, aaguid)
+     VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO NOTHING`,
   )
     .bind(
       cred.id,
@@ -291,6 +292,7 @@ auth.post('/passkey/register/verify', requireAuth, async (c) => {
       cred.counter,
       cred.transports ? JSON.stringify(cred.transports) : null,
       Date.now(),
+      verification.registrationInfo.aaguid ?? null,
     )
     .run();
   if (!inserted.meta.changes) throw new HttpError(409, 'passkey_exists');
@@ -330,7 +332,7 @@ auth.post('/passkey/login/verify', async (c) => {
     .bind(passkey.user_id)
     .first<{ id: string; email: string }>();
   if (!user) throw new HttpError(400, 'passkey_invalid');
-  const session = await createSession(c.env, user.id, input.device_label);
+  const session = await createSession(c.env, user.id, input.device_label, undefined, passkey.id);
   return c.json({ ...session, user, new_user: false });
 });
 
@@ -341,7 +343,8 @@ async function verifyAssertion(
   expectedChallenge: string,
   rpID: string,
   origins: string[],
-): Promise<{ user_id: string }> {
+  requireUserVerification = false,
+): Promise<{ id: string; user_id: string }> {
   const passkey = await env.DB.prepare(
     'SELECT id, user_id, public_key, counter, transports FROM passkeys WHERE id = ?',
   )
@@ -368,7 +371,7 @@ async function verifyAssertion(
         counter: passkey.counter,
         ...(passkey.transports ? { transports: JSON.parse(passkey.transports) } : {}),
       },
-      requireUserVerification: false,
+      requireUserVerification,
     });
   } catch {
     throw new HttpError(400, 'passkey_invalid');
@@ -377,7 +380,7 @@ async function verifyAssertion(
   await env.DB.prepare('UPDATE passkeys SET counter = ? WHERE id = ?')
     .bind(verification.authenticationInfo.newCounter, passkey.id)
     .run();
-  return { user_id: passkey.user_id };
+  return { id: passkey.id, user_id: passkey.user_id };
 }
 
 /**
@@ -413,22 +416,36 @@ auth.post('/passkey/reauth/verify', requireAuth, async (c) => {
   const uid = c.var.user.id;
   const { rpID, origins } = rp(c.env, c.req.header('Origin'));
   const expectedChallenge = await takeChallenge(c.env, input.challenge_id, 'login', uid);
-  const passkey = await verifyAssertion(c.env, input.response, expectedChallenge, rpID, origins);
+  // A confirmation means face, fingerprint or passcode, checked (review 0006, M2).
+  const passkey = await verifyAssertion(
+    c.env,
+    input.response,
+    expectedChallenge,
+    rpID,
+    origins,
+    true,
+  );
   if (passkey.user_id !== uid) throw new HttpError(400, 'passkey_invalid');
-  await c.env.DB.prepare('UPDATE sessions SET reauth_at = ? WHERE token_hash = ?')
-    .bind(Date.now(), c.var.session.token_hash)
+  await c.env.DB.prepare('UPDATE sessions SET reauth_at = ?, passkey_id = ? WHERE token_hash = ?')
+    .bind(Date.now(), passkey.id, c.var.session.token_hash)
     .run();
   return c.json({ ok: true });
 });
 
 /** The account's passkeys (id and when added). */
 auth.get('/passkeys', requireAuth, async (c) => {
+  // can_unlock: added after this person's latest change of keys (review 0006, M1).
   const rows = await c.env.DB.prepare(
-    'SELECT id, created_at FROM passkeys WHERE user_id = ? ORDER BY created_at',
+    `SELECT p.id, p.created_at, p.aaguid,
+            p.created_at > COALESCE(u.keys_changed_at, 0) AS can_unlock
+       FROM passkeys p JOIN users u ON u.id = p.user_id
+      WHERE p.user_id = ? ORDER BY p.created_at`,
   )
     .bind(c.var.user.id)
-    .all<{ id: string; created_at: number }>();
-  return c.json({ passkeys: rows.results });
+    .all<{ id: string; created_at: number; aaguid: string | null; can_unlock: number }>();
+  return c.json({
+    passkeys: rows.results.map((r) => ({ ...r, can_unlock: !!r.can_unlock })),
+  });
 });
 
 auth.delete('/passkeys/:id', requireAuth, async (c) => {

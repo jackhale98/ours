@@ -10,8 +10,9 @@
 import { Hono } from 'hono';
 import * as v from 'valibot';
 import { type AppEnv, requireAuth } from '../auth/session';
+import type { Env } from '../env';
 import { bytesOf, fromB64Url, toB64Url } from '../lib/crypto';
-import { sendEmail } from '../lib/email';
+import { type Email, sendEmail } from '../lib/email';
 import { body, HttpError } from '../lib/http';
 import { rateLimit } from '../lib/ratelimit';
 
@@ -83,10 +84,13 @@ keys.put('/backup', async (c) => {
   return c.json({ ok: true, version: input.version });
 });
 
-/* ---------- passkey unlock (ADR 0015) ---------- */
+/* ---------- passkey unlock (ADR 0015, review 0006) ---------- */
 
 const PasskeyId = v.pipe(v.string(), v.regex(/^[A-Za-z0-9_-]{16,1366}$/));
 const MAX_UNLOCK = 256 * 1024;
+/** Setting a copy needs that passkey to have signed in or confirmed this recently (L2). */
+const CONFIRMED_MS = 10 * 60_000;
+const Version = v.pipe(v.number(), v.integer(), v.minValue(1), v.maxValue(1_000_000));
 
 const passkeyId = (raw: string) => {
   const r = v.safeParse(PasskeyId, raw);
@@ -94,23 +98,54 @@ const passkeyId = (raw: string) => {
   return r.output;
 };
 
-/** Which of my passkeys can unlock my keys. */
+/** The switch covers every use, not only setting it up (L1). */
+const requireOn = (env: { PASSKEY_UNLOCK?: string }) => {
+  if (env.PASSKEY_UNLOCK !== 'on')
+    throw new HttpError(403, 'unlock_off', 'Unlocking with a passkey isn’t available.');
+};
+
+/** At most one notice of a kind an hour, so they can't be used to flood someone (L3). */
+async function notice(env: Env, kind: string, uid: string, email: Email): Promise<void> {
+  try {
+    await rateLimit(env, `unlock-mail:${kind}:${uid}`, 1, 3600);
+  } catch {
+    return;
+  }
+  await sendEmail(env, email).catch(() => {});
+}
+
+/** Which of my passkeys can unlock my keys, and which key versions each copy holds. */
 keys.get('/unlocks', async (c) => {
+  requireOn(c.env);
   const rows = await c.env.DB.prepare(
-    'SELECT passkey_id, created_at FROM key_unlocks WHERE user_id = ? ORDER BY created_at',
+    `SELECT passkey_id, created_at, space_version, personal_version
+       FROM key_unlocks WHERE user_id = ? ORDER BY created_at`,
   )
     .bind(c.var.user.id)
-    .all<{ passkey_id: string; created_at: number }>();
+    .all<{
+      passkey_id: string;
+      created_at: number;
+      space_version: number;
+      personal_version: number;
+    }>();
   return c.json({ unlocks: rows.results });
 });
 
-/** Stores (or replaces) the copy sealed for one of my passkeys. */
+/**
+ * Stores (or replaces) the copy sealed for one of my passkeys. Only from a
+ * session that signed in or confirmed with that very passkey in the last
+ * minutes (L2), and only for a passkey added after my latest change of keys,
+ * so a lost phone's passkey can't be used to undo a rotation (M1).
+ */
 keys.put('/unlock/:id', async (c) => {
+  requireOn(c.env);
   const uid = c.var.user.id;
   const id = passkeyId(c.req.param('id'));
   const input = await body(
     c,
     v.strictObject({
+      space_version: Version,
+      personal_version: Version,
       wrapped: v.strictObject({
         nonce: v.pipe(v.string(), v.regex(/^[A-Za-z0-9_-]{32}$/)),
         ciphertext: v.pipe(
@@ -121,36 +156,50 @@ keys.put('/unlock/:id', async (c) => {
       }),
     }),
   );
-  if (c.env.PASSKEY_UNLOCK !== 'on')
-    throw new HttpError(403, 'unlock_off', 'Unlocking with a passkey isn’t available yet.');
   await rateLimit(c.env, `unlock-set:${uid}`, 20, 3600);
+  const s = c.var.session;
+  if (s.passkey_id !== id || Date.now() - Math.max(s.created_at, s.reauth_at ?? 0) > CONFIRMED_MS)
+    throw new HttpError(403, 'reauth_required', 'Confirm with that passkey first.');
+  const pk = await c.env.DB.prepare(
+    `SELECT p.created_at > COALESCE(u.keys_changed_at, 0) AS ok
+       FROM passkeys p JOIN users u ON u.id = p.user_id WHERE p.id = ? AND p.user_id = ?`,
+  )
+    .bind(id, uid)
+    .first<{ ok: number }>();
+  if (!pk) throw new HttpError(404, 'not_found', 'That passkey isn’t on this account.');
+  if (!pk.ok)
+    throw new HttpError(
+      409,
+      'passkey_too_old',
+      'This passkey was added before you changed your keys, so it can’t unlock them. Add a new one.',
+    );
   const nonce = fromB64Url(input.wrapped.nonce);
   const ct = fromB64Url(input.wrapped.ciphertext);
   const packed = new Uint8Array(nonce.length + ct.length);
   packed.set(nonce);
   packed.set(ct, nonce.length);
-  const res = await c.env.DB.prepare(
-    `INSERT INTO key_unlocks (passkey_id, user_id, wrapped, created_at)
-       SELECT ?1, ?2, ?3, ?4 WHERE EXISTS (SELECT 1 FROM passkeys WHERE id = ?1 AND user_id = ?2)
-     ON CONFLICT(passkey_id) DO UPDATE SET wrapped = excluded.wrapped, created_at = excluded.created_at
+  await c.env.DB.prepare(
+    `INSERT INTO key_unlocks (passkey_id, user_id, wrapped, created_at, space_version, personal_version)
+       VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+     ON CONFLICT(passkey_id) DO UPDATE SET wrapped = excluded.wrapped, created_at = excluded.created_at,
+       space_version = excluded.space_version, personal_version = excluded.personal_version
        WHERE key_unlocks.user_id = ?2`,
   )
-    .bind(id, uid, packed, Date.now())
+    .bind(id, uid, packed, Date.now(), input.space_version, input.personal_version)
     .run();
-  if (!res.meta.changes)
-    throw new HttpError(404, 'not_found', 'That passkey isn’t on this account.');
   c.executionCtx.waitUntil(
-    sendEmail(c.env, {
+    notice(c.env, 'set', uid, {
       to: c.var.user.email,
       subject: 'Passkey unlock is on for your Ours account',
       text: 'One of your passkeys can now unlock your Ours keys on a new device, after face, fingerprint or device passcode. If this wasn’t you, open Ours → Privacy, remove the passkey, and change your keys.',
-    }).catch(() => {}),
+    }),
   );
   return c.json({ ok: true });
 });
 
 /** The sealed copy for one of my passkeys: fetched to unlock a new device. */
 keys.get('/unlock/:id', async (c) => {
+  requireOn(c.env);
   const uid = c.var.user.id;
   const id = passkeyId(c.req.param('id'));
   await rateLimit(c.env, `unlock-get:${uid}`, 10, 3600);
@@ -160,13 +209,14 @@ keys.get('/unlock/:id', async (c) => {
     .bind(id, uid)
     .first<{ wrapped: ArrayBuffer }>();
   if (!row) throw new HttpError(404, 'not_found');
-  // So an unlock someone else made doesn't go unnoticed.
+  // So an unlock someone else tried doesn't go unnoticed. The server can't
+  // tell whether it opened, so it says what it knows (L3).
   c.executionCtx.waitUntil(
-    sendEmail(c.env, {
+    notice(c.env, 'get', uid, {
       to: c.var.user.email,
-      subject: 'Your Ours keys were unlocked with a passkey',
-      text: 'A device just used one of your passkeys to unlock your Ours keys. If this wasn’t you, open Ours → Privacy, remove that passkey and devices you don’t recognise, and change your keys.',
-    }).catch(() => {}),
+      subject: 'A device asked to unlock your Ours keys with a passkey',
+      text: 'A device just fetched the copy of your Ours keys that one of your passkeys can open. If this wasn’t you, open Ours → Privacy, remove that passkey and devices you don’t recognise, and change your keys.',
+    }),
   );
   const bytes = bytesOf(row.wrapped);
   return c.json({
@@ -177,10 +227,20 @@ keys.get('/unlock/:id', async (c) => {
   });
 });
 
+/** Turning it off always works, even with the switch off. */
 keys.delete('/unlock/:id', async (c) => {
+  const uid = c.var.user.id;
   const id = passkeyId(c.req.param('id'));
-  await c.env.DB.prepare('DELETE FROM key_unlocks WHERE passkey_id = ? AND user_id = ?')
-    .bind(id, c.var.user.id)
+  const res = await c.env.DB.prepare('DELETE FROM key_unlocks WHERE passkey_id = ? AND user_id = ?')
+    .bind(id, uid)
     .run();
+  if (res.meta.changes)
+    c.executionCtx.waitUntil(
+      notice(c.env, 'off', uid, {
+        to: c.var.user.email,
+        subject: 'A passkey no longer unlocks your Ours keys',
+        text: 'Unlocking with one of your passkeys was just turned off. If this wasn’t you, sign in, check Privacy → Passkeys, and change your keys.',
+      }),
+    );
   return c.json({ ok: true });
 });

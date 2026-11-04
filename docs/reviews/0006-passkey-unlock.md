@@ -189,3 +189,17 @@ Conditions, with tests:
 6. L2 and L3: fix them, or record them as accepted risks in THREAT_MODEL.
 
 **`PASSKEY_UNLOCK` must stay `off` in production until conditions 1–6 are met.** After that, a check of the fixes is enough to turn it on. A new full review is not needed.
+
+## Fixes for the conditions
+
+| Item | Fix | Test |
+|---|---|---|
+| M1 | `users.keys_changed_at` is set by the rotate batch; `PUT /keys/unlock/:id` refuses (409 `passkey_too_old`) a passkey added before it, and `/auth/passkeys` says which can unlock (`can_unlock`). Passkeys are named by provider (AAGUID, stored at registration). "Update" shows only for a copy this device set up (it remembers the copy's `created_at`); a behind copy set up elsewhere gets "If you don't recognise it, remove that passkey". The advice to remove the lost device from the Apple, Google or password manager account first is in the Passkeys card, ADR 0015 and THREAT_MODEL. Only eligible passkeys are offered when turning it on. | API "goes with the passkey and a change of keys, and old passkeys stay out"; web `passkeys.test.ts` "tells which copies are current, behind, or set up elsewhere" |
+| M2 | The PRF output is used only when the authenticator data's UV flag is set: at sign-in, on Welcome back, and when setting it up. Setting it up goes through `/auth/passkey/reauth/verify`, which now requires user verification. | Web `passkeys.test.ts` "uses the unlock secret only when the person was verified" |
+| L1 | With the switch off, `GET /keys/unlocks` and `GET /keys/unlock/:id` refuse (403 `unlock_off`) as well as `PUT`; `DELETE` still works. The client doesn't fetch or list when `/me` says off. ADR 0015 says switching off doesn't delete copies. | API "when off, nothing can be set up, listed or fetched" |
+| L2 | `PUT` needs a session that signed in or confirmed with that very passkey in the last ten minutes (`sessions.passkey_id`, set at passkey sign-in and confirmation). `DELETE` emails the owner. Turning a copy off from a stolen session is recorded as accepted in THREAT_MODEL. | API "keeps one sealed copy per passkey…" (403 before confirming), "needs a confirmation from the last ten minutes" |
+| L3 | The fetch email now says "A device asked to unlock…", and each kind of notice goes at most once an hour. Recorded in THREAT_MODEL. | API (email subject) |
+| L4 | Each copy stores the key versions it holds (`space_version`, `personal_version`); every device compares them with its own. | API (listed versions); web status test |
+| L5 | ADR 0015, THREAT_MODEL, the Passkeys card and the privacy policy ("What we cannot see") corrected as listed. The end-to-end test now also checks the requests made when setting it up. | E2E |
+| I1, I2 | Recorded in THREAT_MODEL. | — |
+| I5 | A copy that won't open says so in words and points to a device link or the phrase. | Reading |

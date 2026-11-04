@@ -86,7 +86,10 @@ export function rotateStatements(
         'UPDATE spaces SET key_version = ?2, rotated_rev = seq, rotated_by = ?3, rotated_at = ?4 WHERE id = ?1',
       )
       .bind(r.spaceId, space, r.userId, r.now),
-    db.prepare('UPDATE users SET personal_key_version = ?2 WHERE id = ?1').bind(r.userId, personal),
+    // keys_changed_at: passkeys added before it can no longer unlock (ADR 0015).
+    db
+      .prepare('UPDATE users SET personal_key_version = ?2, keys_changed_at = ?3 WHERE id = ?1')
+      .bind(r.userId, personal, r.now),
     db
       .prepare(
         `INSERT INTO key_ids (scope, owner, version, kid, created_at)

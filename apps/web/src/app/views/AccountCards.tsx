@@ -17,6 +17,7 @@ import {
   sendTest,
   setQuietHours,
 } from '../../account/notify';
+import { providerName, type UnlockStatus, unlockStatus } from '../../account/passkeys';
 import {
   abandonRotation,
   account,
@@ -25,6 +26,7 @@ import {
   comparedVersion,
   confirmItsYou,
   currentSafetyCode,
+  currentVersions,
   disablePasskeyUnlock,
   dismissPhraseKept,
   enablePasskeyUnlock,
@@ -46,7 +48,7 @@ import {
   rotationBlocked,
   saveBackup,
   signOut,
-  unlockStale,
+  unlocksMadeHere,
 } from '../../account/session';
 import { needsNewKeys } from '../../account/sync';
 import { nameOf, partner, settings, updateSettings, viewer } from '../model';
@@ -132,7 +134,9 @@ export function DevicesCard() {
 
 /**
  * Passkeys, and letting one unlock your keys on a new device (ADR 0015).
- * Off unless turned on, with the trade-off said plainly.
+ * Off unless turned on, with the trade-off said plainly. Each passkey says
+ * who made it and what it can do; passkeys added before the latest change of
+ * keys can't unlock (review 0006, M1).
  */
 export function PasskeysCard() {
   const info = me.value;
@@ -143,7 +147,13 @@ export function PasskeysCard() {
   }, []);
   if (!info) return null;
   const list = passkeyList.value ?? [];
-  const unlocks = new Set((passkeyUnlocks.value ?? []).map((u) => u.passkey_id));
+  const copies = new Map((passkeyUnlocks.value ?? []).map((u) => [u.passkey_id, u]));
+  const now = currentVersions() ?? { space: 1, personal: 1 };
+  const status = (p: (typeof list)[number]) =>
+    unlockStatus(p, copies.get(p.id), now, unlocksMadeHere.value);
+  const on = !!info.passkey_unlock;
+  const anyEligible = list.some((p) => p.can_unlock && !copies.has(p.id));
+  const anyTooOld = on && list.some((p) => !p.can_unlock);
   const partnerName = nameOf(partner.value);
   const run = async (fn: () => Promise<void>, ok: string) => {
     setBusy(true);
@@ -161,6 +171,13 @@ export function PasskeysCard() {
       setArmed(false);
     }
   };
+  const WHAT: Record<UnlockStatus, string> = {
+    'too-old': 'signs in only: added before you changed your keys',
+    off: 'signs in',
+    current: 'signs in and unlocks your keys',
+    behind: 'unlocks your older keys only',
+    'behind-elsewhere': 'unlocks older keys only; set up on another device',
+  };
   return (
     <section class="card" aria-labelledby="pk-h">
       <h2 class="h3" id="pk-h">
@@ -168,78 +185,95 @@ export function PasskeysCard() {
       </h2>
       <p class="d">
         A passkey signs you in with your face, fingerprint or device passcode.
-        {info.passkey_unlock
+        {on
           ? ' It can also unlock your keys on a new device, so you don’t need a device link or your recovery phrase.'
           : ''}
       </p>
       {list.length ? (
         <ul class="devs">
-          {list.map((p, i) => (
-            <li key={p.id}>
-              <Icon name="lock" />
-              <span>
-                Passkey {i + 1}
-                <span class="small muted">
-                  {' '}
-                  · added {when(p.created_at)} ·{' '}
-                  {unlocks.has(p.id) ? 'signs in and unlocks your keys' : 'signs in'}
+          {list.map((p, i) => {
+            const st = status(p);
+            const name = providerName(p.aaguid) ?? `Passkey ${i + 1}`;
+            return (
+              <li key={p.id}>
+                <Icon name="lock" />
+                <span>
+                  {name}
+                  <span class="small muted">
+                    {' '}
+                    · added {when(p.created_at)} · {on ? WHAT[st] : 'signs in'}
+                  </span>
                 </span>
-              </span>
-              <span class="btnrow">
-                {unlocks.has(p.id) && (
+                <span class="btnrow">
+                  {on && st === 'behind' && (
+                    <button
+                      type="button"
+                      class="linkbtn"
+                      disabled={busy}
+                      onClick={() => void run(() => enablePasskeyUnlock(p.id), 'Updated.')}
+                    >
+                      Update
+                    </button>
+                  )}
+                  {on && st !== 'off' && st !== 'too-old' && (
+                    <button
+                      type="button"
+                      class="linkbtn"
+                      disabled={busy}
+                      onClick={() =>
+                        void run(
+                          () => disablePasskeyUnlock(p.id),
+                          'It no longer unlocks your keys.',
+                        )
+                      }
+                    >
+                      Stop unlocking
+                    </button>
+                  )}
                   <button
                     type="button"
-                    class="linkbtn"
+                    class="iconbtn"
+                    aria-label={`Remove ${name}, added ${when(p.created_at)}`}
                     disabled={busy}
-                    onClick={() =>
-                      void run(() => disablePasskeyUnlock(p.id), 'It no longer unlocks your keys.')
-                    }
+                    onClick={() => void run(() => removePasskey(p.id), 'Passkey removed.')}
                   >
-                    Stop unlocking
+                    <Icon name="x" size={16} />
                   </button>
-                )}
-                <button
-                  type="button"
-                  class="iconbtn"
-                  aria-label={`Remove passkey ${i + 1}`}
-                  disabled={busy}
-                  onClick={() => void run(() => removePasskey(p.id), 'Passkey removed.')}
-                >
-                  <Icon name="x" size={16} />
-                </button>
-              </span>
-            </li>
-          ))}
+                </span>
+              </li>
+            );
+          })}
         </ul>
       ) : (
         <p class="d small">No passkeys yet.</p>
       )}
-      {unlockStale.value && (
+      {on && list.some((p) => status(p) === 'behind-elsewhere') && (
         <p class="note">
           <Icon name="lock" size={15} />
           <span>
-            Your keys changed. Use your passkey again so it unlocks the new ones.{' '}
-            <button
-              type="button"
-              class="linkbtn"
-              disabled={busy}
-              onClick={() => void run(enablePasskeyUnlock, 'Updated.')}
-            >
-              Update
-            </button>
+            A passkey’s unlocking was set up on another device and holds older keys. If you don’t
+            recognise it, remove that passkey.
           </span>
         </p>
       )}
-      {list.length > 0 &&
-        info.passkey_unlock &&
+      {anyTooOld && (
+        <p class="d small">
+          Passkeys added before you last changed your keys can still sign you in, but can’t unlock:
+          the lost device may have them. Remove them, and add a new passkey once the lost device is
+          out of your Apple, Google or password manager account.
+        </p>
+      )}
+      {on &&
+        anyEligible &&
         (armed ? (
           <div class="stack gap">
             <p class="d small">
               Turning this on means anyone who can use this passkey can read your plans on a new
-              device: with your Apple, Google or password manager account plus one of your device
-              passcodes, or your phone and its passcode. Leave it off if someone close to you knows
-              your passcode. Don’t share this passkey with {partnerName} (a shared passwords group):
-              it would open your private plans too.
+              device. With iCloud Keychain or Google Password Manager, that’s someone with your
+              account and one of your device passcodes, or your phone and its passcode; with a
+              password manager, its master password may be enough. Leave it off if someone close to
+              you knows your passcode. Don’t share this passkey with {partnerName} (a shared
+              passwords group): it would open your private plans too.
             </p>
             <div class="btnrow">
               <button
@@ -247,7 +281,10 @@ export function PasskeysCard() {
                 class="btn sm primary"
                 disabled={busy}
                 onClick={() =>
-                  void run(enablePasskeyUnlock, 'Done. That passkey can now unlock your keys.')
+                  void run(
+                    () => enablePasskeyUnlock(),
+                    'Done. That passkey can now unlock your keys.',
+                  )
                 }
               >
                 Choose a passkey
@@ -262,20 +299,29 @@ export function PasskeysCard() {
             Let a passkey unlock my keys
           </button>
         ))}
-      {!list.length && (
-        <button
-          type="button"
-          class="btn sm"
-          disabled={busy}
-          onClick={() => void run(addPasskey, 'Passkey added.')}
-        >
-          Add a passkey
-        </button>
+      <button
+        type="button"
+        class="btn sm"
+        disabled={busy}
+        onClick={() =>
+          void run(async () => {
+            // A recent sign-in, or a fresh check with a passkey you have.
+            if (needsConfirm()) await confirmItsYou();
+            await addPasskey();
+            await loadPasskeys();
+          }, 'Passkey added.')
+        }
+      >
+        Add a passkey
+      </button>
+      {on && (
+        <p class="d small">
+          Changing your keys (Secure your space) turns unlocking off for all your passkeys, and
+          older passkeys can’t unlock again. Before adding a new one after losing a device, remove
+          that device from your Apple, Google or password manager account: until then, any passkey
+          you make syncs to it too.
+        </p>
       )}
-      <p class="d small">
-        Changing your keys (Secure your space) turns unlocking off for every passkey, so a lost
-        phone can’t use one. Remove passkeys the lost phone could use before turning it on again.
-      </p>
     </section>
   );
 }

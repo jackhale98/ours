@@ -18,6 +18,8 @@ export interface AuthSession {
   created_at: number;
   /** Last passkey confirmation in this session (actions that need a recent sign-in). */
   reauth_at?: number | null;
+  /** The passkey this session signed in or last confirmed with. */
+  passkey_id?: string | null;
 }
 
 export type AppEnv = {
@@ -52,6 +54,7 @@ export async function createSession(
   userId: string,
   deviceLabel: string,
   deviceId?: string,
+  passkeyId?: string,
 ): Promise<{ token: string; device_id: string; expires_at: number }> {
   const now = Date.now();
   let device = deviceId;
@@ -74,8 +77,8 @@ export async function createSession(
   const expires = now + SESSION_DAYS * DAY;
   await env.DB.batch([
     env.DB.prepare(
-      'INSERT INTO sessions (token_hash, user_id, device_id, created_at, expires_at, last_seen) VALUES (?, ?, ?, ?, ?, ?)',
-    ).bind(await hashToken(token), userId, device, now, expires, now),
+      'INSERT INTO sessions (token_hash, user_id, device_id, created_at, expires_at, last_seen, passkey_id) VALUES (?, ?, ?, ?, ?, ?, ?)',
+    ).bind(await hashToken(token), userId, device, now, expires, now, passkeyId ?? null),
     env.DB.prepare('UPDATE users SET last_active = ? WHERE id = ?').bind(now, userId),
   ]);
   return { token, device_id: device, expires_at: expires };
@@ -99,7 +102,7 @@ export const requireAuth: MiddlewareHandler<AppEnv> = async (c, next) => {
   const tokenHash = await hashToken(match[1]);
   const now = Date.now();
   const row = await c.env.DB.prepare(
-    `SELECT s.token_hash, s.device_id, s.created_at, s.expires_at, s.last_seen, s.reauth_at, u.id, u.email
+    `SELECT s.token_hash, s.device_id, s.created_at, s.expires_at, s.last_seen, s.reauth_at, s.passkey_id, u.id, u.email
        FROM sessions s JOIN users u ON u.id = s.user_id
       WHERE s.token_hash = ?`,
   )
@@ -111,6 +114,7 @@ export const requireAuth: MiddlewareHandler<AppEnv> = async (c, next) => {
       expires_at: number;
       last_seen: number | null;
       reauth_at: number | null;
+      passkey_id: string | null;
       id: string;
       email: string;
     }>();
@@ -133,6 +137,7 @@ export const requireAuth: MiddlewareHandler<AppEnv> = async (c, next) => {
     device_id: row.device_id,
     created_at: row.created_at,
     reauth_at: row.reauth_at,
+    passkey_id: row.passkey_id,
   });
   await next();
 };

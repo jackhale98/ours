@@ -579,6 +579,11 @@ test('a passkey can sign in and unlock the keys, without a link or the phrase', 
   await page.goto('/#privacy');
   const card = page.locator('section[aria-labelledby="pk-h"]');
   await expect(card).toContainText('signs in');
+  // Nothing from the passkey's unlock secret is sent when setting it up either.
+  const setup: string[] = [];
+  page.on('request', (r) => {
+    if (r.method() !== 'GET') setup.push(r.postData() ?? '');
+  });
   await card.getByRole('button', { name: 'Let a passkey unlock my keys' }).click();
   await expect(card).toContainText('Leave it off if someone close to you knows your passcode');
   await card.getByRole('button', { name: 'Choose a passkey' }).click();
@@ -586,6 +591,8 @@ test('a passkey can sign in and unlock the keys, without a link or the phrase', 
     timeout: 20_000,
   });
   await expect(card).toContainText('signs in and unlocks your keys');
+  expect(setup.some((b) => b.includes('space_version'))).toBe(true);
+  for (const b of setup) expect(b).not.toMatch(/"prf"|"results"/);
 
   // Signing out removes everything from this device...
   await page
@@ -593,6 +600,10 @@ test('a passkey can sign in and unlock the keys, without a link or the phrase', 
     .getByRole('button', { name: 'Sign out' })
     .click();
   await page.getByRole('button', { name: 'Tap again to sign out' }).click();
+  // Signing out has finished once the landing page is back.
+  await expect(page.getByRole('heading', { name: /The shared planner/ })).toBeVisible({
+    timeout: 20_000,
+  });
   // ...and one touch of the passkey brings it all back.
   await page.goto('/#start');
   await page.reload();
