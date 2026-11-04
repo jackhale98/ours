@@ -82,6 +82,7 @@ Add repo secrets `CLOUDFLARE_API_TOKEN` (a token with Workers Scripts: Edit, D1:
 - **Worker logs:** in the Cloudflare dashboard, confirm the Worker's invocation logs are off (they would store client IP addresses). `wrangler.jsonc` sets this; `pnpm check:worker` guards it.
 - **Build hashes:** the Deploy web workflow prints a SHA-256 for every file it publishes. Compare them with what your browser loads if you want to be sure what you are running.
 - **Bot check:** if you configured Turnstile, sign in once and confirm the check appears and passes.
+- **No analytics (Cloudflare hosting):** Cloudflare may switch on Web Analytics for a new domain, which injects a tracking script into every page. The app's CSP blocks it, but turn it off: **Analytics & Logs → Web Analytics**, open your site's settings and disable it (or remove the site).
 - Read the privacy policy and terms on your site and make sure they describe your instance.
 
 ## All on Cloudflare (no terminal)
