@@ -20,13 +20,21 @@ const ICONS = {
   inbox:
     '<path d="M3.5 13.5 6 5.5h12l2.5 8v5a1.5 1.5 0 0 1-1.5 1.5H5a1.5 1.5 0 0 1-1.5-1.5z"/><path d="M3.5 13.5h5l1.5 2.5h4l1.5-2.5h5"/>',
   flag: '<path d="M6 21V4.5M6 5h11l-2.5 4 2.5 4H6"/>',
+  search: '<circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/>',
+  heart:
+    '<path d="M12 20s-7.5-4.6-7.5-10.2A4.3 4.3 0 0 1 12 7.3a4.3 4.3 0 0 1 7.5 2.5C19.5 15.4 12 20 12 20z"/>',
+  pin: '<path d="M12 21s-6.5-5.6-6.5-11a6.5 6.5 0 0 1 13 0c0 5.4-6.5 11-6.5 11z"/><circle cx="12" cy="10" r="2.2"/>',
+  repeat:
+    '<path d="M17 3l3 3-3 3"/><path d="M4 12v-1.5A4.5 4.5 0 0 1 8.5 6H20"/><path d="M7 21l-3-3 3-3"/><path d="M20 12v1.5a4.5 4.5 0 0 1-4.5 4.5H4"/>',
+  next: '<path d="M9.5 6l6 6-6 6"/>',
+  lock: '<rect x="5" y="11" width="14" height="9.5" rx="2.2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>',
 } as const;
 
-function LineIcon({ name }: { name: keyof typeof ICONS }) {
+function LineIcon({ name, size = 20 }: { name: keyof typeof ICONS; size?: number }) {
   return (
     <svg
-      width="20"
-      height="20"
+      width={size}
+      height={size}
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
@@ -39,24 +47,94 @@ function LineIcon({ name }: { name: keyof typeof ICONS }) {
   );
 }
 
-function Dot({ who, dashed }: { who: Who; dashed?: boolean }) {
-  return <i class={`ld-dot ${who}${dashed ? ' dashed' : ''}`} />;
+/**
+ * The app's plan marks: a dot each, two overlapping for a plan you share,
+ * rings while waiting for a yes, stripes when the details are private.
+ */
+function Mk({ who, mode }: { who: Who; mode?: 'dash' | 'busy' }) {
+  return (
+    <span class={`ld-mk${who === 'both' ? ' ours' : ''}${mode ? ` ${mode}` : ''}`}>
+      {who === 'both' ? (
+        <>
+          <i class="a" />
+          <i class="b" />
+        </>
+      ) : (
+        <i class={who} />
+      )}
+    </span>
+  );
 }
 
-function Row({ time, who, title, meta }: { time: string; who: Who; title: string; meta?: string }) {
+function Ev({
+  from,
+  to,
+  who,
+  title,
+  mode,
+  place,
+  repeat,
+}: {
+  from: string;
+  to: string;
+  who: Who;
+  title: string;
+  mode?: 'dash' | 'busy';
+  place?: string;
+  repeat?: string;
+}) {
   return (
     <div class="ld-row">
-      <span class="ld-time">{time}</span>
-      <Dot who={who} />
+      <span class="ld-time">
+        {from}
+        <br />
+        {to}
+      </span>
+      <Mk who={who} {...(mode ? { mode } : {})} />
       <span class="ld-title">
         {title}
-        {meta && <span class="ld-meta">{meta}</span>}
+        {(place || repeat) && (
+          <span class="ld-meta">
+            {place && (
+              <>
+                <LineIcon name="pin" size={11} /> {place}
+              </>
+            )}
+            {repeat && (
+              <>
+                <LineIcon name="repeat" size={11} /> {repeat}
+              </>
+            )}
+          </span>
+        )}
       </span>
     </div>
   );
 }
 
-/** The hero preview: a phone showing this week. */
+function Day({
+  label,
+  n,
+  today,
+  children,
+}: {
+  label: string;
+  n: number;
+  today?: boolean;
+  children: ComponentChildren;
+}) {
+  return (
+    <div class="ld-dayrow">
+      <span class="ld-dlabel">
+        {label}
+        <b class={today ? 'today' : undefined}>{n}</b>
+      </span>
+      <div class="ld-evs">{children}</div>
+    </div>
+  );
+}
+
+/** The hero preview: a phone showing this week, as in the demo. */
 function PhonePreview() {
   return (
     <div class="ld-phone" aria-hidden="true">
@@ -66,57 +144,104 @@ function PhonePreview() {
             <LogoMark size={18} />
             ours
           </span>
-          <span class="ld-badge">2</span>
+          <span class="ld-tools">
+            <LineIcon name="search" size={16} />
+            <span class="ld-inbox">
+              <LineIcon name="inbox" size={16} />
+              <span class="ld-badge">2</span>
+            </span>
+            <span class="ld-pair">
+              <span class="ld-av a">S</span>
+              <span class="ld-av b round">A</span>
+            </span>
+          </span>
         </div>
         <p class="ld-eyebrow">Nov 4 – Nov 10</p>
         <p class="ld-h">This week</p>
+        <div class="ld-seg">
+          <span class="on">Agenda</span>
+          <span>Week</span>
+          <span>Month</span>
+        </div>
         <div class="ld-cds">
           <span class="ld-cd">
-            <b>23</b> days to <em>Lisbon</em>
+            <b>23</b>
+            <span>
+              days to
+              <em>Lisbon trip</em>
+            </span>
           </span>
           <span class="ld-cd">
-            <b>41</b> days to <em>our anniversary</em>
+            <b>41</b>
+            <span>
+              days to
+              <em>Our anniversary</em>
+            </span>
           </span>
         </div>
         <div class="ld-ask">
           <p class="ld-eyebrow ours">Alex asked · needs your answer</p>
           <p class="ld-asktitle">Dinner at my parents’</p>
-          <p class="ld-meta">Monday · 6 – 9 PM</p>
+          <p class="ld-meta">Monday, Nov 9 · 6 PM – 9 PM</p>
+          <p class="ld-bubble">Mom is making the lasagna. Can we do it?</p>
           <div class="ld-btns">
-            <span class="ld-btn primary">Yes, add it</span>
+            <span class="ld-btn primary">✓ Yes, add it</span>
             <span class="ld-btn">Reply</span>
+            <span class="ld-btn ghost">Can’t make it</span>
           </div>
         </div>
-        <p class="ld-day">Today</p>
-        <Row time="4:30 PM" who="a" title="Dentist" meta="Dr. Okafor" />
-        <Row time="7 PM" who="both" title="Date night" meta="Booked for two" />
-        <p class="ld-day">Thursday</p>
-        <Row time="7 PM" who="b" title="Book club" />
-        <div class="ld-free">
-          <Dot who="both" dashed /> Both free this evening
-          <span>Plan something</span>
-        </div>
+        <Day label="Today" n={4} today>
+          <Ev from="3 PM" to="11 PM" who="b" title="Late shift" />
+          <Ev from="4:30 PM" to="5:30 PM" who="a" title="Dentist" place="Dr. Okafor" />
+        </Day>
+        <Day label="Thu" n={5}>
+          <Ev from="7 PM" to="9 PM" who="a" title="Book club" place="Lena’s place" />
+          <Ev
+            from="9 PM"
+            to="9:15 PM"
+            who="both"
+            title="Trash & recycling out"
+            repeat="Every week"
+          />
+        </Day>
+        <Day label="Fri" n={6}>
+          <Ev from="12 PM" to="1 PM" who="b" mode="busy" title="Busy" />
+          <div class="ld-free">
+            <Mk who="both" mode="dash" /> Both free this evening
+            <span>Plan something</span>
+          </div>
+        </Day>
       </div>
     </div>
   );
 }
 
+/** The demo's Home list: who's on what, due dates and repeats that take turns. */
 function ListPreview() {
-  const items: [string, string, Who | null, boolean][] = [
-    ['Take out the bins', 'Every Monday · taking turns', 'a', false],
-    ['Water the plants', 'Due today', null, false],
-    ['Book furnace service', 'Due Friday', 'b', false],
-    ['Oat milk', '', 'a', true],
+  const items: [string, string, Who | null][] = [
+    ['Take out the bins', 'Due Monday · Every Monday, taking turns', 'a'],
+    ['Water the plants', 'Due today · Every Wednesday and Saturday', null],
+    ['Book furnace service', '', 'a'],
+    ['Return library books', '', 'b'],
   ];
   return (
     <div class="ld-card ld-list" aria-hidden="true">
       <div class="ld-tabs">
-        <span class="on">Home 6</span>
         <span>Groceries 5</span>
-        <span>Gift ideas 3</span>
+        <span class="on">Home 6</span>
+        <span>
+          <LineIcon name="lock" size={11} /> Gift ideas 3
+        </span>
       </div>
-      {items.map(([text, sub, who, done]) => (
-        <div class={`ld-item${done ? ' done' : ''}`} key={text}>
+      <div class="ld-lbar">
+        <span>Chores</span>
+        <span class="ld-links">
+          <u>Select</u>
+          <u>Settings</u>
+        </span>
+      </div>
+      {items.map(([text, sub, who]) => (
+        <div class="ld-item" key={text}>
           <span class="ld-box" />
           <span class="ld-title">
             {text}
@@ -124,6 +249,9 @@ function ListPreview() {
           </span>
           <span class={`ld-av ${who ?? 'none'}`}>
             {who === 'a' ? 'S' : who === 'b' ? 'A' : '+'}
+          </span>
+          <span class="ld-chev">
+            <LineIcon name="next" size={14} />
           </span>
         </div>
       ))}
@@ -141,57 +269,88 @@ function CheckinPreview() {
   return (
     <div class="ld-card ld-checkin" aria-hidden="true">
       <p class="ld-note">
-        <span class="ld-eyebrow ours">Alex’s note</span>
-        Can we keep Sunday morning slow this week?
+        <span class="ld-eyebrow ours">Alex’s note · Sun, Nov 1</span>
+        Can we keep Sunday morning slow this week? I’ve been running on empty.
       </p>
+      <div class="ld-prog">
+        {steps.map(([s, ok]) => (
+          <i class={ok ? 'ok' : undefined} key={s} />
+        ))}
+      </div>
       {steps.map(([s, ok], i) => (
         <div class={`ld-step${ok ? ' ok' : ''}`} key={s}>
           <span class="ld-num">{ok ? '✓' : i + 1}</span>
           {s}
+          <span class="ld-btn">{ok ? 'Reopen' : 'Done'}</span>
         </div>
       ))}
     </div>
   );
 }
 
+/** The demo's November on a phone: who has what, and the evenings you're both free. */
 function MonthPreview() {
-  // A month at a glance: who has what, and the evenings you're both free.
-  const marks: Record<number, Who[]> = {
-    2: ['a'],
-    4: ['a', 'b'],
-    5: ['b', 'both'],
-    7: ['both', 'a'],
-    9: ['both'],
-    12: ['b'],
-    13: ['a'],
-    14: ['both', 'b'],
-    16: ['a'],
+  type Mark = Who | 'ask' | 'busy';
+  const marks: Record<number, Mark[]> = {
+    4: ['b', 'a'],
+    5: ['a', 'both'],
+    6: ['b', 'busy'],
+    7: ['both', 'a', 'b'],
+    8: ['both'],
+    9: ['ask'],
+    10: ['a'],
+    12: ['ask', 'both'],
+    13: ['b'],
+    14: ['b', 'both'],
+    15: ['both'],
     19: ['both'],
-    21: ['b', 'a'],
-    23: ['both'],
-    26: ['a'],
+    21: ['both'],
+    26: ['both'],
     27: ['both'],
-    28: ['b'],
+    28: ['both'],
   };
-  const free = new Set([3, 10, 11, 17, 18, 24, 25]);
+  const free = new Set([6, 10, 11, 16, 17, 18, 20, 21, 22, 23, 24, 25, 28, 29, 30]);
+  const away = new Set([13, 14, 27]);
+  // November 2026 starts on a Sunday: six weeks, Monday Oct 26 to Sunday Dec 6.
+  const cells = [
+    ...[26, 27, 28, 29, 30, 31].map((n) => ({ n, out: true })),
+    ...Array.from({ length: 30 }, (_, i) => ({ n: i + 1, out: false })),
+    ...[1, 2, 3, 4, 5, 6].map((n) => ({ n, out: true })),
+  ];
+  const december: Record<number, Mark[]> = { 3: ['both'], 5: ['both'] };
   return (
     <div class="ld-card ld-month" aria-hidden="true">
-      <p class="ld-asktitle">November</p>
+      <p class="ld-asktitle">November 2026</p>
       <div class="ld-grid">
-        {['M', 'T', 'W', 'T', 'F', 'S', 'S'].map((d, i) => (
-          <span class="ld-dow" key={i}>
+        {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((d) => (
+          <span class="ld-dow" key={d}>
             {d}
           </span>
         ))}
-        {Array.from({ length: 28 }, (_, i) => i + 1).map((n) => (
-          <span class={`ld-cell${n === 4 ? ' today' : ''}`} key={n}>
-            {n}
+        {cells.map(({ n, out }) => (
+          <span
+            class={`ld-cell${out ? ' out' : ''}${!out && n === 4 ? ' today' : ''}`}
+            key={`${out ? (n < 20 ? 'd' : 'o') : 'n'}${n}`}
+          >
+            <b>{n}</b>
+            {!out && free.has(n) && <i class="ld-free-ring" />}
+            {!out && n === 27 && (
+              <span class="ld-flag">
+                <LineIcon name="flag" size={9} />
+              </span>
+            )}
             <span class="ld-marks">
-              {(marks[n] ?? []).map((w, j) => (
-                <Dot who={w} key={j} />
-              ))}
-              {free.has(n) && <Dot who="both" dashed />}
+              {((out ? (n < 20 ? december[n] : undefined) : marks[n]) ?? []).map((m, j) =>
+                m === 'ask' ? (
+                  <Mk who="both" mode="dash" key={j} />
+                ) : m === 'busy' ? (
+                  <Mk who="b" mode="busy" key={j} />
+                ) : (
+                  <Mk who={m} key={j} />
+                ),
+              )}
             </span>
+            {!out && away.has(n) && <i class="ld-away" />}
           </span>
         ))}
       </div>
@@ -289,12 +448,20 @@ export function Landing() {
                 Lists with owners, due dates and repeating tasks that take turns, so the bins aren’t
                 always one person’s job.
               </Feature>
+              <Feature icon="heart" title="Lists for anything">
+                Start from groceries, packing or date ideas, or a blank list. Heart what you both
+                want, let Ours pick one for date night, and remember what you’ve done together.
+              </Feature>
               <Feature icon="link" title="Your other calendars, included">
-                Add your work or personal calendar by link. Your partner sees just “busy”, or the
-                details, as you choose.
+                Add your work or personal calendar by link; your partner sees just “busy”, or the
+                details, as you choose. Any plan goes into your phone’s calendar in one tap.
               </Feature>
               <Feature icon="inbox" title="Waiting on you">
-                Everything that needs your answer or a hand, in one place, one thing at a time.
+                Everything that needs your answer or a hand, in one place, and what your partner
+                changed since you last looked.
+              </Feature>
+              <Feature icon="search" title="Find anything">
+                Search plans, notes and lists. It runs on your device, so your words never leave it.
               </Feature>
               <Feature icon="flag" title="Countdowns and reminders">
                 Count down to trips and anniversaries, and get reminded when you want, not just when
@@ -326,8 +493,10 @@ export function Landing() {
               Lists you both keep, and some you don’t
             </h2>
             <p>
-              Groceries, chores, packing, date ideas. Give each thing an owner, set it to repeat and
-              let it take turns. Gift ideas stay private, so surprises stay surprises.
+              Groceries, chores, packing, date ideas, or anything else. Give each thing an owner,
+              set it to repeat and let it take turns, or pick a few and give them the same date at
+              once. Heart the ideas you both want and keep the ones you’ve done. Gift ideas stay
+              private, so surprises stay surprises.
             </p>
           </div>
           <ListPreview />
@@ -356,7 +525,8 @@ export function Landing() {
             <ol class="lp-steps">
               <li>
                 <p>
-                  <b>Make your space.</b> Sign in with your email. No password to remember.
+                  <b>Make your space.</b> Sign in with your email or a passkey. No password to
+                  remember.
                 </p>
               </li>
               <li>
@@ -390,18 +560,29 @@ export function Landing() {
             <section class="card">
               <h3>What it can see</h3>
               <ul>
-                <li>Your email address</li>
-                <li>How many records you have, roughly how large, and when they change</li>
+                <li>Your email address, and which passkey app you use, if you add a passkey</li>
+                <li>
+                  How many records you have, roughly how large, when they change and which of you
+                  changed them
+                </li>
                 <li>When reminders fire and when notifications are sent</li>
                 <li>Busy times, only if you turn on the calendar feed</li>
+                <li>
+                  Outside calendars you subscribe to by link, while it fetches them for you (never
+                  stored)
+                </li>
               </ul>
             </section>
             <section class="card">
-              <h3>If you lose everything</h3>
+              <h3>If you lose a phone, or everything</h3>
               <p>
-                Lose every device and your 12-word recovery phrase, and your data is gone for good.
-                Not even we can get it back. That’s the price of real privacy, and we say it up
-                front.
+                Lose a phone and you can sign it out and change your keys from another device. A new
+                phone gets your keys from one of your devices, your 12-word recovery phrase, or a
+                passkey you’ve set up to unlock them.
+              </p>
+              <p>
+                Lose all of those, and your data is gone for good. Not even we can get it back.
+                That’s the price of real privacy, and we say it up front.
               </p>
             </section>
           </div>
