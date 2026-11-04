@@ -2980,3 +2980,31 @@ fieldset.reminders > legend {
     opacity: 0;
   }
 }
+
+/* A link to share (device link, partner invite, calendar feed): the address
+   wraps inside the screen instead of pushing the page wider than the phone. */
+.url {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  max-width: 100%;
+  padding: 8px 8px 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--sunk);
+}
+.url code {
+  flex: 1 1 12rem;
+  min-width: 0;
+  font-size: 0.8125rem;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+  word-break: break-all;
+  user-select: all;
+  -webkit-user-select: all;
+}
+.url .btn {
+  flex: none;
+}

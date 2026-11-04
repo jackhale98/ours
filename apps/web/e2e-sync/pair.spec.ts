@@ -422,6 +422,14 @@ test('a partner invite can be made again later, from Privacy or Waiting on you',
   await card.getByRole('button', { name: 'Make a new link' }).click();
   await expect(card.locator('.url code')).not.toHaveText(second);
 
+  // On a phone, the links fit the screen (they used to push the page wider).
+  await jo.setViewportSize({ width: 375, height: 740 });
+  const fits = () => jo.evaluate(() => document.documentElement.scrollWidth <= innerWidth);
+  expect(await fits()).toBe(true);
+  await jo.getByRole('button', { name: 'Link a new device' }).click();
+  await expect(jo.locator('.url code').nth(1)).toContainText('/join/#');
+  expect(await fits()).toBe(true);
+
   // And it's first in Waiting on you.
   await jo.goto('/#inbox');
   await expect(jo.locator('.wo-card')).toContainText('Invite your partner');
