@@ -3353,16 +3353,6 @@ fieldset.reminders > legend {
 }
 
 /* ---------- lists: selecting several items ---------- */
-.lbar {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-height: 32px;
-}
-.lbar > .lfilters {
-  flex: 1;
-  min-width: 0;
-}
 .lselect {
   margin-left: auto;
   white-space: nowrap;

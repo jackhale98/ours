@@ -575,21 +575,7 @@ function ListBody({ list }: { list: ListEntry }) {
         </p>
       )}
       {f.has('pick') && !selecting(list.id) && <Pick list={list} pool={open} />}
-      <div class="lbar">
-        <Filters list={list} />
-        {all.length > 1 && (
-          <button
-            type="button"
-            class="linkbtn lselect"
-            aria-pressed={selecting(list.id)}
-            onClick={() => {
-              selection.value = selecting(list.id) ? null : { list: list.id, ids: new Set() };
-            }}
-          >
-            {selecting(list.id) ? 'Cancel' : 'Select'}
-          </button>
-        )}
-      </div>
+      <Filters list={list} />
       {!selecting(list.id) && <AddItem list={list} placeholder={placeholderFor(list)} />}
       <Items items={open} list={list} />
       {!open.length && (
@@ -1287,6 +1273,21 @@ export function ListsView() {
               <>
                 <div class="listbar">
                   <span class="small muted">{startLabel(cur)}</span>
+                  {itemsOf(cur.id).length > 1 && (
+                    <button
+                      type="button"
+                      class="linkbtn lselect"
+                      aria-pressed={selecting(cur.id)}
+                      onClick={() => {
+                        selection.value = selecting(cur.id)
+                          ? null
+                          : { list: cur.id, ids: new Set() };
+                      }}
+                    >
+                      <Icon name="check" size={15} />
+                      {selecting(cur.id) ? 'Cancel' : 'Select'}
+                    </button>
+                  )}
                   <button
                     type="button"
                     class="linkbtn"
