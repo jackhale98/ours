@@ -30,6 +30,9 @@ describe('passkey unlock checks (review 0006)', () => {
     });
     expect(unlockStatus(pk, undefined, now, {})).toBe('off');
     expect(unlockStatus({ ...pk, can_unlock: false }, undefined, now, {})).toBe('too-old');
+    // Its app can't give an unlock secret (said when added, or found out here).
+    expect(unlockStatus({ ...pk, prf: false }, undefined, now, {})).toBe('unsupported');
+    expect(unlockStatus({ ...pk, prf: null }, undefined, now, {})).toBe('off');
     expect(unlockStatus(pk, copy(2), now, {})).toBe('current');
     // Behind, and this device made it: it can update it.
     expect(unlockStatus(pk, copy(1), now, { p1: 100 })).toBe('behind');

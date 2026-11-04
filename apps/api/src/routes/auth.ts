@@ -257,7 +257,13 @@ auth.post('/passkey/register/options', requireAuth, async (c) => {
 auth.post('/passkey/register/verify', requireAuth, async (c) => {
   const input = await body(
     c,
-    v.object({ challenge_id: v.string(), response: v.looseObject({ id: v.string() }) }),
+    v.object({
+      challenge_id: v.string(),
+      response: v.looseObject({ id: v.string() }),
+      // Whether the passkey's app said it can give an unlock secret (PRF):
+      // only shown to the person, so they know which passkeys can unlock.
+      prf_enabled: v.optional(v.boolean()),
+    }),
   );
   const { rpID, origins } = rp(c.env, c.req.header('Origin'));
   const expectedChallenge = await takeChallenge(
@@ -282,8 +288,8 @@ auth.post('/passkey/register/verify', requireAuth, async (c) => {
   if (!verification.verified) throw new HttpError(400, 'passkey_invalid');
   const cred = verification.registrationInfo.credential;
   const inserted = await c.env.DB.prepare(
-    `INSERT INTO passkeys (id, user_id, public_key, counter, transports, created_at, aaguid)
-     VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO NOTHING`,
+    `INSERT INTO passkeys (id, user_id, public_key, counter, transports, created_at, aaguid, prf)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO NOTHING`,
   )
     .bind(
       cred.id,
@@ -293,6 +299,7 @@ auth.post('/passkey/register/verify', requireAuth, async (c) => {
       cred.transports ? JSON.stringify(cred.transports) : null,
       Date.now(),
       verification.registrationInfo.aaguid ?? null,
+      input.prf_enabled === undefined ? null : input.prf_enabled ? 1 : 0,
     )
     .run();
   if (!inserted.meta.changes) throw new HttpError(409, 'passkey_exists');
@@ -436,15 +443,26 @@ auth.post('/passkey/reauth/verify', requireAuth, async (c) => {
 auth.get('/passkeys', requireAuth, async (c) => {
   // can_unlock: added after this person's latest change of keys (review 0006, M1).
   const rows = await c.env.DB.prepare(
-    `SELECT p.id, p.created_at, p.aaguid,
+    `SELECT p.id, p.created_at, p.aaguid, p.prf,
             p.created_at > COALESCE(u.keys_changed_at, 0) AS can_unlock
        FROM passkeys p JOIN users u ON u.id = p.user_id
       WHERE p.user_id = ? ORDER BY p.created_at`,
   )
     .bind(c.var.user.id)
-    .all<{ id: string; created_at: number; aaguid: string | null; can_unlock: number }>();
+    .all<{
+      id: string;
+      created_at: number;
+      aaguid: string | null;
+      prf: number | null;
+      can_unlock: number;
+    }>();
+  // prf: whether its app said it can unlock keys when it was added (null: didn't say).
   return c.json({
-    passkeys: rows.results.map((r) => ({ ...r, can_unlock: !!r.can_unlock })),
+    passkeys: rows.results.map((r) => ({
+      ...r,
+      prf: r.prf === null ? null : !!r.prf,
+      can_unlock: !!r.can_unlock,
+    })),
   });
 });
 

@@ -122,6 +122,21 @@ describe('passkey unlock (ADR 0015)', () => {
     expect((await put(sam.token, pk, copy(1, 2))).status).toBe(200);
   });
 
+  it('lists whether each passkey’s app said it can unlock keys', async () => {
+    const { sam } = await couple();
+    const yes = `pk-prf1-${Date.now()}-aaaaaaaaaa`;
+    const no = `pk-prf0-${Date.now()}-bbbbbbbbbb`;
+    const unknown = `pk-prfn-${Date.now()}-cccccccccc`;
+    for (const id of [yes, no, unknown]) await addPasskey(sam.userId, id);
+    await env.DB.prepare('UPDATE passkeys SET prf = 1 WHERE id = ?').bind(yes).run();
+    await env.DB.prepare('UPDATE passkeys SET prf = 0 WHERE id = ?').bind(no).run();
+    const listed = await call('/auth/passkeys', { token: sam.token });
+    const prf = Object.fromEntries(
+      listed.json.passkeys.map((p: { id: string; prf: boolean | null }) => [p.id, p.prf]),
+    );
+    expect(prf).toEqual({ [yes]: true, [no]: false, [unknown]: null });
+  });
+
   it('needs a confirmation from the last ten minutes (L2)', async () => {
     const { sam } = await couple();
     const pk = `pk-late-${Date.now()}-aaaaaaaaaa`;

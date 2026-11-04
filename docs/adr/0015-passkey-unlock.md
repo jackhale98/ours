@@ -29,3 +29,7 @@ Opt-in, per passkey: a passkey can unlock the keys.
 - **Setting a copy needs that passkey (L2):** the session must have signed in or confirmed with that very passkey in the last ten minutes.
 - **Out-of-date copies (L4):** each copy lists the key versions it holds, so any device can tell.
 - **Accepted:** someone with a session token can still turn a copy off (it's emailed); the "a device asked to unlock" email goes out when a copy is fetched, because the server can't know whether it opened (L3).
+
+## Passkeys whose app can't unlock
+
+Some passkey apps sign in but don't support the PRF extension (older iOS, some password managers). When a passkey is added, the app's "PRF enabled" answer (a yes or no, never a secret) is stored as `passkeys.prf`. A passkey that gives no unlock secret when setting up unlocking is also remembered on that device. Either way it's listed as "signs in only: its app can't unlock keys", isn't offered for unlocking, and the person is told which passkey apps can.

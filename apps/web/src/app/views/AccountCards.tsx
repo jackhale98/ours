@@ -161,7 +161,8 @@ export function PasskeysCard() {
   const status = (p: (typeof list)[number]) =>
     unlockStatus(p, copies.get(p.id), now, unlocksMadeHere.value);
   const on = !!info.passkey_unlock;
-  const anyEligible = list.some((p) => p.can_unlock && !copies.has(p.id));
+  const anyEligible = list.some((p) => p.can_unlock && p.prf !== false && !copies.has(p.id));
+  const anyUnsupported = on && list.some((p) => status(p) === 'unsupported');
   const anyTooOld = on && list.some((p) => !p.can_unlock);
   const partnerName = nameOf(partner.value);
   // After a change of keys, a new passkey is only safe once the lost device
@@ -187,6 +188,7 @@ export function PasskeysCard() {
     }
   };
   const WHAT: Record<UnlockStatus, string> = {
+    unsupported: 'signs in only: its app can’t unlock keys',
     'too-old': 'signs in only: added before you changed your keys',
     off: 'signs in',
     current: 'signs in and unlocks your keys',
@@ -230,7 +232,7 @@ export function PasskeysCard() {
                       Update
                     </button>
                   )}
-                  {on && st !== 'off' && st !== 'too-old' && (
+                  {on && st !== 'off' && st !== 'too-old' && st !== 'unsupported' && (
                     <button
                       type="button"
                       class="linkbtn"
@@ -269,6 +271,13 @@ export function PasskeysCard() {
             A passkey’s unlocking was set up on another device and holds older keys. If you don’t
             recognise it, remove that passkey.
           </span>
+        </p>
+      )}
+      {anyUnsupported && (
+        <p class="d small">
+          Some passkey apps can sign you in but can’t unlock keys. Passkeys saved in iCloud Keychain
+          (iOS 18 or later) or Google Password Manager can. To use one, choose it when you add a
+          passkey.
         </p>
       )}
       {anyTooOld && (

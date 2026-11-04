@@ -38,6 +38,8 @@ export function providerName(aaguid: string | null | undefined): string | null {
 }
 
 export type UnlockStatus =
+  /** Signs in only: the app that keeps it can't give an unlock secret. */
+  | 'unsupported'
   /** Can't unlock: added before the latest change of keys (it may be on the lost phone). */
   | 'too-old'
   /** Signs in only. */
@@ -54,12 +56,15 @@ export type UnlockStatus =
  * device remembers setting up (review 0006, M1 and L4).
  */
 export function unlockStatus(
-  passkey: { id: string; can_unlock: boolean },
+  passkey: { id: string; can_unlock: boolean; prf?: boolean | null },
   copy: { created_at: number; space_version: number; personal_version: number } | undefined,
   current: { space: number; personal: number },
   madeHere: Record<string, number>,
 ): UnlockStatus {
-  if (!copy) return passkey.can_unlock ? 'off' : 'too-old';
+  if (!copy) {
+    if (passkey.prf === false) return 'unsupported';
+    return passkey.can_unlock ? 'off' : 'too-old';
+  }
   if (copy.space_version === current.space && copy.personal_version === current.personal)
     return 'current';
   return madeHere[passkey.id] === copy.created_at ? 'behind' : 'behind-elsewhere';

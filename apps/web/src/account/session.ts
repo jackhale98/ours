@@ -358,8 +358,17 @@ export async function addPasskey(): Promise<void> {
       >,
     },
   });
+  // Whether its app can give an unlock secret, so the list can say which
+  // passkeys can unlock. Only that yes or no is sent: never any secret.
+  const results = response.clientExtensionResults as { prf?: { enabled?: unknown } };
+  const enabled = results.prf?.enabled;
+  takePrf(results);
   await api('/auth/passkey/register/verify', {
-    body: { challenge_id: opts.challenge_id, response },
+    body: {
+      challenge_id: opts.challenge_id,
+      response,
+      ...(typeof enabled === 'boolean' ? { prf_enabled: enabled } : {}),
+    },
   });
 }
 
@@ -1154,6 +1163,11 @@ export interface PasskeyRow {
   aaguid: string | null;
   /** Added after the latest change of keys: only these can unlock (M1). */
   can_unlock: boolean;
+  /**
+   * Whether its app can give an unlock secret: said when it was added, or
+   * found out on this device when it didn't give one. null: not known.
+   */
+  prf: boolean | null;
 }
 export interface UnlockRow {
   passkey_id: string;
@@ -1201,7 +1215,19 @@ function takePrf(results: object | undefined): Uint8Array | null {
 }
 
 const NO_PRF =
-  'That passkey can’t unlock keys. Try another one, or use your recovery phrase or a device link.';
+  'That passkey can’t unlock keys: the app that keeps it doesn’t support it. Try another one, or use your recovery phrase or a device link.';
+const NO_PRF_SETUP =
+  'That passkey can sign you in, but the app that keeps it can’t unlock keys. Passkeys saved in iCloud Keychain (iOS 18 or later) or Google Password Manager can: add one saved there, then try again.';
+
+/** Passkeys found on this device to give no unlock secret, so they aren't offered again. */
+async function markNoUnlock(id: string): Promise<void> {
+  const ids = new Set((await kvGet<string[]>('no-unlock')) ?? []);
+  ids.add(id);
+  await kvSet('no-unlock', [...ids]);
+  passkeyList.value = (passkeyList.value ?? []).map((p) =>
+    p.id === id ? { ...p, prf: false } : p,
+  );
+}
 
 /**
  * Welcome back: asks a passkey for its unlock secret. A secret given without
@@ -1282,13 +1308,17 @@ export async function enablePasskeyUnlock(only?: string): Promise<void> {
     challenge_id: string;
     options: Parameters<typeof startAuthentication>[0]['optionsJSON'];
   }>('/auth/passkey/reauth/options', { body: {} });
-  const eligible = new Set((passkeyList.value ?? []).filter((p) => p.can_unlock).map((p) => p.id));
+  const eligible = new Set(
+    (passkeyList.value ?? []).filter((p) => p.can_unlock && p.prf !== false).map((p) => p.id),
+  );
   const allow = (opts.options.allowCredentials ?? []).filter(
     (c) => eligible.has(c.id) && (!only || c.id === only),
   );
   if (!allow.length)
     throw new Error(
-      'None of your passkeys can unlock: they were added before you last changed your keys. Add a new one first.',
+      (passkeyList.value ?? []).some((p) => p.can_unlock)
+        ? NO_PRF_SETUP
+        : 'None of your passkeys can unlock: they were added before you last changed your keys. Add a new one first.',
     );
   const response = await startAuthentication({
     optionsJSON: {
@@ -1300,7 +1330,10 @@ export async function enablePasskeyUnlock(only?: string): Promise<void> {
   });
   const prf = takePrf(response.clientExtensionResults);
   try {
-    if (!prf) throw new Error(NO_PRF);
+    if (!prf) {
+      await markNoUnlock(response.id);
+      throw new Error(NO_PRF_SETUP);
+    }
     if (!userVerified(fromBase64Url(response.response.authenticatorData)))
       throw new Error('Confirm with your face, fingerprint or device passcode.');
     // The server checks the confirmation (with user verification), and
@@ -1345,7 +1378,10 @@ export async function removePasskey(passkeyId: string): Promise<void> {
 /** Passkeys, and (when unlocking is available) the copies and their key versions. */
 export async function loadPasskeys(): Promise<void> {
   const list = await api<{ passkeys: PasskeyRow[] }>('/auth/passkeys');
-  passkeyList.value = list.passkeys;
+  const noUnlock = new Set((await kvGet<string[]>('no-unlock')) ?? []);
+  passkeyList.value = list.passkeys.map((p) =>
+    noUnlock.has(p.id) ? { ...p, prf: false } : { ...p, prf: p.prf ?? null },
+  );
   unlocksMadeHere.value = (await kvGet<Record<string, number>>('unlocks-made')) ?? {};
   passkeyUnlocks.value = me.value?.passkey_unlock
     ? (await api<{ unlocks: UnlockRow[] }>('/keys/unlocks')).unlocks
