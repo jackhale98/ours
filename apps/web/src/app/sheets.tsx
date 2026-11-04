@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 /** Quick add and event details sheets. */
+
 import { parseQuickAdd } from '@ours/core/parse';
 import { addDays, addWallMinutes } from '@ours/core/time';
 import { signal } from '@preact/signals';
 import { useState } from 'preact/hooks';
+import { AddToCalendar } from './addtocal';
 import { FreeTimeSheet } from './freetime';
 import {
   addComment,
@@ -535,6 +537,7 @@ function EventSheet({ id, occ }: { id: string; occ: string | null }) {
             onChange={(next) => update<'event'>(id, { remind: withReminders(e, me, next) })}
           />
         )}
+      {e.status !== 'declined' && <AddToCalendar id={id} e={e} day={day} />}
       <div class="thread">
         <p class="eyebrow">Notes</p>
         {comments.length ? (

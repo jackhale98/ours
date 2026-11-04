@@ -27,11 +27,30 @@ declare const self: ServiceWorkerGlobalScope;
 precacheAndRoute(self.__WB_MANIFEST);
 cleanupOutdatedCaches();
 
+// "Add to my calendar" on iPhone and iPad: the page leaves one calendar file
+// in a cache under a random name and opens it here; it is served once and
+// deleted, and never touches the network (app/addtocal.tsx).
+const ADD_EVENT_CACHE = 'ours-add-event';
+registerRoute(
+  ({ url }) => url.origin === self.location.origin && /\/add-event\/\d+\.ics$/.test(url.pathname),
+  async ({ request }) => {
+    const cache = await caches.open(ADD_EVENT_CACHE);
+    const found = await cache.match(request.url);
+    await cache.delete(request.url);
+    return (
+      found ?? new Response('This link has expired. Try again from the plan.', { status: 404 })
+    );
+  },
+);
+self.addEventListener('activate', (event) => {
+  event.waitUntil(caches.delete(ADD_EVENT_CACHE));
+});
+
 // Navigations to the app (any hash route) are served from the cached shell.
 // The invite page and legal pages are their own precached HTML files.
 registerRoute(
   new NavigationRoute(createHandlerBoundToURL('index.html'), {
-    denylist: [/\/join\//, /\/legal\//],
+    denylist: [/\/join\//, /\/legal\//, /\/add-event\//],
   }),
 );
 

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 /** Everything the demo shows can be made and changed in the app: edit, repeat, trips, countdowns. */
+import AxeBuilder from '@axe-core/playwright';
 import { expect, type Page, test } from '@playwright/test';
 
 test.beforeEach(async ({ page }) => {
@@ -192,4 +193,61 @@ test('one day of a repeating plan can be skipped, moved and put back', async ({ 
   await sheet.getByRole('button', { name: 'Put it back' }).click();
   await expect(trash.first()).not.toContainText('moved this time');
   await expect(trash.first()).toContainText('9 PM');
+});
+
+test('add a plan to my calendar: time and title unless I ask for more', async ({ page }) => {
+  await page
+    .getByRole('button', { name: /Dentist/ })
+    .first()
+    .click();
+  const sheet = page.getByRole('dialog', { name: 'Dentist' });
+  await sheet.getByRole('button', { name: 'Add to my calendar' }).click();
+  const panel = sheet.getByRole('group', { name: 'Add to my calendar' });
+  await expect(panel.getByRole('radio', { name: /Time and title/ })).toBeChecked();
+  await expect(panel).toContainText('isn’t protected by Ours’ encryption');
+  const axe = await new AxeBuilder({ page })
+    .include('.addcal')
+    .withTags(['wcag2a', 'wcag2aa', 'wcag21aa', 'wcag22aa'])
+    .analyze();
+  expect(axe.violations).toEqual([]);
+  // Phones open the calendar app directly; the file is always there too.
+  const file = panel.getByRole('button', { name: 'Download a file' });
+  const button = (await file.count()) ? file : panel.getByRole('button', { name: 'Add' });
+  const [download] = await Promise.all([page.waitForEvent('download'), button.click()]);
+  expect(download.suggestedFilename()).toBe('Dentist.ics');
+  const text = await (await download.createReadStream()).toArray();
+  const ics = Buffer.concat(text).toString('utf8');
+  expect(ics).toContain('SUMMARY:Dentist');
+  expect(ics).not.toContain('LOCATION');
+
+  // The choice is remembered; full details add the place.
+  await sheet.getByRole('button', { name: 'Add to my calendar' }).click();
+  await panel.getByRole('radio', { name: /Full details/ }).check();
+  const again = (await file.count()) ? file : panel.getByRole('button', { name: 'Add' });
+  const [second] = await Promise.all([page.waitForEvent('download'), again.click()]);
+  const full = Buffer.concat(await (await second.createReadStream()).toArray()).toString('utf8');
+  expect(full).toContain('LOCATION');
+  await sheet.getByRole('button', { name: 'Add to my calendar' }).click();
+  await expect(panel.getByRole('radio', { name: /Full details/ })).toBeChecked();
+});
+
+test('the service worker hands out a calendar file once, without the network', async ({
+  page,
+}, info) => {
+  test.skip(info.project.name.startsWith('webkit'), 'checked in Chromium');
+  await page.evaluate(() => navigator.serviceWorker.ready);
+  await page.reload();
+  await page.waitForFunction(() => !!navigator.serviceWorker.controller);
+  const got = await page.evaluate(async () => {
+    const url = new URL('add-event/123.ics', location.href.split('#')[0]).href;
+    const cache = await caches.open('ours-add-event');
+    await cache.put(
+      url,
+      new Response('BEGIN:VCALENDAR', { headers: { 'Content-Type': 'text/calendar' } }),
+    );
+    const first = await fetch(url);
+    const second = await fetch(url);
+    return [first.status, first.headers.get('Content-Type'), await first.text(), second.status];
+  });
+  expect(got).toEqual([200, 'text/calendar', 'BEGIN:VCALENDAR', 404]);
 });

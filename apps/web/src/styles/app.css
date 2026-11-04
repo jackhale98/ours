@@ -3104,3 +3104,47 @@ fieldset.reminders > legend {
   border-radius: 1px;
   transform: rotate(45deg) scale(0.84);
 }
+
+/* ---------- add to my calendar (plan sheet) ---------- */
+
+.addcal-btn {
+  align-self: flex-start;
+  margin: 4px 0 12px;
+}
+.addcal {
+  display: grid;
+  gap: 8px;
+  margin: 4px 0 16px;
+  padding: 12px 14px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  min-width: 0;
+}
+.addcal legend {
+  padding: 0 4px;
+}
+.addcal .chips {
+  margin: 0;
+}
+.addcal .chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: var(--tap);
+}
+.addcal-opt {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  min-height: var(--tap);
+  padding-top: 10px;
+  cursor: pointer;
+}
+.addcal-opt input,
+.addcal .chip input {
+  accent-color: var(--ours);
+  margin-top: 3px;
+}
+.addcal p {
+  margin: 0;
+}
