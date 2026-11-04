@@ -47,15 +47,48 @@ interface WhenFields {
   end: string;
   all_day: boolean;
   tz: string | null;
+  rrule?: string | null;
+  except?: { at: string; to: { start: string; end: string } | null }[] | undefined;
 }
 
 /** Timed events use LocalDateTime + tz; all-day events use LocalDate (end exclusive) and no tz. */
 export function isValidWhen(e: WhenFields): boolean {
   const dateOnly = e.start.length === 10 && e.end.length === 10;
   const timed = e.start.length === 16 && e.end.length === 16;
-  if (e.all_day) return dateOnly && e.tz === null && e.end > e.start;
-  return timed && e.tz !== null && e.end >= e.start;
+  const ok = e.all_day
+    ? dateOnly && e.tz === null && e.end > e.start
+    : timed && e.tz !== null && e.end >= e.start;
+  if (!ok) return false;
+  // Exceptions only on repeating plans, in the same form as the plan's times.
+  const len = e.all_day ? 10 : 16;
+  return (e.except ?? []).every(
+    (x) =>
+      !!e.rrule &&
+      x.at.length === len &&
+      (x.to === null ||
+        (x.to.start.length === len &&
+          x.to.end.length === len &&
+          (e.all_day ? x.to.end > x.to.start : x.to.end >= x.to.start))),
+  );
 }
+
+/** Most exceptions a repeating plan keeps (skipped or moved days). */
+export const MAX_EXCEPTIONS = 200;
+
+/**
+ * One day of a repeating plan, changed on its own: skipped (`to: null`) or
+ * moved to other times. `at` is that day's original start, in the plan's form
+ * (a date for all-day plans, a wall-clock date and time otherwise).
+ */
+const Exception = v.strictObject({
+  at: v.union([LocalDate, LocalDateTime]),
+  to: v.nullable(
+    v.strictObject({
+      start: v.union([LocalDate, LocalDateTime]),
+      end: v.union([LocalDate, LocalDateTime]),
+    }),
+  ),
+});
 
 const whenEntries = {
   start: v.union([LocalDate, LocalDateTime]),
@@ -63,6 +96,7 @@ const whenEntries = {
   all_day: v.boolean(),
   tz: v.nullable(TimeZone),
   rrule: v.nullable(Text(500)),
+  except: v.optional(v.pipe(v.array(Exception), v.maxLength(MAX_EXCEPTIONS))),
   /** Out of town / unavailable all day (e.g. a work trip): blocks "both free" evenings. */
   away: v.boolean(),
 };

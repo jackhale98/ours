@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
+import * as v from 'valibot';
 import { afterEach, describe, expect, it } from 'vitest';
 import { utf8 } from '../crypto/bytes';
 import {
@@ -8,6 +9,8 @@ import {
   type EventData,
   encodeRecord,
   isTimeZone,
+  KIND_SCHEMAS,
+  MAX_EXCEPTIONS,
   MIGRATIONS,
   RecordError,
 } from './records';
@@ -232,5 +235,38 @@ describe('migrations', () => {
       data: { name: 'x' },
     });
     expect(decodeRecord(utf8(old))).toEqual({ ok: false, reason: 'invalid' });
+  });
+});
+
+describe('exceptions on repeating plans', () => {
+  const weekly = { ...event, rrule: 'FREQ=WEEKLY' };
+  const ok = (data: unknown) => v.safeParse(KIND_SCHEMAS.event, data).success;
+  const moved = { start: '2026-11-11T18:30', end: '2026-11-11T19:30' };
+
+  it('accepts skipped and moved days in the plan’s own form', () => {
+    expect(ok({ ...weekly, except: [{ at: weekly.start, to: null }] })).toBe(true);
+    expect(ok({ ...weekly, except: [{ at: weekly.start, to: moved }] })).toBe(true);
+  });
+
+  it('refuses them on a plan that doesn’t repeat, or in the wrong form', () => {
+    expect(ok({ ...event, rrule: null, except: [{ at: event.start, to: null }] })).toBe(false);
+    expect(ok({ ...weekly, except: [{ at: weekly.start.slice(0, 10), to: null }] })).toBe(false);
+    expect(
+      ok({
+        ...weekly,
+        except: [{ at: weekly.start, to: { start: '2026-11-11', end: '2026-11-12' } }],
+      }),
+    ).toBe(false);
+    expect(
+      ok({
+        ...weekly,
+        except: [{ at: weekly.start, to: { start: moved.end, end: moved.start } }],
+      }),
+    ).toBe(false);
+  });
+
+  it('keeps at most 200', () => {
+    const many = Array.from({ length: MAX_EXCEPTIONS + 1 }, () => ({ at: weekly.start, to: null }));
+    expect(ok({ ...weekly, except: many })).toBe(false);
   });
 });

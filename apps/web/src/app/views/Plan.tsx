@@ -37,7 +37,7 @@ export function EventRow({ row, date }: { row: Row; date: string }) {
     <button
       type="button"
       class={`ev${masked ? ' is-masked' : ''}${row.free ? ' is-free' : ''}${row.status === 'declined' ? ' is-declined' : ''}`}
-      onClick={() => (row.origin === 'import' ? openImport(row, date) : openEvent(row.id))}
+      onClick={() => (row.origin === 'import' ? openImport(row, date) : openEvent(row.id, row.occ))}
     >
       <span class="ev-time">
         {row.allDay ? (
@@ -94,7 +94,7 @@ export function EventRow({ row, date }: { row: Row; date: string }) {
             {row.repeat && (
               <span>
                 <Icon name="repeat" size={13} />
-                {row.repeat}
+                {row.moved ? `${row.repeat}, moved this time` : row.repeat}
               </span>
             )}
             {row.comments > 0 && (

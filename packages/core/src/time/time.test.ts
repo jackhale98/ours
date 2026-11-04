@@ -284,3 +284,82 @@ describe('next due date for repeating tasks', () => {
     expect(nextDueDate('nonsense', TUE, TUE)).toBeNull();
   });
 });
+
+describe('one day of a series, changed on its own', () => {
+  const weekly: Schedulable = {
+    start: '2026-11-02T19:00', // a Monday
+    end: '2026-11-02T20:00',
+    all_day: false,
+    tz: 'Europe/London',
+    rrule: 'FREQ=WEEKLY',
+  };
+  const from = Date.parse('2026-11-01T00:00:00Z');
+  const to = Date.parse('2026-11-30T00:00:00Z');
+  const starts = (e: Schedulable) => expand(e, from, to, 'Europe/London').map((o) => o.localStart);
+
+  it('a skipped day drops out and the rest stay', () => {
+    expect(starts({ ...weekly, except: [{ at: '2026-11-09T19:00', to: null }] })).toEqual([
+      '2026-11-02T19:00',
+      '2026-11-16T19:00',
+      '2026-11-23T19:00',
+    ]);
+  });
+
+  it('a moved day shows at its new time and keeps its identity', () => {
+    const plain = expand(weekly, from, to, 'Europe/London');
+    const moved = expand(
+      {
+        ...weekly,
+        except: [
+          { at: '2026-11-09T19:00', to: { start: '2026-11-11T18:30', end: '2026-11-11T19:30' } },
+        ],
+      },
+      from,
+      to,
+      'Europe/London',
+    );
+    expect(moved.map((o) => o.localStart)).toEqual([
+      '2026-11-02T19:00',
+      '2026-11-11T18:30',
+      '2026-11-16T19:00',
+      '2026-11-23T19:00',
+    ]);
+    const m = moved[1];
+    expect(m?.movedFrom).toBe('2026-11-09T19:00');
+    expect(m?.index).toBe(plain[1]?.index);
+    expect(m?.end).toBe(Date.parse('2026-11-11T19:30:00Z'));
+  });
+
+  it('a day moved out of the window leaves it, one moved in joins it', () => {
+    const out = starts({
+      ...weekly,
+      except: [
+        { at: '2026-11-23T19:00', to: { start: '2026-12-01T19:00', end: '2026-12-01T20:00' } },
+      ],
+    });
+    expect(out).not.toContain('2026-11-23T19:00');
+    expect(out).toHaveLength(3);
+    const into = starts({
+      ...weekly,
+      except: [
+        { at: '2026-12-07T19:00', to: { start: '2026-11-28T10:00', end: '2026-11-28T11:00' } },
+      ],
+    });
+    expect(into).toContain('2026-11-28T10:00');
+  });
+
+  it('works for all-day plans', () => {
+    const allDay: Schedulable = {
+      start: '2026-11-07',
+      end: '2026-11-08',
+      all_day: true,
+      tz: null,
+      rrule: 'FREQ=WEEKLY',
+      except: [
+        { at: '2026-11-14', to: null },
+        { at: '2026-11-21', to: { start: '2026-11-22', end: '2026-11-23' } },
+      ],
+    };
+    expect(starts(allDay)).toEqual(['2026-11-07', '2026-11-22', '2026-11-28']);
+  });
+});

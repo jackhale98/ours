@@ -2737,3 +2737,37 @@ fieldset.reminders > legend {
 .mk-demo .mk {
   margin-top: 0;
 }
+
+/* One day of a repeating plan, on its own. */
+.thisday {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--sunk);
+}
+.thisday .sublbl {
+  margin: 0;
+}
+.thisday .small .ic {
+  display: inline-block;
+  vertical-align: -2px;
+}
+.row3 {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) minmax(0, 1fr);
+  gap: 8px;
+}
+.row3 > .field {
+  min-width: 0;
+}
+@media (max-width: 429.98px) {
+  .row3 {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+  .row3 > .field:first-child {
+    grid-column: 1 / -1;
+  }
+}

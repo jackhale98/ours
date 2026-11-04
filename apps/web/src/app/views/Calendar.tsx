@@ -680,7 +680,7 @@ function WeekGrid({ days }: { days: Day[] }) {
                     key={r.key}
                     class={`wg-chip${r.away ? ' away' : ''}`}
                     aria-label={blockLabel(r)}
-                    onClick={() => openEvent(r.id)}
+                    onClick={() => openEvent(r.id, r.occ)}
                   >
                     <Marker owner={r.owner} {...(mode ? { mode } : {})} />
                     <span>{r.title}</span>
@@ -733,7 +733,7 @@ function WeekGrid({ days }: { days: Day[] }) {
                       width: `${100 / b.lanes}%`,
                     }}
                     aria-label={blockLabel(b.row)}
-                    onClick={() => openEvent(b.row.id)}
+                    onClick={() => openEvent(b.row.id, b.row.occ)}
                   >
                     <Marker owner={b.row.owner} {...(mode ? { mode } : {})} />
                     <span class="wg-t">{b.row.title}</span>

@@ -10,7 +10,13 @@
  * private event appears only as its shared busy_stub.
  */
 import { fromBase64Url, generateKey, scopeAllows, toBase64Url } from '@ours/core/crypto';
-import { type DecodedRecord, encodeRecord, type KindData, uuidv7 } from '@ours/core/schema';
+import {
+  type DecodedRecord,
+  encodeRecord,
+  type KindData,
+  MAX_EXCEPTIONS,
+  uuidv7,
+} from '@ours/core/schema';
 import { nextTimestamp } from '@ours/core/sync';
 import { batch, computed, signal } from '@preact/signals';
 
@@ -273,6 +279,7 @@ export function createEvent(data: EventData): string {
       all_day: data.all_day,
       tz: data.tz,
       rrule: data.rrule,
+      except: data.except ?? [],
       away: data.away,
       owner: data.owner === 'b' ? 'b' : 'a',
     },
@@ -288,9 +295,19 @@ export function createEvent(data: EventData): string {
 export function updateEvent(id: string, patch: Partial<EventData>): void {
   const e = findEntry(id);
   if (e?.rec.kind !== 'event') return;
+  const before = e.rec.data;
+  // Changing when the series happens clears its changed days: they named
+  // days of the old pattern.
+  const retimed =
+    ('start' in patch && patch.start !== before.start) ||
+    ('rrule' in patch && patch.rrule !== before.rrule) ||
+    ('all_day' in patch && patch.all_day !== before.all_day) ||
+    ('tz' in patch && patch.tz !== before.tz);
+  const full =
+    retimed && before.except?.length && !('except' in patch) ? { ...patch, except: [] } : patch;
   bulk(() => {
-    update<'event'>(id, patch);
-    const d = { ...e.rec.data, ...patch } as EventData;
+    update<'event'>(id, full);
+    const d = { ...e.rec.data, ...full } as EventData;
     if (d.privacy === 'busy' && d.stub_id && findEntry(d.stub_id)) {
       update<'busy_stub'>(d.stub_id, {
         start: d.start,
@@ -298,11 +315,31 @@ export function updateEvent(id: string, patch: Partial<EventData>): void {
         all_day: d.all_day,
         tz: d.tz,
         rrule: d.rrule,
+        except: d.except ?? [],
         away: d.away,
         owner: d.owner === 'b' ? 'b' : 'a',
       });
     }
   });
+}
+
+/**
+ * One day of a repeating plan, on its own: skip it, move it, or put it back.
+ * `at` is that day's original start. Each returns an undo.
+ */
+export function setException(
+  id: string,
+  at: string,
+  to: { start: string; end: string } | null | undefined,
+): () => void {
+  const e = findEntry(id);
+  if (e?.rec.kind !== 'event' || !e.rec.data.rrule) return () => {};
+  const before = e.rec.data.except ?? [];
+  const rest = before.filter((x) => x.at !== at);
+  // `undefined` puts the day back as the series has it.
+  const next = to === undefined ? rest : [...rest, { at, to }].slice(-MAX_EXCEPTIONS);
+  updateEvent(id, { except: next });
+  return () => updateEvent(id, { except: before });
 }
 
 /** Deletes an event with its stub and comments. Returns undo. */

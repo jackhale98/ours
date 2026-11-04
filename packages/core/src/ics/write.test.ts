@@ -193,3 +193,54 @@ describe('writeIcs', () => {
     });
   });
 });
+
+describe('changed days of a series', () => {
+  const weekly: IcsExportEvent = {
+    ...base,
+    rrule: 'FREQ=WEEKLY;COUNT=4',
+    except: [
+      { at: '2025-03-10T19:00', to: null },
+      { at: '2025-03-17T19:00', to: { start: '2025-03-19T18:00', end: '2025-03-19T19:30' } },
+    ],
+  };
+
+  it('writes skipped days as EXDATE and moved days as RECURRENCE-ID overrides', () => {
+    const out = writeIcs([weekly], { name: 'Ours' });
+    expect(out).toContain('EXDATE;TZID=America/New_York:20250310T190000');
+    expect(out).toContain('RECURRENCE-ID;TZID=America/New_York:20250317T190000');
+    expect(out.match(/BEGIN:VEVENT/g)).toHaveLength(2);
+    expect(out.match(/UID:rec1@ours/g)).toHaveLength(2);
+  });
+
+  it('reads back as the same days', () => {
+    const cal = parseIcs(writeIcs([weekly], { name: 'Ours' }));
+    const occ = icsOccurrences(cal, Date.UTC(2025, 2, 1), Date.UTC(2025, 3, 30), 'UTC');
+    expect(occ.map((o) => new Date(o.start).toISOString().slice(0, 16))).toEqual([
+      '2025-03-04T00:00', // 7 PM New York (EST)
+      '2025-03-19T22:00', // moved: 6 PM (EDT from Mar 9)
+      '2025-03-24T23:00',
+    ]);
+  });
+
+  it('writes all-day exceptions as dates and drops malformed ones', () => {
+    const out = writeIcs(
+      [
+        {
+          ...base,
+          start: '2025-03-01',
+          end: '2025-03-02',
+          allDay: true,
+          tz: null,
+          rrule: 'FREQ=WEEKLY',
+          except: [
+            { at: '2025-03-08', to: null },
+            { at: 'nope', to: null },
+          ],
+        },
+      ],
+      { name: 'Ours' },
+    );
+    expect(out).toContain('EXDATE;VALUE=DATE:20250308');
+    expect(out.match(/EXDATE/g)).toHaveLength(1);
+  });
+});

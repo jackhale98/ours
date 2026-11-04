@@ -23,6 +23,12 @@ export interface IcsExportEvent {
   tz: string | null;
   /** RRULE value without the 'RRULE:' prefix, passed through verbatim. */
   rrule: string | null;
+  /**
+   * Days of the series changed on their own (same forms as start/end):
+   * skipped ones are written as EXDATE, moved ones as an extra VEVENT with
+   * the same UID and a RECURRENCE-ID naming the original day (RFC 5545 §3.8.4.4).
+   */
+  except?: { at: string; to: { start: string; end: string } | null }[];
   location?: string | null;
   description?: string | null;
   status?: 'confirmed' | 'tentative';
@@ -122,22 +128,19 @@ function eventLines(e: IcsExportEvent): string[] | null {
   const uid = stripControls(String(e.uid ?? '')).trim();
   if (!uid) return null;
 
-  let dtstart: string;
-  let dtend: string;
-  if (e.allDay) {
-    const s = dateValue(e.start);
-    const en = dateValue(e.end);
-    if (!s || !en) return null;
-    dtstart = `DTSTART;VALUE=DATE:${s}`;
-    dtend = `DTEND;VALUE=DATE:${en}`;
-  } else {
-    const s = dateTimeValue(e.start);
-    const en = dateTimeValue(e.end);
-    if (!s || !en) return null;
-    if (typeof e.tz !== 'string' || !TZID_RE.test(e.tz)) return null;
-    dtstart = `DTSTART;TZID=${e.tz}:${s}`;
-    dtend = `DTEND;TZID=${e.tz}:${en}`;
-  }
+  if (!e.allDay && (typeof e.tz !== 'string' || !TZID_RE.test(e.tz))) return null;
+  /** A date property in this event's form ('DTSTART', 'EXDATE', ...), or null if malformed. */
+  const prop = (name: string, value: string): string | null => {
+    if (e.allDay) {
+      const d = dateValue(value);
+      return d ? `${name};VALUE=DATE:${d}` : null;
+    }
+    const d = dateTimeValue(value);
+    return d ? `${name};TZID=${e.tz}:${d}` : null;
+  };
+  const dtstart = prop('DTSTART', e.start);
+  const dtend = prop('DTEND', e.end);
+  if (!dtstart || !dtend) return null;
 
   const stamp = utcStamp(e.updatedAt);
   const lines = [
@@ -150,12 +153,38 @@ function eventLines(e: IcsExportEvent): string[] | null {
     `SUMMARY:${escapeText(String(e.title ?? ''))}`,
   ];
   const rrule = typeof e.rrule === 'string' ? stripControls(e.rrule).trim() : '';
-  if (rrule) lines.push(`RRULE:${rrule}`);
-  if (e.location) lines.push(`LOCATION:${escapeText(e.location)}`);
-  if (e.description) lines.push(`DESCRIPTION:${escapeText(e.description)}`);
-  if (e.status === 'confirmed') lines.push('STATUS:CONFIRMED');
-  else if (e.status === 'tentative') lines.push('STATUS:TENTATIVE');
-  lines.push('END:VEVENT');
+  const details: string[] = [];
+  if (e.location) details.push(`LOCATION:${escapeText(e.location)}`);
+  if (e.description) details.push(`DESCRIPTION:${escapeText(e.description)}`);
+  if (e.status === 'confirmed') details.push('STATUS:CONFIRMED');
+  else if (e.status === 'tentative') details.push('STATUS:TENTATIVE');
+  const overrides: string[] = [];
+  if (rrule) {
+    lines.push(`RRULE:${rrule}`);
+    for (const x of (Array.isArray(e.except) ? e.except : []).slice(0, 500)) {
+      if (!x.to) {
+        const exdate = prop('EXDATE', x.at);
+        if (exdate) lines.push(exdate);
+        continue;
+      }
+      const rid = prop('RECURRENCE-ID', x.at);
+      const s = prop('DTSTART', x.to.start);
+      const en = prop('DTEND', x.to.end);
+      if (!rid || !s || !en) continue;
+      overrides.push(
+        'BEGIN:VEVENT',
+        `UID:${uid}@ours`,
+        `DTSTAMP:${stamp}`,
+        rid,
+        s,
+        en,
+        `SUMMARY:${escapeText(String(e.title ?? ''))}`,
+        ...details,
+        'END:VEVENT',
+      );
+    }
+  }
+  lines.push(...details, 'END:VEVENT', ...overrides);
   return lines;
 }
 

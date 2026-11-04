@@ -33,6 +33,7 @@ import {
   whenText,
   zone,
 } from './select';
+import { dayTimes, ThisDay } from './thisday';
 import { Avatar, CloseButton, Icon, Marker, Sheet, Switch, toast } from './ui';
 
 export interface QuickPreset {
@@ -45,7 +46,7 @@ export interface QuickPreset {
 
 export type SheetState =
   | { type: 'quick'; preset: QuickPreset }
-  | { type: 'event'; id: string }
+  | { type: 'event'; id: string; occ?: string | null }
   | { type: 'edit'; id: string | null; draft?: Draft }
   | { type: 'import'; row: Row; date: string }
   | null;
@@ -53,8 +54,9 @@ export const sheet = signal<SheetState>(null);
 export const openQuick = (preset: QuickPreset = {}) => {
   sheet.value = { type: 'quick', preset };
 };
-export const openEvent = (id: string) => {
-  sheet.value = { type: 'event', id };
+/** A plan's sheet. `occ` names the day it was opened from, for a repeating plan. */
+export const openEvent = (id: string, occ?: string | null) => {
+  sheet.value = { type: 'event', id, occ: occ ?? null };
 };
 /** The full form: edit a plan, or make one with every option. */
 export const openPlanForm = (id: string | null, draft?: Draft) => {
@@ -77,7 +79,7 @@ export function SheetHost() {
   if (s.type === 'import') return <ImportSheet key={s.row.key} row={s.row} date={s.date} />;
   if (s.type === 'edit')
     return <PlanForm key={s.id ?? 'new'} id={s.id} {...(s.draft ? { draft: s.draft } : {})} />;
-  return <EventSheet key={s.id} id={s.id} />;
+  return <EventSheet key={`${s.id}:${s.occ ?? ''}`} id={s.id} occ={s.occ ?? null} />;
 }
 
 const capitalise = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
@@ -348,7 +350,7 @@ export function decline(id: string): void {
   );
 }
 
-function EventSheet({ id }: { id: string }) {
+function EventSheet({ id, occ }: { id: string; occ: string | null }) {
   const entry = findEntry(id);
   const [armed, setArmed] = useState(false);
   const [note, setNote] = useState('');
@@ -385,6 +387,8 @@ function EventSheet({ id }: { id: string }) {
   const comments = commentsFor(id);
   const proposed = e.status === 'proposed';
   const canDelete = e.owner === 'both' || e.owner === me || e.proposed_by === me;
+  // The day this sheet was opened from, if the plan repeats.
+  const day = e.rrule && occ ? occ : null;
   const del = () => {
     if (!armed) {
       setArmed(true);
@@ -415,7 +419,7 @@ function EventSheet({ id }: { id: string }) {
         <CloseButton onClose={close} />
       </div>
       <h2 id="sh-title">{e.title}</h2>
-      <p class="when">{when}</p>
+      <p class="when">{day ? planWhen({ ...dayTimes(e, day), all_day: e.all_day }) : when}</p>
       {e.location && (
         <p class="loc">
           <Icon name="pin" size={15} />
@@ -428,6 +432,7 @@ function EventSheet({ id }: { id: string }) {
           {repeatText(e.rrule)}
         </p>
       )}
+      {day && canDelete && <ThisDay id={id} e={e} occ={day} onDone={close} />}
       {(e.countdown || e.away) && (
         <p class="loc">
           <Icon name="flag" size={15} />

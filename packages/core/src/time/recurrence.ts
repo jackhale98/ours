@@ -21,12 +21,20 @@ import {
   wallMinutes,
 } from './zones';
 
+/** One day of a series changed on its own: skipped (`to: null`) or moved. */
+export interface SeriesException {
+  /** That day's original start: a date (all-day) or wall-clock date and time. */
+  at: string;
+  to: { start: string; end: string } | null;
+}
+
 export interface Schedulable {
   start: string;
   end: string;
   all_day: boolean;
   tz: string | null;
   rrule: string | null;
+  except?: SeriesException[] | undefined;
 }
 
 export interface Occurrence {
@@ -41,6 +49,8 @@ export interface Occurrence {
    * walking the series from its first date.
    */
   index: number;
+  /** For a moved day: its original start (same form as `localStart`). */
+  movedFrom?: string;
 }
 
 const ALLOWED_RULE_PARTS = new Set([
@@ -193,12 +203,35 @@ export function expand(
     true,
     (_d, i) => i < MAX_OCCURRENCES,
   );
+  const inRange = (o: Occurrence) =>
+    overlaps(o) || (o.start === o.end && o.start >= from && o.start < to);
+  // Days changed on their own: skipped ones drop out, moved ones drop out
+  // here and come back at their new times below (with the same index, so
+  // the day keeps its identity for reminders and keys).
+  const except = new Map<string, SeriesException>();
+  for (const x of event.except ?? []) except.set(event.all_day ? x.at : x.at.slice(0, 16), x);
   const out: Occurrence[] = [];
   all.forEach((d) => {
-    const o = make(fromFloating(d), Math.floor(d.getTime() / 60_000));
-    if (overlaps(o) || (o.start === o.end && o.start >= from && o.start < to)) out.push(o);
+    const local = fromFloating(d);
+    if (except.has(event.all_day ? local.slice(0, 10) : local)) return;
+    const o = make(local, Math.floor(d.getTime() / 60_000));
+    if (inRange(o)) out.push(o);
   });
-  return out;
+  for (const x of except.values()) {
+    if (!x.to) continue;
+    const at = event.all_day ? `${x.at}T00:00` : x.at;
+    const s = event.all_day ? `${x.to.start}T00:00` : x.to.start;
+    const e = event.all_day ? `${x.to.end}T00:00` : x.to.end;
+    const o: Occurrence = {
+      start: toInstant(s, zone),
+      end: toInstant(e, zone),
+      localStart: event.all_day ? x.to.start : x.to.start,
+      index: Math.floor(floating(at).getTime() / 60_000),
+      movedFrom: x.at,
+    };
+    if (o.end >= o.start && inRange(o)) out.push(o);
+  }
+  return out.sort((a, b) => a.start - b.start);
 }
 
 /** Calendar dates an occurrence touches in `tz` (for placing it in a day list). */

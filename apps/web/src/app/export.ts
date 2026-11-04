@@ -103,6 +103,7 @@ export function calendarExport(): string {
         allDay: d.all_day,
         tz: d.tz,
         rrule: d.rrule && isValidRRule(d.rrule) ? d.rrule : null,
+        except: d.except ?? [],
         location: d.location,
         description: d.notes,
         status: d.status === 'proposed' ? 'tentative' : 'confirmed',
@@ -118,6 +119,7 @@ export function calendarExport(): string {
         allDay: d.all_day,
         tz: d.tz,
         rrule: d.rrule && isValidRRule(d.rrule) ? d.rrule : null,
+        except: d.except ?? [],
         updatedAt: r.updated_at,
       });
     }

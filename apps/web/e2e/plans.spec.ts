@@ -159,3 +159,37 @@ test('quick add understands repeats, and the choice can be changed', async ({ pa
     .click();
   await expect(page.getByRole('dialog', { name: 'Book club' })).toContainText('Every month');
 });
+
+test('one day of a repeating plan can be skipped, moved and put back', async ({ page }) => {
+  await page.getByRole('button', { name: 'Show next week' }).click();
+  const trash = page.locator('.agenda .ev', { hasText: 'Trash & recycling out' });
+  await expect(trash).toHaveCount(2);
+
+  // Skip the first: the rest of the series stays.
+  await trash.first().click();
+  const sheet = page.getByRole('dialog', { name: 'Trash & recycling out' });
+  await expect(sheet.getByRole('heading', { name: /^Just / })).toBeVisible();
+  await sheet.getByRole('button', { name: 'Skip this day' }).click();
+  await expect(page.locator('.toast-host')).toContainText('The rest still repeat');
+  await expect(trash).toHaveCount(1);
+  await page.locator('.toast-host').getByRole('button', { name: 'Undo' }).click();
+  await expect(trash).toHaveCount(2);
+
+  // Move the first to earlier the same evening.
+  await trash.first().click();
+  await sheet.getByRole('button', { name: 'Move this day' }).click();
+  await sheet.getByLabel('From').fill('19:00');
+  await sheet.getByLabel('To').fill('19:15');
+  await sheet.getByRole('button', { name: 'Move this day' }).click();
+  await expect(page.locator('.toast-host')).toContainText('Moved to');
+  await expect(trash.first()).toContainText('moved this time');
+  await expect(trash.first()).toContainText('7 PM');
+  await expect(trash.nth(1)).not.toContainText('moved this time');
+
+  // Put it back.
+  await trash.first().click();
+  await expect(sheet).toContainText('Moved from');
+  await sheet.getByRole('button', { name: 'Put it back' }).click();
+  await expect(trash.first()).not.toContainText('moved this time');
+  await expect(trash.first()).toContainText('9 PM');
+});

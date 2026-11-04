@@ -8,5 +8,6 @@ export {
   nextDueDate,
   type Occurrence,
   type Schedulable,
+  type SeriesException,
 } from './recurrence';
 export * from './zones';

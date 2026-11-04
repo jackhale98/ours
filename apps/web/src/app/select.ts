@@ -184,6 +184,13 @@ export interface Row {
   countdown: boolean;
   occStart: number;
   occEnd: number;
+  /**
+   * For a repeating plan: this day's original start (the series' own form),
+   * which names the day for skipping or moving it on its own.
+   */
+  occ: string | null;
+  /** This day was moved on its own (from `occ`). */
+  moved: boolean;
 }
 
 function hhmm(instant: number): string {
@@ -230,6 +237,8 @@ function rowsFor(entry: Entry, from: number, to: number): { day: string; row: Ro
       countdown: r.kind === 'event' && r.data.countdown,
       occStart: o.start,
       occEnd: o.end,
+      occ: d.rrule ? (o.movedFrom ?? o.localStart) : null,
+      moved: !!o.movedFrom,
     };
     return daysTouched(o, zone).map((day) => ({ day, row: base }));
   });
@@ -261,6 +270,8 @@ function importRows(entry: SnapshotEntry, from: number, to: number): { day: stri
         countdown: false,
         occStart: o.start,
         occEnd: o.end,
+        occ: null,
+        moved: false,
         source: d.name ?? null,
         free: !!item.free,
       };
