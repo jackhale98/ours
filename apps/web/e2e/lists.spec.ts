@@ -319,3 +319,21 @@ test('select several items and change them together, with undo', async ({ page }
   await page.getByRole('button', { name: /Show done · 2/ }).click();
   await expect(page.getByRole('button', { name: /is on it\. Change: Post office/ })).toBeVisible();
 });
+
+test('the check-in shows free evenings even without a list of date ideas', async ({ page }) => {
+  await page.goto('/#lists');
+  await page.getByRole('button', { name: /^Date ideas/ }).first().click();
+  const settings = await settingsOf(page, 'Date ideas');
+  await settings.getByRole('button', { name: /^Delete list/ }).click();
+  await settings.getByRole('button', { name: 'Tap again to delete' }).click();
+  await expect(page.getByRole('button', { name: /Date ideas/ })).toHaveCount(0);
+
+  await nav(page, 'Check-in');
+  await expect(page.getByText('No shared free evenings')).toHaveCount(0);
+  const dates = page.getByRole('group', { name: 'Evenings you’re both free' });
+  await expect(dates.getByRole('button').first()).toBeVisible();
+  await page.getByRole('textbox', { name: 'Do what?' }).fill('Dinner out');
+  await page.getByRole('button', { name: /^Ask Alex · / }).click();
+  await nav(page, 'Plan');
+  await expect(page.getByRole('button', { name: /Dinner out/ }).first()).toBeVisible();
+});

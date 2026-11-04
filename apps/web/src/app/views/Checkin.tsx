@@ -18,6 +18,8 @@ interface Draft {
   note: string;
   date: string | null;
   idea: string | null;
+  /** What to do, typed, when there's no list of ideas to pick from. */
+  what?: string;
 }
 const DRAFT_KEY = 'ours-checkin-draft';
 function loadDraft(): Draft {
@@ -269,7 +271,7 @@ export function CheckinView() {
               </span>
             </p>
           )}
-          {frees.length && idea ? (
+          {frees.length ? (
             <>
               <span class="sublbl" id="ci-dates">
                 Evenings you’re both free
@@ -288,33 +290,53 @@ export function CheckinView() {
                   </button>
                 ))}
               </div>
-              <span class="sublbl" id="ci-ideas">
-                Do what?
-              </span>
-              {/* biome-ignore lint/a11y/useSemanticElements: toggle-button group (aria-pressed), labelled; fieldset/legend breaks the segmented layout */}
-              <div class="chips" role="group" aria-labelledby="ci-ideas">
-                {ideas.map((i) => (
-                  <button
-                    type="button"
-                    class="chip"
-                    key={i.id}
-                    aria-pressed={i.id === idea.id}
-                    onClick={() => setDraft({ idea: i.id })}
-                  >
-                    {i.rec.data.text}
-                  </button>
-                ))}
-              </div>
+              {idea ? (
+                <>
+                  <span class="sublbl" id="ci-ideas">
+                    Do what?
+                  </span>
+                  {/* biome-ignore lint/a11y/useSemanticElements: toggle-button group (aria-pressed), labelled; fieldset/legend breaks the segmented layout */}
+                  <div class="chips" role="group" aria-labelledby="ci-ideas">
+                    {ideas.map((i) => (
+                      <button
+                        type="button"
+                        class="chip"
+                        key={i.id}
+                        aria-pressed={i.id === idea.id}
+                        onClick={() => setDraft({ idea: i.id })}
+                      >
+                        {i.rec.data.text}
+                      </button>
+                    ))}
+                  </div>
+                </>
+              ) : (
+                <div class="field">
+                  <label for="ci-what">Do what?</label>
+                  <input
+                    id="ci-what"
+                    class="txt"
+                    maxLength={120}
+                    placeholder="Dinner out, a walk, a film…"
+                    value={d.what ?? ''}
+                    onInput={(e) => setDraft({ what: e.currentTarget.value })}
+                  />
+                  <p class="small muted">
+                    Keep a list of date ideas in Lists and you can pick from it here.
+                  </p>
+                </div>
+              )}
               <div>
                 <button
                   type="button"
                   class="btn primary"
                   onClick={() => {
                     if (!date) return;
+                    const title = (idea ? idea.rec.data.text : d.what?.trim()) || 'Time together';
                     const id = createEvent(
                       withDefaultReminders(
                         {
-                          title: idea.rec.data.text,
+                          title,
                           start: `${date}T19:00`,
                           end: `${date}T21:00`,
                           all_day: false,
@@ -374,7 +396,13 @@ export function CheckinView() {
               steps_done: [...CHECKIN_STEPS],
               note: d.note.trim() || null,
             });
-            setDraft({ done: [false, false, false, false], note: '', date: null, idea: null });
+            setDraft({
+              done: [false, false, false, false],
+              note: '',
+              date: null,
+              idea: null,
+              what: '',
+            });
             window.scrollTo(0, 0);
             toast(`Check-in saved. ${nameOf(p)} can see your note.`);
           }}
