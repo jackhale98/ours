@@ -1772,6 +1772,21 @@ dialog.sheet::backdrop {
   flex: none;
   margin-top: 2px;
 }
+.keylink > div {
+  min-width: 0;
+}
+.keylink h2 {
+  margin: 0 0 4px;
+}
+.keylink p {
+  margin: 0 0 8px;
+}
+.confirmwords {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 12px;
+  margin: 12px 0;
+}
 
 /* ---------- week and month views (docs/design/calendar-views.md) ---------- */
 

@@ -28,6 +28,8 @@ export async function deleteAccount(env: Env, uid: string, email: string): Promi
     env.DB.prepare('DELETE FROM email_tokens WHERE email = ?').bind(email),
     // Cascades sessions, devices, passkeys, memberships, backups, push, feed, reminders.
     env.DB.prepare('DELETE FROM users WHERE id = ?').bind(uid),
+    env.DB.prepare("DELETE FROM key_ids WHERE scope = 'user' AND owner = ?").bind(uid),
+    env.DB.prepare('UPDATE spaces SET rotated_by = NULL WHERE rotated_by = ?').bind(uid),
   ];
   for (const { space_id } of spaces.results) {
     statements.push(
@@ -40,6 +42,11 @@ export async function deleteAccount(env: Env, uid: string, email: string): Promi
       ),
     );
   }
+  statements.push(
+    env.DB.prepare(
+      "DELETE FROM key_ids WHERE scope = 'space' AND owner NOT IN (SELECT id FROM spaces)",
+    ),
+  );
   await env.DB.batch(statements);
 }
 

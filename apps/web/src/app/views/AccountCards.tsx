@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 /** Privacy-screen cards for a signed-in account: devices, linking, recovery, sign-out, deletion. */
-import { generateRecoveryPhrase } from '@ours/core/crypto';
+import {
+  checkConfirmation,
+  generateRecoveryPhrase,
+  pickConfirmationIndices,
+} from '@ours/core/crypto';
 import { useState } from 'preact/hooks';
 import { ApiError, api } from '../../account/api';
 import {
@@ -13,7 +17,28 @@ import {
   sendTest,
   setQuietHours,
 } from '../../account/notify';
-import { linkDevice, me, rotateKeys, saveBackup, signOut } from '../../account/session';
+import {
+  abandonRotation,
+  account,
+  commitRotation,
+  comparedVersion,
+  confirmItsYou,
+  currentSafetyCode,
+  keyUpdateLink,
+  linkDevice,
+  markCompared,
+  me,
+  needsConfirm,
+  partnerNeedsKeyLink,
+  prepareRotation,
+  replacedFeed,
+  retryRotation,
+  rotation,
+  rotationBlocked,
+  saveBackup,
+  signOut,
+} from '../../account/session';
+import { needsNewKeys } from '../../account/sync';
 import { nameOf, partner } from '../model';
 import { PhraseWords } from '../phrase';
 import { Icon, Switch, toast } from '../ui';
@@ -299,30 +324,77 @@ export function NotificationsCard() {
 
 /**
  * After losing a device (or a partner leaving): new keys, old ones
- * decrypt-only, everything re-encrypted (ADR 0013). Then the partner opens a
- * key update link, and a new recovery phrase replaces the old backup.
+ * decrypt-only, everything re-encrypted (ADR 0013). In this order, so an
+ * interruption never loses data (review 0005, H2): new keys made and kept
+ * apart; a new recovery phrase shown and two words checked; the backup saved
+ * over old and new keys; only then the server makes the new keys current.
+ * Then the partner gets a key update link (which can be made again until
+ * they have the keys, M3), and both compare the new safety code (I3).
  */
 export function SecureCard() {
   const [armed, setArmed] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [stage, setStage] = useState<'idle' | 'link' | 'phrase' | 'done'>('idle');
-  const [link, setLink] = useState<string | null>(null);
   const [words, setWords] = useState<string[] | null>(null);
+  const [checking, setChecking] = useState(false);
+  const [ask, setAsk] = useState<number[]>([]);
+  const [answers, setAnswers] = useState<string[]>(['', '']);
+  const [link, setLink] = useState<string | null>(null);
   const partnerName = nameOf(partner.value);
+  const st = rotation.value;
+  const blocked = rotationBlocked();
+  const info = me.value;
+  const code = currentSafetyCode();
+  const space = info?.spaces[0];
+  const toCompare =
+    account.value.status === 'ready' &&
+    account.value.partnerJoined &&
+    (space?.key_version ?? 1) > comparedVersion.value &&
+    !needsNewKeys.value;
 
-  const rotate = async () => {
+  const start = async () => {
     setBusy(true);
     try {
-      const l = await rotateKeys();
-      setLink(l);
-      setWords(generateRecoveryPhrase());
-      setStage(l ? 'link' : 'phrase');
-      toast('New keys made. Everything is being re-encrypted.');
+      if (needsConfirm()) await confirmItsYou();
+      const w = await prepareRotation();
+      setWords(w);
+      setAsk(pickConfirmationIndices(2));
+      setAnswers(['', '']);
+      setChecking(false);
     } catch (err) {
-      toast(err instanceof Error ? err.message : 'Couldn’t change the keys. Try again.');
+      toast(err instanceof Error ? err.message : 'Couldn’t start. Try again.');
     } finally {
       setBusy(false);
       setArmed(false);
+    }
+  };
+
+  const commit = async (e: Event) => {
+    e.preventDefault();
+    if (!words) return;
+    const ok = checkConfirmation(
+      words,
+      ask.map((index, i) => ({ index, word: answers[i] ?? '' })),
+    );
+    if (!ok) {
+      toast('Those don’t match. Check your copy and try again.');
+      return;
+    }
+    setBusy(true);
+    try {
+      if (needsConfirm()) await confirmItsYou();
+      await commitRotation(words);
+      setWords(null);
+      toast('Done. Your space has new keys.');
+    } catch (err) {
+      if (err instanceof ApiError && err.code === 'reauth_required') {
+        toast('Confirm it’s you with your passkey, then press Save again.');
+        if (me.value) me.value = { ...me.value, signed_in_at: 0 };
+      } else {
+        toast(err instanceof Error ? err.message : 'Couldn’t change the keys. Try again.');
+      }
+      if (rotation.value?.stage !== 'staged') setWords(null);
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -331,84 +403,173 @@ export function SecureCard() {
       <h2 class="h3" id="secure-h">
         Secure your space
       </h2>
-      {stage === 'idle' && (
+
+      {words ? (
+        checking ? (
+          <form class="stack gap" onSubmit={commit}>
+            <p class="d">Check two words from your new phrase, then the new keys go live.</p>
+            <div class="confirmwords">
+              {ask.map((index, i) => (
+                <div class="field" key={index}>
+                  <label for={`rot-${index}`}>Word {index + 1}</label>
+                  <input
+                    id={`rot-${index}`}
+                    class="txt"
+                    type="text"
+                    autocomplete="off"
+                    autocapitalize="none"
+                    spellcheck={false}
+                    value={answers[i]}
+                    onInput={(ev) => {
+                      const next = [...answers];
+                      next[i] = ev.currentTarget.value;
+                      setAnswers(next);
+                    }}
+                  />
+                </div>
+              ))}
+            </div>
+            <div class="btnrow">
+              <button type="submit" class="btn sm primary" disabled={busy}>
+                {busy ? 'Saving…' : 'Save and use the new keys'}
+              </button>
+              <button type="button" class="btn sm ghost" onClick={() => setChecking(false)}>
+                Show the words again
+              </button>
+            </div>
+          </form>
+        ) : (
+          <>
+            <p class="d">
+              Your old recovery phrase can’t restore the new keys. Write down these 12 words
+              instead. Nothing changes until you’ve checked them.
+            </p>
+            <PhraseWords words={words} label="New recovery phrase" />
+            <div class="btnrow">
+              <button type="button" class="btn sm primary" onClick={() => setChecking(true)}>
+                I’ve saved these
+              </button>
+              <button
+                type="button"
+                class="btn sm ghost"
+                onClick={async () => {
+                  await abandonRotation();
+                  setWords(null);
+                }}
+              >
+                Cancel
+              </button>
+            </div>
+          </>
+        )
+      ) : st?.stage === 'staged' && st.backup ? (
         <>
           <p class="d">
-            Lost a phone, or removed a device you don’t trust? Make new keys. The removed device
-            can’t read anything written from now on. You’ll send {partnerName} a one-time link and
-            write down a new recovery phrase.
+            Your new phrase is saved, but the server didn’t confirm the new keys. Nothing is lost.
           </p>
+          <div class="btnrow">
+            <button
+              type="button"
+              class="btn sm primary"
+              disabled={busy}
+              onClick={async () => {
+                setBusy(true);
+                try {
+                  await retryRotation();
+                  toast('Done. Your space has new keys.');
+                } catch (err) {
+                  toast(err instanceof Error ? err.message : 'Still couldn’t. Try again later.');
+                } finally {
+                  setBusy(false);
+                }
+              }}
+            >
+              Try again
+            </button>
+          </div>
+        </>
+      ) : (
+        <>
+          <p class="d">
+            Lost a phone, or removed a device you don’t trust? Make new keys. Nothing written from
+            then on can be read with the old ones. You’ll write down a new recovery phrase, and send{' '}
+            {partnerName} a one-time link.
+          </p>
+          <p class="d small">
+            Remove the device in Devices above first. If it could still sign in (a passkey saved on
+            it, or your email open on it), remove that passkey and secure your email too, or it
+            could sign in again.
+          </p>
+          {blocked && armed && <p class="d small">{blocked}</p>}
           <button
             type="button"
             class={`btn sm${armed ? ' primary' : ''}`}
-            disabled={busy}
-            onClick={() => (armed ? void rotate() : setArmed(true))}
+            disabled={busy || (armed && !!blocked)}
+            onClick={() => (armed ? void start() : setArmed(true))}
           >
             {busy ? 'Making new keys…' : armed ? 'Yes, make new keys' : 'Make new keys'}
           </button>
         </>
       )}
-      {stage === 'link' && link && (
-        <>
+
+      {!words && partnerNeedsKeyLink() && (
+        <div class="stack gap">
           <p class="d">
-            Send this link to {partnerName}, ideally in person or in a private chat. It works once,
-            for 24 hours. When they open it, compare your safety codes again.
+            {partnerName} still needs the new keys. Send them a one-time link, ideally in person or
+            in a private chat. It works once, for 24 hours; you can make another here.
           </p>
-          <div class="url">
-            <code>{link}</code>
+          {link ? (
+            <div class="url">
+              <code>{link}</code>
+              <button
+                type="button"
+                class="btn sm"
+                onClick={async () => {
+                  if (navigator.share) {
+                    await navigator.share({ url: link }).catch(() => {});
+                  } else {
+                    await navigator.clipboard?.writeText(link).catch(() => {});
+                    toast('Link copied.');
+                  }
+                }}
+              >
+                Share
+              </button>
+            </div>
+          ) : (
             <button
               type="button"
               class="btn sm"
               onClick={async () => {
-                if (navigator.share) {
-                  await navigator.share({ url: link }).catch(() => {});
-                } else {
-                  await navigator.clipboard?.writeText(link).catch(() => {});
-                  toast('Link copied.');
+                try {
+                  setLink(await keyUpdateLink());
+                } catch (err) {
+                  toast(err instanceof Error ? err.message : 'Couldn’t make a link.');
                 }
               }}
             >
-              Share
+              Make key update link
             </button>
-          </div>
-          <button type="button" class="btn sm primary" onClick={() => setStage('phrase')}>
-            Next: new recovery phrase
-          </button>
-        </>
+          )}
+        </div>
       )}
-      {stage === 'phrase' && words && (
-        <>
+
+      {!words && toCompare && code && (
+        <div class="stack gap">
           <p class="d">
-            Your old recovery phrase can’t restore the new keys. Save these 12 words instead. Your
-            other devices also need the new keys: link them again from Devices above.
+            Your keys changed. Compare your safety code with {partnerName}’s, in person or on a
+            call: <span class="code">{code}</span>
           </p>
-          <PhraseWords words={words} label="New recovery phrase" />
-          <button
-            type="button"
-            class="btn primary"
-            disabled={busy}
-            onClick={async () => {
-              setBusy(true);
-              try {
-                await saveBackup(words);
-                setWords(null);
-                setStage('done');
-                toast('Done. Your space has new keys.');
-              } catch (err) {
-                toast(err instanceof ApiError ? err.message : 'Couldn’t save the new phrase.');
-              } finally {
-                setBusy(false);
-              }
-            }}
-          >
-            I’ve saved these
+          <button type="button" class="btn sm" onClick={() => void markCompared()}>
+            We compared, they match
           </button>
-        </>
+        </div>
       )}
-      {stage === 'done' && (
-        <p class="d">
-          Your space has new keys. Removed devices can’t read anything new.
-          {link ? ` If ${partnerName} hasn’t opened the link yet, they’ll see a reminder.` : ''}
+
+      {replacedFeed.value && (
+        <p class="d small">
+          Your calendar feed has a new link (the old one stopped working). Update it in your
+          calendar app from Calendars below.
         </p>
       )}
     </section>

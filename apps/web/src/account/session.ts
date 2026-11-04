@@ -15,17 +15,17 @@ import {
   formatInviteFragment,
   fromBase64Url,
   generateKey,
+  generateRecoveryPhrase,
   KeyRing,
+  keyId,
   openBackup,
   openDeviceInvite,
   openPartnerInvite,
   openRekeyInvite,
   parseInviteFragment,
-  parseKeyRing,
   recoveryKeyFromPhrase,
   safetyCode,
   sealBackup,
-  serializeKeyRing,
   toBase64Url,
 } from '@ours/core/crypto';
 import { signal } from '@preact/signals';
@@ -34,9 +34,26 @@ import { put, settings, store } from '../app/model';
 import { HAS_API } from '../config';
 import { ApiError, api, setToken } from './api';
 import { kvGet, kvSet, wipe } from './db';
-import { setPartnerPresent, startFeeds, stopFeeds } from './feeds';
-import { loadRing, saveRing } from './keystore';
-import { disablePush, startNotifications, stopNotifications, unsubscribeLocally } from './notify';
+import { feedOn, newFeedLink, setPartnerPresent, startFeeds, stopFeeds } from './feeds';
+import { dropStaged, loadRing, saveRing } from './keystore';
+import {
+  disablePush,
+  forgetReminders,
+  startNotifications,
+  stopNotifications,
+  unsubscribeLocally,
+} from './notify';
+import {
+  activeRing,
+  copyRing,
+  dropUnconfirmed,
+  type Floor,
+  KeyLinkError,
+  type KeyState,
+  type Kid,
+  mergeFloor,
+  takeKeys,
+} from './rotation';
 import { needsNewKeys, SyncEngine } from './sync';
 
 export interface Session {
@@ -46,15 +63,20 @@ export interface Session {
 }
 
 interface MeResponse {
-  user: { id: string; email: string; personal_key_version?: number };
+  user: { id: string; email: string; personal_key_version?: number; personal_kids?: Kid[] };
   device_id: string;
+  /** When this session signed in or last confirmed with a passkey. */
+  signed_in_at?: number;
   devices: { id: string; label: string; created_at: number; last_seen: number | null }[];
   spaces: {
     space_id: string;
     role: Slot;
-    members: { user_id: string; role: Slot }[];
+    members: { user_id: string; role: Slot; key_version?: number }[];
     key_version?: number;
     rotated_rev?: number;
+    rotated_by?: string | null;
+    rotated_at?: number | null;
+    kids?: Kid[];
   }[];
   passkeys: number;
 }
@@ -142,20 +164,28 @@ async function refresh(session: Session): Promise<void> {
     account.value = { status: 'needs-keys', session, spaceId: space.space_id, slot: space.role };
     return;
   }
-  // Keys rotated elsewhere (ADR 0013): this device keeps working with what it
-  // has, and asks for the key update.
-  const latest = (keys: { version: number }[]) => Math.max(0, ...keys.map((k) => k.version));
-  const floor = {
+  // Keys rotated (ADR 0013, review 0005): what this device trusts only ever
+  // moves forward, a rotation whose answer was lost is picked up, keys that
+  // never became real are dropped, and only keys whose fingerprints match
+  // the server's are used. Without the current ones this device keeps
+  // working with what it has, and asks for the key update.
+  const floor = await learnFloor(space.space_id, {
     space: space.key_version ?? 1,
     personal: info.user.personal_key_version ?? 1,
     rotatedRev: space.rotated_rev ?? 0,
-  };
-  needsNewKeys.value =
-    latest(ring.spaceKeys(space.space_id)) < floor.space ||
-    latest(ring.personalKeys()) < floor.personal;
+  });
+  await settleStaged(info, space.space_id, floor);
+  if (dropUnconfirmed(ring, space.space_id, floor)) await saveRing(ring);
+  const kids = { space: space.kids ?? [], personal: info.user.personal_kids ?? [] };
+  const active = activeRing(ring, space.space_id, floor, kids);
+  needsNewKeys.value = active.space !== 'ok' || active.personal !== 'ok';
+  keyState.value = { space: active.space, personal: active.personal };
+  rotation.value = (await kvGet<RotationState>(rotationKey(space.space_id))) ?? null;
+  phraseStale.value = !!(await kvGet<boolean>('phrase-stale'));
+  void acknowledgeKeys(info, space.space_id, floor, active.space);
   if (!engine) {
     engine = new SyncEngine({
-      ring,
+      ring: active.ring,
       userId: session.user.id,
       deviceId: session.device_id,
       spaceId: space.space_id,
@@ -165,7 +195,7 @@ async function refresh(session: Session): Promise<void> {
     await engine.start();
     const e = engine;
     void startNotifications({
-      ring,
+      ring: active.ring,
       spaceId: space.space_id,
       slot: space.role,
       userId: session.user.id,
@@ -186,6 +216,8 @@ async function refresh(session: Session): Promise<void> {
   };
   setPartnerPresent(space.members.length > 1);
   void keepStorage();
+  // A rotation that was made but didn't finish re-encrypting carries on.
+  if (rotation.value?.stage === 'securing') void finishSecuring();
 }
 
 /**
@@ -338,9 +370,12 @@ export async function createSpace(name: string): Promise<void> {
   });
 }
 
-/** Seals the key ring with the recovery phrase and stores it as the next backup version. */
-export async function saveBackup(words: string[]): Promise<void> {
-  if (!ring) throw new Error('No keys on this device');
+/**
+ * Seals a key ring (this device's, unless given) with the recovery phrase and
+ * stores it as the next backup version.
+ */
+export async function saveBackup(words: string[], over: KeyRing | null = ring): Promise<void> {
+  if (!over) throw new Error('No keys on this device');
   const rk = recoveryKeyFromPhrase(words);
   let version = 1;
   try {
@@ -348,7 +383,7 @@ export async function saveBackup(words: string[]): Promise<void> {
   } catch (err) {
     if (!(err instanceof ApiError && err.status === 404)) throw err;
   }
-  const sealed = sealBackup(rk, ring, version);
+  const sealed = sealBackup(rk, over, version);
   await api('/keys/backup', {
     method: 'PUT',
     body: {
@@ -356,6 +391,11 @@ export async function saveBackup(words: string[]): Promise<void> {
       wrapped: { nonce: toBase64Url(sealed.nonce), ciphertext: toBase64Url(sealed.ciphertext) },
     },
   });
+  // A backup over this device's own ring holds every key it uses now.
+  if (over === ring) {
+    phraseStale.value = false;
+    await kvSet('phrase-stale', false);
+  }
 }
 
 /** Whether these words open this account's current backup (checked before an encrypted export). */
@@ -486,18 +526,61 @@ export async function acceptDeviceLink(fragment: string): Promise<void> {
   await refresh(state.session);
 }
 
-/* ---------- key rotation (ADR 0013) ---------- */
+/* ---------- key rotation (ADR 0013, review 0005) ---------- */
+
+/**
+ * Where a rotation stands, kept on this device so it can carry on after a
+ * reload or a lost answer (review 0005, H2 and M2):
+ * - staged: new keys made and kept apart (never used to seal anything);
+ *   `backup` once the new phrase's backup holds them;
+ * - securing: the server made them current; re-encrypting what's left.
+ */
+export type RotationState =
+  | { stage: 'staged'; spaceFrom: number; personalFrom: number; backup: boolean }
+  | { stage: 'securing'; version: number };
+
+export const rotation = signal<RotationState | null>(null);
+/** Live records still under old keys, as the server counts them (M2). */
+export const rotationLeft = signal<{ space: number; mine: number } | null>(null);
+/** Whether this device holds the current keys, and if not, why. */
+export const keyState = signal<{ space: KeyState; personal: KeyState }>({
+  space: 'ok',
+  personal: 'ok',
+});
+/** The recovery phrase's backup lacks keys this device now uses (M3). */
+export const phraseStale = signal(false);
+/** The space key version both people last confirmed comparing safety codes for (I3). */
+export const comparedVersion = signal(1);
+/** A calendar feed link made to replace one a lost phone may follow (L7). */
+export const replacedFeed = signal<string | null>(null);
+
+const rotationKey = (spaceId: string) => `rotation:${spaceId}`;
+const floorKey = (spaceId: string) => `floor:${spaceId}`;
+const comparedKey = (spaceId: string) => `compared:${spaceId}`;
+const REKEY_WINDOW_MS = 14 * 86_400_000;
+
+async function setRotation(spaceId: string, state: RotationState | null): Promise<void> {
+  rotation.value = state;
+  await kvSet(rotationKey(spaceId), state);
+}
+
+/** Merges the server's floor into the one this device keeps, and stores it (M6). */
+async function learnFloor(
+  spaceId: string,
+  server: { space: number; personal: number; rotatedRev: number },
+): Promise<Floor> {
+  const prev = await kvGet<Floor>(floorKey(spaceId));
+  const next = mergeFloor(prev, server);
+  if (JSON.stringify(prev) !== JSON.stringify(next)) await kvSet(floorKey(spaceId), next);
+  comparedVersion.value = (await kvGet<number>(comparedKey(spaceId))) ?? 1;
+  return next;
+}
 
 /** Whose action is needed for this device to get the new keys. */
 export function newKeysFrom(): 'partner' | 'my-device' | null {
-  const info = me.value;
-  const space = info?.spaces[0];
-  if (!needsNewKeys.value || !info || !space || !ring) return null;
-  const mine = Math.max(0, ...ring.personalKeys().map((k) => k.version));
-  return mine < (info.user.personal_key_version ?? 1) ? 'my-device' : 'partner';
+  if (!needsNewKeys.value) return null;
+  return keyState.value.personal !== 'ok' ? 'my-device' : 'partner';
 }
-
-const copyRing = (r: KeyRing) => parseKeyRing(serializeKeyRing(r));
 
 /** Restarts sync with the current ring, re-reading everything this device has stored. */
 async function restartSync(session: Session): Promise<void> {
@@ -506,49 +589,254 @@ async function restartSync(session: Session): Promise<void> {
   await refresh(session);
 }
 
+const newestOf = (
+  staged: KeyRing,
+  spaceId: string,
+  st: { spaceFrom: number; personalFrom: number },
+) => ({
+  space: staged.spaceKeys(spaceId).find((k) => k.version === st.spaceFrom + 1),
+  personal: staged.personalKeys().find((k) => k.version === st.personalFrom + 1),
+});
+
 /**
- * Secures the space after losing a device: new space and personal keys,
- * old ones decrypt-only, everything re-encrypted. Returns a one-time key
- * update link for the partner (null if there is no partner yet). The caller
- * must then make a new recovery phrase: only a new backup holds the new keys.
+ * A rotation whose keys were made here but whose answer never came back
+ * (H1): if the server's fingerprints show it landed, the keys join the ring;
+ * if the versions moved on without it, or no backup was made yet, they're
+ * dropped; otherwise they wait for "Try again".
  */
-export async function rotateKeys(): Promise<string | null> {
+async function settleStaged(info: MeResponse, spaceId: string, floor: Floor): Promise<void> {
+  const st = await kvGet<RotationState>(rotationKey(spaceId));
+  if (st?.stage !== 'staged' || !ring) return;
+  const staged = await loadRing('staged');
+  const space = info.spaces.find((x) => x.space_id === spaceId);
+  if (staged) {
+    const k = newestOf(staged, spaceId, st);
+    const landed =
+      !!k.space &&
+      !!k.personal &&
+      space?.kids?.find((x) => x.version === k.space?.version)?.kid ===
+        keyId('space', spaceId, k.space.version, k.space.key) &&
+      info.user.personal_kids?.find((x) => x.version === k.personal?.version)?.kid ===
+        keyId('user', staged.userId, k.personal.version, k.personal.key);
+    if (landed) {
+      await commitStaged(staged, spaceId, st, space?.rotated_rev ?? 0);
+      return;
+    }
+  }
+  const unchanged = floor.space === st.spaceFrom && floor.personal === st.personalFrom;
+  if (!staged || !unchanged || !st.backup) {
+    await dropStaged();
+    await setRotation(spaceId, null);
+  }
+}
+
+/** The server confirmed: the new keys join the ring and are used from now on. */
+async function commitStaged(
+  staged: KeyRing,
+  spaceId: string,
+  st: { spaceFrom: number; personalFrom: number },
+  rotatedRev: number,
+): Promise<void> {
+  if (!ring) return;
+  const next = copyRing(ring);
+  next.mergeFrom(staged);
+  await saveRing(next);
+  ring = next;
+  await dropStaged();
+  const floor: Floor = {
+    space: st.spaceFrom + 1,
+    personal: st.personalFrom + 1,
+    rotatedRev,
+  };
+  await kvSet(floorKey(spaceId), floor);
+  await setRotation(spaceId, { stage: 'securing', version: floor.space });
+  // The server dropped reminders sealed under the old key: send them again (L2).
+  await forgetReminders();
+  // The backup was made over these keys before the server moved.
+  phraseStale.value = false;
+  await kvSet('phrase-stale', false);
+}
+
+/** Why this device can't start a rotation now, or null if it can. */
+export function rotationBlocked(): string | null {
   const state = account.value;
-  if (state.status !== 'ready' || !ring) throw new Error('Not ready');
-  // The server's current minimums decide the new versions (exactly one more).
+  const info = me.value;
+  if (state.status !== 'ready' || !ring || !info) return 'Not ready yet.';
+  // A device missing keys would leave gaps in the new ring (L3).
+  if (needsNewKeys.value) return 'This device needs the current keys before it can make new ones.';
+  if (info.spaces.length > 1) return 'Leave your other spaces before changing keys.';
+  if (rotation.value?.stage === 'securing') return 'Still re-encrypting from the last change.';
+  return null;
+}
+
+/** True when changing keys needs a fresh passkey check first (M4). */
+export function needsConfirm(): boolean {
+  const info = me.value;
+  return !!info && info.passkeys > 0 && Date.now() - (info.signed_in_at ?? 0) > 9 * 60_000;
+}
+
+/** Confirms it's you with a passkey, in this session (no new device or sign-in). */
+export async function confirmItsYou(): Promise<void> {
+  const { startAuthentication } = await import('@simplewebauthn/browser');
+  const opts = await api<{
+    challenge_id: string;
+    options: Parameters<typeof startAuthentication>[0]['optionsJSON'];
+  }>('/auth/passkey/reauth/options', { body: {} });
+  const response = await startAuthentication({ optionsJSON: opts.options });
+  await api('/auth/passkey/reauth/verify', {
+    body: { challenge_id: opts.challenge_id, response },
+  });
+  if (me.value) me.value = { ...me.value, signed_in_at: Date.now() };
+}
+
+/**
+ * Step 1 (H2, M2): once this device has fully synced, make the new keys
+ * (kept apart, unused) and a new recovery phrase. Nothing changes on the
+ * server yet, and nothing is sealed under the new keys.
+ */
+export async function prepareRotation(): Promise<string[]> {
+  const blocked = rotationBlocked();
+  if (blocked) throw new Error(blocked);
+  const state = account.value;
+  if (state.status !== 'ready') throw new Error('Not ready yet.');
+  if (!(await engine?.settle()))
+    throw new Error('Finish syncing first: this device needs to be online and up to date.');
   const info = await api<MeResponse>('/me');
+  me.value = info;
   const space = info.spaces.find((x) => x.space_id === state.spaceId);
   const spaceFrom = space?.key_version ?? 1;
   const personalFrom = info.user.personal_key_version ?? 1;
-  const next = copyRing(ring);
-  // A retry after a lost response reuses the keys made the first time.
-  if (!next.spaceKeys(state.spaceId).some((k) => k.version === spaceFrom + 1))
-    next.addSpaceKey(state.spaceId, { version: spaceFrom + 1, key: generateKey() });
-  if (!next.personalKeys().some((k) => k.version === personalFrom + 1))
-    next.addPersonalKey({ version: personalFrom + 1, key: generateKey() });
-  // Saved before the server raises the minimums, so a crash in between can't
-  // leave the space needing keys nobody has.
-  const previous = ring;
-  await saveRing(next);
-  ring = next;
-  try {
-    await api(`/spaces/${state.spaceId}/rotate`, {
-      body: { space_from: spaceFrom, personal_from: personalFrom },
-    });
-  } catch (err) {
-    // Refused: the new keys must not be used. Offline: keep them for a retry.
-    if (err instanceof ApiError && err.status >= 400) {
-      await saveRing(previous);
-      ring = previous;
-    }
-    throw err;
-  }
-  await restartSync(state.session);
-  await engine?.reencryptAll();
-  return state.partnerJoined ? keyUpdateLink() : null;
+  const staged = new KeyRing(state.session.user.id);
+  staged.addSpaceKey(state.spaceId, { version: spaceFrom + 1, key: generateKey() });
+  staged.addPersonalKey({ version: personalFrom + 1, key: generateKey() });
+  await saveRing(staged, 'staged');
+  await setRotation(state.spaceId, { stage: 'staged', spaceFrom, personalFrom, backup: false });
+  return generateRecoveryPhrase();
 }
 
-/** A one-time link that gives the partner the current space keys. */
+/**
+ * Step 2 (H2): back up the old and new keys under the new phrase, and only
+ * then ask the server to make the new keys current. Whatever happens after,
+ * the new phrase restores everything.
+ */
+export async function commitRotation(words: string[]): Promise<void> {
+  const state = account.value;
+  if (state.status !== 'ready' || !ring) throw new Error('Not ready yet.');
+  const st = rotation.value;
+  const staged = await loadRing('staged');
+  if (st?.stage !== 'staged' || !staged)
+    throw new Error('Start again: the new keys weren’t found.');
+  if (!st.backup) {
+    const full = copyRing(ring);
+    full.mergeFrom(staged);
+    await saveBackup(words, full);
+    await setRotation(state.spaceId, { ...st, backup: true });
+  }
+  await sendRotation(state.session, state.spaceId, staged, st);
+}
+
+/** After a lost answer or a network error: check whether it landed, else send it again. */
+export async function retryRotation(): Promise<void> {
+  const state = account.value;
+  if (state.status !== 'ready') throw new Error('Not ready yet.');
+  await refresh(state.session);
+  const st = rotation.value;
+  if (st?.stage !== 'staged') return; // it had landed: refresh carried on from there
+  const staged = await loadRing('staged');
+  if (!staged) throw new Error('Start again: the new keys weren’t found.');
+  await sendRotation(state.session, state.spaceId, staged, st);
+}
+
+/** Gives up a rotation the server hasn't made current. The keys are forgotten. */
+export async function abandonRotation(): Promise<void> {
+  const state = account.value;
+  if (state.status !== 'ready' || rotation.value?.stage !== 'staged') return;
+  await dropStaged();
+  await setRotation(state.spaceId, null);
+}
+
+async function sendRotation(
+  session: Session,
+  spaceId: string,
+  staged: KeyRing,
+  st: { spaceFrom: number; personalFrom: number },
+): Promise<void> {
+  const k = newestOf(staged, spaceId, st);
+  if (!k.space || !k.personal) throw new Error('Start again: the new keys weren’t found.');
+  let res: { rotated_rev: number };
+  try {
+    res = await api<{ rotated_rev: number }>(`/spaces/${spaceId}/rotate`, {
+      body: {
+        space_from: st.spaceFrom,
+        personal_from: st.personalFrom,
+        space_kid: keyId('space', spaceId, k.space.version, k.space.key),
+        personal_kid: keyId('user', staged.userId, k.personal.version, k.personal.key),
+      },
+    });
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 409) {
+      // Another rotation came first: these keys never became real, and are
+      // dropped (the new phrase still restores everything else).
+      await dropStaged();
+      await setRotation(spaceId, null);
+    }
+    // Offline or a lost answer: kept for "Try again", which checks first.
+    throw err;
+  }
+  await commitStaged(staged, spaceId, st, res.rotated_rev);
+  await restartSync(session);
+  // A lost phone may follow the busy feed: replace its link (L7).
+  if (feedOn.value) replacedFeed.value = await newFeedLink().catch(() => null);
+  void finishSecuring();
+}
+
+let securing = false;
+
+/**
+ * Step 3 (M2): re-seal everything under the new keys, then ask the server
+ * how much is still under old ones, until nothing is. Resumes on every start
+ * until done.
+ */
+async function finishSecuring(): Promise<void> {
+  const state = account.value;
+  if (state.status !== 'ready' || securing) return;
+  securing = true;
+  try {
+    for (let i = 0; i < 5; i++) {
+      const e = engine;
+      if (!e || !(await e.settle())) return; // offline: carries on next time
+      await e.reencryptAll();
+      if (!(await e.settle())) return;
+      const left = await api<{ space_below: number; mine_below: number }>(
+        `/spaces/${state.spaceId}/rotation`,
+      );
+      rotationLeft.value = { space: left.space_below, mine: left.mine_below };
+      if (!left.space_below && !left.mine_below) {
+        rotationLeft.value = null;
+        await setRotation(state.spaceId, null);
+        return;
+      }
+    }
+  } catch {
+    // Carries on at the next start.
+  } finally {
+    securing = false;
+  }
+}
+
+/** Whether the partner still needs the current space key, and this person can send it (M3). */
+export function partnerNeedsKeyLink(): boolean {
+  const info = me.value;
+  const state = account.value;
+  if (!info || state.status !== 'ready' || !state.partnerJoined) return false;
+  const space = info.spaces.find((x) => x.space_id === state.spaceId);
+  if (!space || space.rotated_by !== info.user.id) return false;
+  if (Date.now() - (space.rotated_at ?? 0) > REKEY_WINDOW_MS) return false;
+  const theirs = space.members.find((m) => m.user_id !== info.user.id);
+  return (theirs?.key_version ?? 1) < (space.key_version ?? 1);
+}
+
+/** A one-time link that gives the partner the current space keys (can be made again, M3). */
 export async function keyUpdateLink(): Promise<string> {
   const state = account.value;
   if (state.status !== 'ready' || !ring) throw new Error('Not ready');
@@ -560,6 +848,7 @@ export async function keyUpdateLink(): Promise<string> {
     body: {
       kind: 'rekey',
       space_id: state.spaceId,
+      key_version: ring.currentSpaceKey(state.spaceId).version,
       wrapped: {
         nonce: toBase64Url(created.wrapped.nonce),
         ciphertext: toBase64Url(created.wrapped.ciphertext),
@@ -569,15 +858,70 @@ export async function keyUpdateLink(): Promise<string> {
   return `${new URL('join/', location.href.split('#')[0]).href}#${formatInviteFragment(res.id, created.secret)}`;
 }
 
+/** Tells the server this device holds the current space key, so the link stops being offered (M3). */
+async function acknowledgeKeys(
+  info: MeResponse,
+  spaceId: string,
+  floor: Floor,
+  state: KeyState,
+): Promise<void> {
+  if (state !== 'ok' || floor.space < 2 || !ring) return;
+  const mine = info.spaces
+    .find((x) => x.space_id === spaceId)
+    ?.members.find((m) => m.user_id === info.user.id);
+  if ((mine?.key_version ?? 1) >= floor.space) return;
+  const k = ring.spaceKeys(spaceId).find((x) => x.version === floor.space);
+  if (!k) return;
+  await api(`/spaces/${spaceId}/keys-ack`, {
+    body: { key_version: k.version, kid: keyId('space', spaceId, k.version, k.key) },
+  }).catch(() => {});
+}
+
+/** Both people compared the new safety code (I3). */
+export async function markCompared(): Promise<void> {
+  const state = account.value;
+  if (state.status !== 'ready' || !ring) return;
+  const v = ring.currentSpaceKey(state.spaceId).version;
+  comparedVersion.value = v;
+  await kvSet(comparedKey(state.spaceId), v);
+}
+
+export interface KeyLinkOffer {
+  kind: 'rekey' | 'device';
+  /** The safety code the new space key gives, to compare before using it (M4). */
+  code: string | null;
+  apply(): Promise<void>;
+}
+
 /**
- * A signed-in, set-up device opens a link: a key update from the partner, or
- * a device link from one of my own devices after they rotated. Adds the keys
- * and re-reads everything. Returns which kind it was.
+ * A set-up device opens a key update link from the partner, or a device link
+ * from one of my own devices. Nothing is used yet (M4, I1): the link's kind
+ * is checked before it is claimed, its keys are checked against the server's
+ * fingerprints and refused unless this device needs them, and the new safety
+ * code is returned to compare before `apply()`.
  */
-export async function applyKeyLink(fragment: string): Promise<'rekey' | 'device'> {
+export async function openKeyLink(fragment: string): Promise<KeyLinkOffer> {
   const state = account.value;
   if (state.status !== 'ready' || !ring) throw new Error('Not ready');
   const { inviteId, secret } = parseInviteFragment(fragment);
+  const meta = await api<{ kind: 'partner' | 'device' | 'rekey'; space_id: string | null }>(
+    `/invites/${inviteId}/kind`,
+  );
+  if (meta.kind === 'partner')
+    throw new KeyLinkError(
+      'That’s an invite for someone joining a space, and this device is already set up. Nothing was used.',
+    );
+  if (meta.kind === 'rekey' && meta.space_id !== state.spaceId)
+    throw new KeyLinkError('That link isn’t a key update for this space.');
+  const info = await api<MeResponse>('/me');
+  me.value = info;
+  const space = info.spaces.find((x) => x.space_id === state.spaceId);
+  const floor = await learnFloor(state.spaceId, {
+    space: space?.key_version ?? 1,
+    personal: info.user.personal_key_version ?? 1,
+    rotatedRev: space?.rotated_rev ?? 0,
+  });
+  const kids = { space: space?.kids ?? [], personal: info.user.personal_kids ?? [] };
   const inv = await api<{
     kind: 'partner' | 'device' | 'rekey';
     space_id: string | null;
@@ -587,23 +931,42 @@ export async function applyKeyLink(fragment: string): Promise<'rekey' | 'device'
     nonce: fromBase64Url(inv.wrapped.nonce),
     ciphertext: fromBase64Url(inv.wrapped.ciphertext),
   };
-  const next = copyRing(ring);
+  const current = ring;
+  let next: KeyRing;
   if (inv.kind === 'rekey' && inv.space_id === state.spaceId) {
     const payload = openRekeyInvite(secret, state.spaceId, wrapped);
-    const have = new Set(next.spaceKeys(state.spaceId).map((k) => k.version));
-    for (const k of payload.keys) if (!have.has(k.version)) next.addSpaceKey(state.spaceId, k);
+    next = takeKeys(current, state.spaceId, floor, kids, { space: payload.keys });
   } else if (inv.kind === 'device') {
-    next.mergeFrom(openDeviceInvite(secret, state.session.user.id, wrapped));
+    const theirs = openDeviceInvite(secret, state.session.user.id, wrapped);
+    next = takeKeys(current, state.spaceId, floor, kids, {
+      space: theirs.spaceKeys(state.spaceId),
+      personal: theirs.personalKeys(),
+    });
   } else {
-    throw new Error('That link isn’t a key update for this space.');
+    throw new KeyLinkError('That link isn’t a key update for this space.');
   }
-  await api(`/invites/${inviteId}/accept`, { body: {} });
-  await saveRing(next);
-  ring = next;
-  setPendingInvite(null);
-  await restartSync(state.session);
-  return inv.kind;
+  const k = next.currentSpaceKey(state.spaceId);
+  const kind = inv.kind;
+  return {
+    kind,
+    code: kind === 'rekey' ? safetyCode(state.spaceId, k.version, k.key) : null,
+    apply: async () => {
+      await api(`/invites/${inviteId}/accept`, { body: {} });
+      await saveRing(next);
+      ring = next;
+      setPendingInvite(null);
+      if (kind === 'rekey') {
+        // My backup can't hold the new key until I make a new phrase (M3).
+        phraseStale.value = true;
+        await kvSet('phrase-stale', true);
+      }
+      await restartSync(state.session);
+    },
+  };
 }
+
+/** The pending link, waiting for the person to compare the code and confirm. */
+export const keyLinkOffer = signal<KeyLinkOffer | null>(null);
 
 /** Checks whether the partner has joined (polled while showing the invite). */
 export async function checkPartner(): Promise<boolean> {

@@ -65,6 +65,18 @@ export class KeyRing {
     this.spaces.delete(spaceId);
   }
 
+  /**
+   * Forgets one version: only for a key that never became real (a rotation
+   * that didn't happen, review 0005 H1), never for one data was sealed under.
+   */
+  dropPersonalKey(version: number): void {
+    this.personal.delete(version);
+  }
+
+  dropSpaceKey(spaceId: string, version: number): void {
+    this.spaces.get(spaceId)?.delete(version);
+  }
+
   personalKey(version: number): Uint8Array {
     const key = this.personal.get(version);
     if (!key) throw new CryptoError('unknown-key-version', 'Unknown personal key version');

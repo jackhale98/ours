@@ -75,4 +75,4 @@ export {
   resolveWord,
   sealBackup,
 } from './recovery';
-export { safetyCode } from './safety';
+export { keyId, safetyCode } from './safety';

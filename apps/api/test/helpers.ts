@@ -82,6 +82,7 @@ export async function signIn(email: string, opts: { invite?: string; acceptTerms
     token: verify.json.token as string,
     userId: verify.json.user.id as string,
     deviceId: verify.json.device_id as string,
+    email,
   };
 }
 

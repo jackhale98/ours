@@ -385,6 +385,12 @@ export function reminderItems(
   });
 }
 
+/** After a key rotation the server dropped the old reminders: upload them again (review 0005, L2). */
+export async function forgetReminders(): Promise<void> {
+  lastReminderSig = null;
+  await kvSet('reminders-sig', null);
+}
+
 /** Replaces the server's list when this device's planned reminders changed. */
 export async function syncReminders(): Promise<void> {
   const c = ctx;

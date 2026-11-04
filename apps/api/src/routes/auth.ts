@@ -325,10 +325,27 @@ auth.post('/passkey/login/verify', async (c) => {
   await rateLimit(c.env, `passkey-verify:ip:${clientNet(c)}`, 30, 600);
   const { rpID, origins } = rp(c.env, c.req.header('Origin'));
   const expectedChallenge = await takeChallenge(c.env, input.challenge_id, 'login', null);
-  const passkey = await c.env.DB.prepare(
+  const passkey = await verifyAssertion(c.env, input.response, expectedChallenge, rpID, origins);
+  const user = await c.env.DB.prepare('SELECT id, email FROM users WHERE id = ?')
+    .bind(passkey.user_id)
+    .first<{ id: string; email: string }>();
+  if (!user) throw new HttpError(400, 'passkey_invalid');
+  const session = await createSession(c.env, user.id, input.device_label);
+  return c.json({ ...session, user, new_user: false });
+});
+
+/** Checks a passkey assertion and advances its counter. Returns the passkey's owner. */
+async function verifyAssertion(
+  env: Env,
+  response: { id: string },
+  expectedChallenge: string,
+  rpID: string,
+  origins: string[],
+): Promise<{ user_id: string }> {
+  const passkey = await env.DB.prepare(
     'SELECT id, user_id, public_key, counter, transports FROM passkeys WHERE id = ?',
   )
-    .bind(input.response.id)
+    .bind(response.id)
     .first<{
       id: string;
       user_id: string;
@@ -341,7 +358,7 @@ auth.post('/passkey/login/verify', async (c) => {
   try {
     verification = await verifyAuthenticationResponse({
       // biome-ignore lint/suspicious/noExplicitAny: shape validated by the library
-      response: input.response as any,
+      response: response as any,
       expectedChallenge,
       expectedOrigin: origins,
       expectedRPID: rpID,
@@ -357,15 +374,51 @@ auth.post('/passkey/login/verify', async (c) => {
     throw new HttpError(400, 'passkey_invalid');
   }
   if (!verification.verified) throw new HttpError(400, 'passkey_invalid');
-  await c.env.DB.prepare('UPDATE passkeys SET counter = ? WHERE id = ?')
+  await env.DB.prepare('UPDATE passkeys SET counter = ? WHERE id = ?')
     .bind(verification.authenticationInfo.newCounter, passkey.id)
     .run();
-  const user = await c.env.DB.prepare('SELECT id, email FROM users WHERE id = ?')
-    .bind(passkey.user_id)
-    .first<{ id: string; email: string }>();
-  if (!user) throw new HttpError(400, 'passkey_invalid');
-  const session = await createSession(c.env, user.id, input.device_label);
-  return c.json({ ...session, user, new_user: false });
+  return { user_id: passkey.user_id };
+}
+
+/**
+ * Confirm it's you, in this session (review 0005, M4): a passkey check that
+ * marks the current session as recently signed in, for changing keys. No new
+ * device or session is made.
+ */
+auth.post('/passkey/reauth/options', requireAuth, async (c) => {
+  const uid = c.var.user.id;
+  await rateLimit(c.env, `passkey-reauth:${uid}`, 20, 3600);
+  const { rpID } = rp(c.env, c.req.header('Origin'));
+  const mine = await c.env.DB.prepare('SELECT id, transports FROM passkeys WHERE user_id = ?')
+    .bind(uid)
+    .all<{ id: string; transports: string | null }>();
+  if (!mine.results.length) throw new HttpError(404, 'no_passkey');
+  const options = await generateAuthenticationOptions({
+    rpID,
+    userVerification: 'preferred',
+    allowCredentials: mine.results.map((p) => ({
+      id: p.id,
+      ...(p.transports ? { transports: JSON.parse(p.transports) } : {}),
+    })),
+  });
+  const challengeId = await storeChallenge(c.env, options.challenge, 'login', uid);
+  return c.json({ challenge_id: challengeId, options });
+});
+
+auth.post('/passkey/reauth/verify', requireAuth, async (c) => {
+  const input = await body(
+    c,
+    v.object({ challenge_id: v.string(), response: v.looseObject({ id: v.string() }) }),
+  );
+  const uid = c.var.user.id;
+  const { rpID, origins } = rp(c.env, c.req.header('Origin'));
+  const expectedChallenge = await takeChallenge(c.env, input.challenge_id, 'login', uid);
+  const passkey = await verifyAssertion(c.env, input.response, expectedChallenge, rpID, origins);
+  if (passkey.user_id !== uid) throw new HttpError(400, 'passkey_invalid');
+  await c.env.DB.prepare('UPDATE sessions SET reauth_at = ? WHERE token_hash = ?')
+    .bind(Date.now(), c.var.session.token_hash)
+    .run();
+  return c.json({ ok: true });
 });
 
 /** The account's passkeys (id and when added). */

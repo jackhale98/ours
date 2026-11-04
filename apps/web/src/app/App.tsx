@@ -4,7 +4,18 @@ import { signal } from '@preact/signals';
 import { lazy, Suspense } from 'preact/compat';
 import { useEffect } from 'preact/hooks';
 import { kvGet, kvSet } from '../account/db';
-import { account, consumeSignInLink, newKeysFrom, syncNow } from '../account/session';
+import {
+  account,
+  consumeSignInLink,
+  keyLinkOffer,
+  newKeysFrom,
+  phraseStale,
+  retryRotation,
+  rotation,
+  rotationLeft,
+  setPendingInvite,
+  syncNow,
+} from '../account/session';
 import { needsNewKeys, syncStatus } from '../account/sync';
 import { LogoMark } from '../Logo';
 import './appearance';
@@ -171,7 +182,7 @@ function WaitingLink({ variant }: { variant: 'rail' | 'top' }) {
 
 /** Shown while this device lacks keys that were rotated elsewhere (ADR 0013). */
 function NewKeysBanner() {
-  if (!needsNewKeys.value) return null;
+  if (!needsNewKeys.value || keyLinkOffer.value) return null;
   const from = newKeysFrom();
   return (
     <div class="keybanner" role="status">
@@ -179,7 +190,119 @@ function NewKeysBanner() {
       <span>
         {from === 'my-device'
           ? 'Your keys were changed on another of your devices. On that device, go to Privacy → Link a new device, and open the link here.'
-          : `${nameOf(partner.value)} changed your shared keys. Open the key update link they sent you. Until then, new plans can’t sync.`}
+          : `${nameOf(partner.value)} changed your shared keys. Open the key update link they sent you, or a device link from your other device that already has the new keys. Until then, new plans can’t sync.`}
+      </span>
+    </div>
+  );
+}
+
+/**
+ * A key update link, opened and checked, waiting for the two of you to
+ * compare the new safety code before it's used (review 0005, M4).
+ */
+function KeyLinkPrompt() {
+  const offer = keyLinkOffer.value;
+  if (!offer) return null;
+  const who = nameOf(partner.value);
+  return (
+    <section class="keybanner keylink" aria-labelledby="kl-h">
+      <Icon name="lock" size={16} />
+      <div>
+        <h2 class="h3" id="kl-h">
+          New keys from {who}
+        </h2>
+        <p>
+          Before using them, compare this safety code with the one on {who}’s phone, in person or on
+          a call:
+        </p>
+        <p class="fp">
+          <span class="code">{offer.code}</span>
+        </p>
+        <p class="small">
+          If the numbers differ, don’t use these keys: someone else made the link.
+        </p>
+        <div class="btnrow">
+          <button
+            type="button"
+            class="btn sm primary"
+            onClick={async () => {
+              try {
+                await offer.apply();
+                keyLinkOffer.value = null;
+                toast('New keys added. Make a new recovery phrase in Privacy.');
+              } catch (err) {
+                toast(err instanceof Error ? err.message : 'That link couldn’t be used.');
+              }
+            }}
+          >
+            They match, use these keys
+          </button>
+          <button
+            type="button"
+            class="btn sm ghost"
+            onClick={() => {
+              keyLinkOffer.value = null;
+              setPendingInvite(null);
+              toast('Not used. Tell them, and compare codes again once they’ve made a new link.');
+            }}
+          >
+            They don’t match
+          </button>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+/** A rotation that's waiting on the server, or still re-encrypting (review 0005, H2 and M2). */
+function RotationBanner() {
+  const r = rotation.value;
+  if (!r) return null;
+  if (r.stage === 'staged') {
+    if (!r.backup) return null;
+    return (
+      <div class="keybanner" role="status">
+        <Icon name="lock" size={16} />
+        <span>
+          Your new keys aren’t in use yet: the server didn’t confirm.{' '}
+          <button
+            type="button"
+            class="linkbtn"
+            onClick={() =>
+              void retryRotation().then(
+                () => toast('Done. Your space has new keys.'),
+                (err) =>
+                  toast(err instanceof Error ? err.message : 'Still couldn’t. Try again later.'),
+              )
+            }
+          >
+            Try again
+          </button>
+        </span>
+      </div>
+    );
+  }
+  const left = rotationLeft.value;
+  return (
+    <div class="keybanner" role="status">
+      <Icon name="lock" size={16} />
+      <span>
+        Re-encrypting under the new keys
+        {left ? `: ${left.space + left.mine} left` : ''}. Keep Ours open and online for a moment.
+      </span>
+    </div>
+  );
+}
+
+/** After taking new keys from a link, the old recovery phrase can't restore them (review 0005, M3). */
+function PhraseBanner() {
+  if (!phraseStale.value || needsNewKeys.value) return null;
+  return (
+    <div class="keybanner" role="status">
+      <Icon name="lock" size={16} />
+      <span>
+        Your keys changed, so your recovery phrase can’t restore them.{' '}
+        <a href="#privacy">Make a new phrase in Privacy</a>.
       </span>
     </div>
   );
@@ -332,7 +455,10 @@ export function App() {
             </span>
           </div>
           <UpdateBanner />
+          <KeyLinkPrompt />
           <NewKeysBanner />
+          <RotationBanner />
+          <PhraseBanner />
           <Suspense fallback={<p class="nothing">Loading…</p>}>{content}</Suspense>
         </main>
       </div>

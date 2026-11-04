@@ -19,7 +19,14 @@ async function wrappingKey(): Promise<CryptoKey> {
   return key;
 }
 
-export async function saveRing(ring: KeyRing): Promise<void> {
+/**
+ * `slot` 'staged' holds keys made for a rotation the server hasn't confirmed
+ * yet: never used to seal anything (review 0005, H1).
+ */
+export async function saveRing(
+  ring: KeyRing,
+  slot: 'keyring' | 'staged' = 'keyring',
+): Promise<void> {
   const iv = crypto.getRandomValues(new Uint8Array(12));
   const data = Uint8Array.from(serializeKeyRing(ring));
   const ct = new Uint8Array(
@@ -30,13 +37,11 @@ export async function saveRing(ring: KeyRing): Promise<void> {
     ),
   );
   data.fill(0);
-  await kvSet('keyring', { iv, ct });
+  await kvSet(slot, { iv, ct });
 }
 
-export async function loadRing(): Promise<KeyRing | null> {
-  const stored = await kvGet<{ iv: Uint8Array<ArrayBuffer>; ct: Uint8Array<ArrayBuffer> }>(
-    'keyring',
-  );
+export async function loadRing(slot: 'keyring' | 'staged' = 'keyring'): Promise<KeyRing | null> {
+  const stored = await kvGet<{ iv: Uint8Array<ArrayBuffer>; ct: Uint8Array<ArrayBuffer> }>(slot);
   if (!stored) return null;
   const pt = new Uint8Array(
     await crypto.subtle.decrypt(
@@ -52,6 +57,10 @@ export async function loadRing(): Promise<KeyRing | null> {
   const ring = parseKeyRing(pt);
   pt.fill(0);
   return ring;
+}
+
+export async function dropStaged(): Promise<void> {
+  await kvSet('staged', null);
 }
 
 export { KeyRing };

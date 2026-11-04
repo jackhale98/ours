@@ -20,7 +20,7 @@ import { Hono } from 'hono';
 import { type AppEnv, requireAuth } from '../auth/session';
 import { num } from '../env';
 import { bytesOf, fromB64Url, toB64Url } from '../lib/crypto';
-import { body, query } from '../lib/http';
+import { body, HttpError, query } from '../lib/http';
 import { requireMember } from '../lib/members';
 import { isQuotaAbort, recordCost, SPACE_BYTES_SQL } from '../lib/quota';
 import { rateLimit } from '../lib/ratelimit';
@@ -102,9 +102,16 @@ sync.post('/push', async (c) => {
       results.set(e.id, { status: 'rejected', id: e.id, reason: 'not_owner' });
       continue;
     }
+    // Only the current version may be written: older ones are decrypt-only,
+    // and a newer one isn't real until a rotation makes it current (review
+    // 0005, H1), so keys a device made but never confirmed are never used.
     const floor = e.scope === 'user' ? (floors?.personal ?? 1) : (floors?.space ?? 1);
-    if (e.key_version < floor) {
-      results.set(e.id, { status: 'rejected', id: e.id, reason: 'stale_key' });
+    if (e.key_version !== floor) {
+      results.set(e.id, {
+        status: 'rejected',
+        id: e.id,
+        reason: e.key_version < floor ? 'stale_key' : 'unknown_key',
+      });
       continue;
     }
     const nonce = fromB64Url(e.nonce);
@@ -127,6 +134,7 @@ sync.post('/push', async (c) => {
       if (
         sameBytes(bytesOf(cur.nonce), nonce) &&
         sameBytes(bytesOf(cur.ciphertext), ct) &&
+        cur.key_version === e.key_version &&
         (cur.deleted === 1) === e.deleted
       ) {
         results.set(e.id, { status: 'ok', id: e.id, rev: cur.rev });
@@ -173,10 +181,15 @@ sync.post('/push', async (c) => {
           req.space_id,
         ),
         // Atomic quota check: if the new total is over, this insert fails and
-        // the whole batch (including the writes below) rolls back.
+        // the whole batch (including the writes below) rolls back. The key
+        // versions checked above must also still be current: a rotation in
+        // between aborts the batch too (review 0005, L1).
         c.env.DB.prepare(
-          'INSERT INTO quota_guard (x) SELECT NULL WHERE (SELECT bytes FROM spaces WHERE id = ?) > ?',
-        ).bind(req.space_id, maxBytes),
+          `INSERT INTO quota_guard (x) SELECT NULL
+            WHERE (SELECT bytes FROM spaces WHERE id = ?1) > ?2
+               OR (SELECT key_version FROM spaces WHERE id = ?1) IS NOT ?3
+               OR (SELECT personal_key_version FROM users WHERE id = ?4) IS NOT ?5`,
+        ).bind(req.space_id, maxBytes, floors?.space ?? 1, uid, floors?.personal ?? 1),
         ...accepted.map((a, k) => {
           const e = a.item.envelope;
           return c.env.DB.prepare(
@@ -210,6 +223,14 @@ sync.post('/push', async (c) => {
         out = await c.env.DB.batch(statements);
       } catch (err) {
         if (!isQuotaAbort(err)) throw err;
+        const now = await c.env.DB.prepare(
+          `SELECT (SELECT key_version FROM spaces WHERE id = ?1) AS space,
+                  (SELECT personal_key_version FROM users WHERE id = ?2) AS personal`,
+        )
+          .bind(req.space_id, uid)
+          .first<{ space: number; personal: number }>();
+        if (now?.space !== floors?.space || now?.personal !== floors?.personal)
+          throw new HttpError(503, 'keys_changed', 'Keys just changed. Try again.');
         // A concurrent push filled the space first; nothing was written.
         for (const a of accepted) {
           results.set(a.item.envelope.id, {

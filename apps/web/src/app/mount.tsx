@@ -3,8 +3,9 @@ import { render } from 'preact';
 import '../styles/app.css';
 import {
   account,
-  applyKeyLink,
   consumeSignInLink,
+  keyLinkOffer,
+  openKeyLink,
   pendingInvite,
   restore,
   setPendingInvite,
@@ -31,16 +32,18 @@ export async function mountApp(root: HTMLElement): Promise<void> {
   }
 
   // A key update or device link opened on a device that is already set up.
+  // Its keys are checked first; a key update from the partner then waits
+  // for the two of you to compare the new safety code (review 0005, M4).
   const link = pendingInvite();
   if (link && account.value.status === 'ready') {
     startRequested.value = false;
     try {
-      const kind = await applyKeyLink(link);
-      toast(
-        kind === 'rekey'
-          ? 'New keys added. Compare your safety code again in Privacy.'
-          : 'This device has the new keys.',
-      );
+      const offer = await openKeyLink(link);
+      if (offer.kind === 'rekey') keyLinkOffer.value = offer;
+      else {
+        await offer.apply();
+        toast('This device has the new keys.');
+      }
     } catch (err) {
       setPendingInvite(null);
       toast(err instanceof Error ? err.message : 'That link couldn’t be used.');

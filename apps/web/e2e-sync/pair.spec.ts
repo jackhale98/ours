@@ -349,17 +349,59 @@ test('sign up, pair, compare safety codes, and sync plans both ways', async ({ b
   expect(ics).toContain('SUMMARY:Busy');
   for (const secret of ['Dinner', 'Surprise', 'Vic']) expect(ics).not.toContain(secret);
 
-  // Key rotation (ADR 0013): Sam secures the space after losing a device.
+  // A shared list both will edit while their keys differ (review 0005, M5).
+  await sam.goto('/#lists');
+  await sam.getByRole('button', { name: 'New list' }).click();
+  const listDialog = sam.getByRole('dialog', { name: 'New list' });
+  await listDialog
+    .getByRole('group', { name: 'What kind of list?' })
+    .getByRole('button', { name: /^List/ })
+    .click();
+  await listDialog.getByRole('textbox', { name: 'Name' }).fill('Hardware');
+  await listDialog.getByRole('button', { name: 'Make list' }).click();
+  await sam.getByRole('textbox', { name: 'Add to Hardware' }).fill('Picture hooks');
+  await sam.getByRole('button', { name: 'Add', exact: true }).click();
+  await expect(sam.locator('.rail .demo')).toHaveText('Synced', { timeout: 20_000 });
+  await alex.goto('/#lists');
+  await alex.reload();
+  await expect(alex.getByText('Picture hooks')).toBeVisible({ timeout: 20_000 });
+
+  // Key rotation (ADR 0013, review 0005): Sam secures the space after losing
+  // a device. The new phrase is saved before anything changes on the server.
   const oldCode = await sam.evaluate(() => document.querySelector('.code')?.textContent ?? null);
   await sam.goto('/#privacy');
   const secure = sam.locator('section[aria-labelledby="secure-h"]');
   await secure.getByRole('button', { name: 'Make new keys' }).click();
   await secure.getByRole('button', { name: 'Yes, make new keys' }).click();
+  await expect(secure.locator('.words li')).toHaveCount(12, { timeout: 20_000 });
+  const words = await secure.locator('.words li').allTextContents();
+  expect(words).toHaveLength(12);
+  await secure.getByRole('button', { name: 'I’ve saved these' }).click();
+  for (const label of await secure.locator('label[for^="rot-"]').allTextContents()) {
+    const n = Number(label.replace(/\D/g, ''));
+    await secure.getByRole('textbox', { name: label, exact: true }).fill(words[n - 1] ?? '');
+  }
+  await secure.getByRole('button', { name: 'Save and use the new keys' }).click();
+  await expect(sam.locator('.toast-host')).toContainText('Your space has new keys', {
+    timeout: 20_000,
+  });
+  // Everything is re-encrypted, checked with the server (M2): the banner goes.
+  await expect(sam.locator('.keybanner')).toHaveCount(0, { timeout: 30_000 });
+  await secure.getByRole('button', { name: 'Make key update link' }).click();
   const rekeyLink = (await secure.locator('.url code').textContent({ timeout: 20_000 })) ?? '';
   expect(rekeyLink).toMatch(/\/join\/#[A-Za-z0-9_-]+\.[A-Za-z0-9_-]{43}$/);
-  await secure.getByRole('button', { name: 'Next: new recovery phrase' }).click();
-  await secure.getByRole('button', { name: 'I’ve saved these' }).click();
-  await expect(secure).toContainText('Your space has new keys');
+  const newCode = (await sam.locator('.code').first().textContent()) ?? '';
+  expect(newCode).not.toBe(oldCode);
+
+  // After rotating, Sam renames the item.
+  const editItem = async (page: Page, field: RegExp, value: string) => {
+    await page.goto('/#lists');
+    await page.getByRole('button', { name: /^Details: Picture hooks/ }).click();
+    const sheet = page.getByRole('dialog', { name: /Picture hooks/ });
+    await sheet.getByLabel(field).fill(value);
+    await sheet.getByRole('button', { name: 'Save' }).click();
+  };
+  await editItem(sam, /^What/, 'Picture hooks (brass)');
   await expect(sam.locator('.rail .demo')).toHaveText('Synced', { timeout: 20_000 });
 
   // Alex's device notices the new keys are missing, but keeps working.
@@ -367,7 +409,8 @@ test('sign up, pair, compare safety codes, and sync plans both ways', async ({ b
   await alex.reload();
   await expect(alex.locator('.keybanner')).toContainText('Sam changed your shared keys');
   await expect(alex.getByRole('button', { name: /Dinner/ }).first()).toBeVisible();
-  // A plan made now is kept on Alex's device until the keys arrive.
+  // A plan made now, and a note added to dinner, are kept on Alex's device
+  // until the keys arrive.
   await alex.keyboard.press('n');
   await alex.getByRole('textbox', { name: 'What’s the plan?' }).fill('Picnic tomorrow 2pm');
   await alex.getByRole('dialog').getByRole('button', { name: 'Ours' }).click();
@@ -376,25 +419,45 @@ test('sign up, pair, compare safety codes, and sync plans both ways', async ({ b
     .getByRole('button', { name: /Add plan|Send to Sam/ })
     .click();
   await expect(alex.getByRole('button', { name: /Picnic/ })).toBeVisible();
+  // Alex, still on the old keys, gives the same item a due date.
+  await editItem(alex, /^Due/, '2031-05-20');
 
-  // Alex opens the key update link: banner gone, the held plan syncs to Sam.
+  // Alex opens the key update link, compares the code with Sam's, and uses it.
   await alex.goto(rekeyLink);
+  const prompt = alex.locator('.keylink');
+  await expect(prompt).toContainText('New keys from Sam', { timeout: 20_000 });
+  expect(await prompt.locator('.code').textContent()).toBe(newCode);
+  await prompt.getByRole('button', { name: 'They match, use these keys' }).click();
   await expect(alex.locator('.toast-host')).toContainText('New keys added', { timeout: 20_000 });
-  await expect(alex.locator('.keybanner')).toHaveCount(0);
+  await expect(alex.locator('.keybanner')).not.toContainText('changed your shared keys');
+  // Alex's backup can't hold the new key yet: a new phrase is asked for (M3).
+  await expect(alex.locator('.keybanner')).toContainText('Make a new phrase');
   await expect(alex.locator('.rail .demo')).toHaveText('Synced', { timeout: 20_000 });
-  await sam.goto('/#plan');
+
+  // Both changes to the item survive, on both sides (M5), and the held plan arrived.
+  for (const page of [sam, alex]) {
+    await page.goto('/#plan');
+    await page.reload();
+    await expect(page.getByRole('button', { name: /Picnic/ }).first()).toBeVisible({
+      timeout: 20_000,
+    });
+    await page.goto('/#lists');
+    await page.getByRole('button', { name: /^Details: Picture hooks \(brass\)/ }).click({
+      timeout: 20_000,
+    });
+    const sheet = page.getByRole('dialog', { name: /Picture hooks/ });
+    await expect(sheet.getByLabel(/^Due/)).toHaveValue('2031-05-20');
+    await page.keyboard.press('Escape');
+  }
+
+  // Both see the same new safety code; Sam stops being offered the link (M3).
+  await alex.goto('/#privacy');
+  expect(await alex.locator('.code').first().textContent()).toBe(newCode);
+  await sam.goto('/#privacy');
   await sam.reload();
-  await expect(sam.getByRole('button', { name: /Picnic/ }).first()).toBeVisible({
+  await expect(secure.getByRole('button', { name: 'Make key update link' })).toHaveCount(0, {
     timeout: 20_000,
   });
-  await expect(sam.getByRole('button', { name: /Dinner/ }).first()).toBeVisible();
-
-  // The safety code changed, and both see the same new one.
-  await sam.goto('/#privacy');
-  await alex.goto('/#privacy');
-  const samCode = await sam.locator('.code').first().textContent();
-  expect(samCode).not.toBe(oldCode);
-  expect(await alex.locator('.code').first().textContent()).toBe(samCode);
 });
 
 test('a partner invite can be made again later, from Privacy or Waiting on you', async ({

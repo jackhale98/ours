@@ -16,6 +16,8 @@ export interface AuthSession {
   token_hash: string;
   device_id: string;
   created_at: number;
+  /** Last passkey confirmation in this session (actions that need a recent sign-in). */
+  reauth_at?: number | null;
 }
 
 export type AppEnv = {
@@ -97,7 +99,7 @@ export const requireAuth: MiddlewareHandler<AppEnv> = async (c, next) => {
   const tokenHash = await hashToken(match[1]);
   const now = Date.now();
   const row = await c.env.DB.prepare(
-    `SELECT s.token_hash, s.device_id, s.created_at, s.expires_at, s.last_seen, u.id, u.email
+    `SELECT s.token_hash, s.device_id, s.created_at, s.expires_at, s.last_seen, s.reauth_at, u.id, u.email
        FROM sessions s JOIN users u ON u.id = s.user_id
       WHERE s.token_hash = ?`,
   )
@@ -108,6 +110,7 @@ export const requireAuth: MiddlewareHandler<AppEnv> = async (c, next) => {
       created_at: number;
       expires_at: number;
       last_seen: number | null;
+      reauth_at: number | null;
       id: string;
       email: string;
     }>();
@@ -129,6 +132,7 @@ export const requireAuth: MiddlewareHandler<AppEnv> = async (c, next) => {
     token_hash: row.token_hash,
     device_id: row.device_id,
     created_at: row.created_at,
+    reauth_at: row.reauth_at,
   });
   await next();
 };

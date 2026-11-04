@@ -20,6 +20,7 @@ import { bytesOf, fromB64Url, hashToken, newId, toB64Url } from '../lib/crypto';
 import { body, HttpError } from '../lib/http';
 import { requireMember } from '../lib/members';
 import { rateLimit } from '../lib/ratelimit';
+import { REKEY_WINDOW_MS } from './spaces';
 
 const INVITE_HOURS = 24;
 const NONCE_BYTES = 24;
@@ -62,7 +63,12 @@ invites.post('/', async (c) => {
     v.variant('kind', [
       v.strictObject({ kind: v.literal('partner'), space_id: v.string(), wrapped: Wrapped }),
       v.strictObject({ kind: v.literal('device'), wrapped: Wrapped }),
-      v.strictObject({ kind: v.literal('rekey'), space_id: v.string(), wrapped: Wrapped }),
+      v.strictObject({
+        kind: v.literal('rekey'),
+        space_id: v.string(),
+        key_version: v.pipe(v.number(), v.integer(), v.minValue(2)),
+        wrapped: Wrapped,
+      }),
     ]),
   );
   await rateLimit(c.env, `invite:${uid}`, 20, 86_400);
@@ -78,15 +84,37 @@ invites.post('/', async (c) => {
       throw new HttpError(409, 'space_full', 'This space already has two people.');
     spaceId = input.space_id;
   }
+  let keyVersion: number | null = null;
   if (input.kind === 'rekey') {
     await requireMember(c.env, input.space_id, uid);
-    const members = await c.env.DB.prepare(
-      'SELECT COUNT(*) AS n FROM memberships WHERE space_id = ?',
+    // Only the person who made the latest rotation, for its version, and
+    // only for a while after it (review 0005, M4): a member who signs in
+    // again on a removed device can't hand the partner keys of its choosing.
+    const s = await c.env.DB.prepare(
+      `SELECT key_version, rotated_by, rotated_at,
+              (SELECT COUNT(*) FROM memberships WHERE space_id = ?1) AS n
+         FROM spaces WHERE id = ?1`,
     )
       .bind(input.space_id)
-      .first<{ n: number }>();
-    if ((members?.n ?? 0) < 2) throw new HttpError(409, 'no_partner');
+      .first<{
+        key_version: number;
+        rotated_by: string | null;
+        rotated_at: number | null;
+        n: number;
+      }>();
+    if ((s?.n ?? 0) < 2) throw new HttpError(409, 'no_partner');
+    if (
+      s?.rotated_by !== uid ||
+      Date.now() - (s.rotated_at ?? 0) > REKEY_WINDOW_MS ||
+      s.key_version !== input.key_version
+    )
+      throw new HttpError(
+        409,
+        'not_rotator',
+        'Only the person who changed the keys can send a key update link, for two weeks after.',
+      );
     spaceId = input.space_id;
+    keyVersion = input.key_version;
   }
   const raw = newId();
   const now = Date.now();
@@ -96,7 +124,7 @@ invites.post('/', async (c) => {
       'DELETE FROM invites WHERE created_by = ? AND kind = ? AND space_id IS ? AND used_at IS NULL',
     ).bind(uid, input.kind, spaceId),
     c.env.DB.prepare(
-      'INSERT INTO invites (id, space_id, kind, wrapped, created_by, expires_at) VALUES (?, ?, ?, ?, ?, ?)',
+      'INSERT INTO invites (id, space_id, kind, wrapped, created_by, expires_at, key_version) VALUES (?, ?, ?, ?, ?, ?, ?)',
     ).bind(
       await hashToken(raw),
       spaceId,
@@ -104,6 +132,7 @@ invites.post('/', async (c) => {
       pack(input.wrapped),
       uid,
       now + INVITE_HOURS * 3_600_000,
+      keyVersion,
     ),
   ]);
   return c.json({ id: raw, expires_at: now + INVITE_HOURS * 3_600_000 }, 201);
@@ -120,8 +149,9 @@ invites.get('/:id', async (c) => {
         AND ((kind = 'device' AND created_by = ?1)
           OR (kind = 'partner' AND created_by != ?1)
           OR (kind = 'rekey' AND created_by != ?1
-              AND EXISTS (SELECT 1 FROM memberships WHERE space_id = invites.space_id AND user_id = ?1)))
-      RETURNING kind, space_id, wrapped, created_by, expires_at`,
+              AND EXISTS (SELECT 1 FROM memberships WHERE space_id = invites.space_id AND user_id = ?1)
+              AND key_version = (SELECT key_version FROM spaces WHERE id = invites.space_id)))
+      RETURNING kind, space_id, wrapped, created_by, expires_at, key_version`,
   )
     .bind(uid, idHash, Date.now())
     .first<{
@@ -130,6 +160,7 @@ invites.get('/:id', async (c) => {
       wrapped: ArrayBuffer;
       created_by: string;
       expires_at: number;
+      key_version: number | null;
     }>();
   if (!row)
     throw new HttpError(404, 'not_found', 'This invite has expired, was used, or isn’t for you.');
@@ -147,7 +178,36 @@ invites.get('/:id', async (c) => {
     wrapped: unpack(bytesOf(row.wrapped)),
     inviter: row.created_by,
     expires_at: row.expires_at,
+    key_version: row.key_version,
   });
+});
+
+/**
+ * What kind of link this is, without claiming it (review 0005, I1), so a
+ * set-up device doesn't use up someone else's first invite by opening it.
+ * Answers only the account that could claim it.
+ */
+invites.get('/:id/kind', async (c) => {
+  const uid = c.var.user.id;
+  await rateLimit(c.env, `invite-fetch:${uid}`, 30, 3600);
+  const idHash = await hashToken(inviteId(c.req.param('id')));
+  const row = await c.env.DB.prepare(
+    `SELECT kind, space_id, key_version FROM invites
+      WHERE id = ?2 AND used_at IS NULL AND expires_at > ?3 AND (claimed_by IS NULL OR claimed_by = ?1)
+        AND ((kind = 'device' AND created_by = ?1)
+          OR (kind = 'partner' AND created_by != ?1)
+          OR (kind = 'rekey' AND created_by != ?1
+              AND EXISTS (SELECT 1 FROM memberships WHERE space_id = invites.space_id AND user_id = ?1)))`,
+  )
+    .bind(uid, idHash, Date.now())
+    .first<{
+      kind: 'partner' | 'device' | 'rekey';
+      space_id: string | null;
+      key_version: number | null;
+    }>();
+  if (!row)
+    throw new HttpError(404, 'not_found', 'This invite has expired, was used, or isn’t for you.');
+  return c.json(row);
 });
 
 /** Accepting adds the membership (partner) and erases the wrapped key blob. */

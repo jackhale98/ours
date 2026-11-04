@@ -19,6 +19,7 @@ import { type Env, num } from '../env';
 import { fromB64Url, newId } from '../lib/crypto';
 import { body, HttpError } from '../lib/http';
 import { requireMember } from '../lib/members';
+import { isQuotaAbort } from '../lib/quota';
 import { rateLimit } from '../lib/ratelimit';
 import { deliver, MAX_PAYLOAD_BYTES, quietUntil, vapidKeys } from '../push/send';
 import { isPushEndpoint } from '../push/vapid';
@@ -64,7 +65,11 @@ function isTimeZone(tz: string): boolean {
   }
 }
 
-/** After a rotation, payloads under old key versions are refused (ADR 0013). */
+/**
+ * Only payloads under the current key version are accepted: older ones are
+ * decrypt-only after a rotation (ADR 0013), and a newer one isn't real until
+ * a rotation makes it current (review 0005, H1).
+ */
 async function requireCurrentKey(
   env: Env,
   scope: 'space' | 'user',
@@ -78,9 +83,21 @@ async function requireCurrentKey(
   )
     .bind(id)
     .first<{ v: number }>();
-  if (row && version < row.v)
+  if (row && version !== row.v)
     throw new HttpError(409, 'stale_key', 'This device needs the new keys.');
 }
+
+/** Aborts a batch if the key version changed after it was checked (review 0005, L1). */
+const keyGuard = (env: Env, scope: 'space' | 'user', id: string, version: number) =>
+  env.DB.prepare(
+    `INSERT INTO quota_guard (x) SELECT NULL WHERE (${
+      scope === 'space'
+        ? 'SELECT key_version FROM spaces WHERE id = ?1'
+        : 'SELECT personal_key_version FROM users WHERE id = ?1'
+    }) IS NOT ?2`,
+  ).bind(id, version);
+
+const keysChanged = () => new HttpError(409, 'stale_key', 'This device needs the new keys.');
 
 export const push = new Hono<AppEnv>();
 push.use('*', requireAuth);
@@ -218,18 +235,24 @@ push.post('/notify', async (c) => {
       continue;
     }
     // At most MAX_DEFERRED per sender and target: a new one replaces the oldest.
-    await c.env.DB.batch([
-      c.env.DB.prepare(
-        `DELETE FROM reminders WHERE id IN (
-           SELECT id FROM reminders
-            WHERE target_user_id = ?1 AND sender_user_id = ?2 AND kind = 'deferred'
-            ORDER BY created_at DESC LIMIT -1 OFFSET ?3)`,
-      ).bind(t.user_id, uid, MAX_DEFERRED_PER_TARGET - 1),
-      c.env.DB.prepare(
-        `INSERT INTO reminders (id, space_id, target_user_id, sender_user_id, kind, scope, fire_at, key_version, payload, created_at)
-         VALUES (?, ?, ?, ?, 'deferred', 'space', ?, ?, ?, ?)`,
-      ).bind(newId(), input.space_id, t.user_id, uid, until, input.key_version, payload, now),
-    ]);
+    try {
+      await c.env.DB.batch([
+        keyGuard(c.env, 'space', input.space_id, input.key_version),
+        c.env.DB.prepare(
+          `DELETE FROM reminders WHERE id IN (
+             SELECT id FROM reminders
+              WHERE target_user_id = ?1 AND sender_user_id = ?2 AND kind = 'deferred'
+              ORDER BY created_at DESC LIMIT -1 OFFSET ?3)`,
+        ).bind(t.user_id, uid, MAX_DEFERRED_PER_TARGET - 1),
+        c.env.DB.prepare(
+          `INSERT INTO reminders (id, space_id, target_user_id, sender_user_id, kind, scope, fire_at, key_version, payload, created_at)
+           VALUES (?, ?, ?, ?, 'deferred', 'space', ?, ?, ?, ?)`,
+        ).bind(newId(), input.space_id, t.user_id, uid, until, input.key_version, payload, now),
+      ]);
+    } catch (err) {
+      if (isQuotaAbort(err)) throw keysChanged();
+      throw err;
+    }
     deferred++;
   }
   // Sending happens after the response, so its timing reveals nothing to the caller.
@@ -278,25 +301,32 @@ push.put('/reminders', async (c) => {
   }
   // Only future reminders: past ones would jump the queue for everyone (review M1).
   const future = input.items.filter((i) => i.fire_at > now);
-  await c.env.DB.batch([
-    c.env.DB.prepare(
-      "DELETE FROM reminders WHERE target_user_id = ? AND space_id = ? AND kind = 'reminder'",
-    ).bind(uid, input.space_id),
-    ...future.map((item) =>
+  const versions = [...new Set(input.items.map((i) => i.key_version))];
+  try {
+    await c.env.DB.batch([
+      ...versions.map((k) => keyGuard(c.env, 'user', uid, k)),
       c.env.DB.prepare(
-        `INSERT INTO reminders (id, space_id, target_user_id, sender_user_id, kind, scope, fire_at, key_version, payload, created_at)
-         VALUES (?, ?, ?, ?, 'reminder', 'user', ?, ?, ?, ?)`,
-      ).bind(
-        newId(),
-        input.space_id,
-        uid,
-        uid,
-        item.fire_at,
-        item.key_version,
-        pack(item.payload),
-        now,
+        "DELETE FROM reminders WHERE target_user_id = ? AND space_id = ? AND kind = 'reminder'",
+      ).bind(uid, input.space_id),
+      ...future.map((item) =>
+        c.env.DB.prepare(
+          `INSERT INTO reminders (id, space_id, target_user_id, sender_user_id, kind, scope, fire_at, key_version, payload, created_at)
+           VALUES (?, ?, ?, ?, 'reminder', 'user', ?, ?, ?, ?)`,
+        ).bind(
+          newId(),
+          input.space_id,
+          uid,
+          uid,
+          item.fire_at,
+          item.key_version,
+          pack(item.payload),
+          now,
+        ),
       ),
-    ),
-  ]);
+    ]);
+  } catch (err) {
+    if (isQuotaAbort(err)) throw keysChanged();
+    throw err;
+  }
   return c.json({ ok: true, stored: future.length });
 });

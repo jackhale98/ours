@@ -113,9 +113,19 @@ export class SyncEngine implements Backend {
     return Math.max(0, ...keys.map((k) => k.version));
   }
 
-  /** A record under a key version this device doesn't have yet. */
+  /**
+   * A record under a key version this device doesn't hold (review 0005, L3):
+   * a newer one, or a gap in the ring. Its data is kept until the key comes.
+   */
   private unknownKey(e: Envelope | EnvelopeInput): boolean {
-    return e.key_version > this.latestVersion(e.scope);
+    const keys =
+      e.scope === 'user' ? this.ctx.ring.personalKeys() : this.ctx.ring.spaceKeys(this.ctx.spaceId);
+    if (e.scope === 'user' && e.owner_user_id !== this.ctx.userId) return false;
+    return !keys.some((k) => k.version === e.key_version);
+  }
+
+  private repullKey() {
+    return `repull:${this.ctx.spaceId}`;
   }
 
   /** Decrypts and validates an envelope. Null if this device can't or shouldn't show it. */
@@ -162,6 +172,14 @@ export class SyncEngine implements Backend {
   /** Loads the local copy (server versions overlaid with pending writes) into the UI. */
   async start(): Promise<void> {
     const d = await db();
+    // Records skipped for want of keys are pulled again from where they
+    // began, so they merge against the true base now (review 0005, M5).
+    const repull = await kvGet<number>(this.repullKey());
+    if (repull !== undefined) {
+      const cursor = (await kvGet<number>(this.cursorKey())) ?? 0;
+      await kvSet(this.cursorKey(), Math.min(cursor, repull));
+      await d.delete('kv', this.repullKey());
+    }
     const [envelopes, outbox] = await Promise.all([d.getAll('envelopes'), d.getAllKeys('outbox')]);
     const pending = new Map<string, OutboxEntry>();
     for (const id of outbox) {
@@ -202,7 +220,28 @@ export class SyncEngine implements Backend {
     this.interval = setInterval(() => {
       if (document.visibilityState === 'visible') void this.sync();
     }, 30_000);
-    void this.sync();
+    void this.sync().then(() => this.sweep());
+  }
+
+  /**
+   * Every device that holds the current keys re-seals what it has stored
+   * under older ones, once it has caught up (review 0005, M2): records the
+   * rotating device never had, or couldn't finish, still get done.
+   */
+  private async sweep(): Promise<void> {
+    if (this.stopped || !this.caught || needsNewKeys.value) return;
+    await this.reencryptAll();
+  }
+
+  /** Syncs until caught up with the server and nothing is left to push. */
+  async settle(): Promise<boolean> {
+    for (let i = 0; i < 5 && !this.stopped; i++) {
+      await this.sync();
+      const pending = (await (await db()).getAllKeys('outbox')).length;
+      if (this.caught && pending === 0) return true;
+      if (!this.caught) return false;
+    }
+    return false;
   }
 
   /** `restarting`: a new engine takes over at once, so the app stays in account mode. */
@@ -262,6 +301,7 @@ export class SyncEngine implements Backend {
         (e.scope === 'space' || e.owner_user_id === this.ctx.userId) &&
         e.key_version < this.latestVersion(e.scope),
     );
+    if (!envelopes.length) return 0;
     const tx = d.transaction(['outbox'], 'readwrite');
     let n = 0;
     for (const e of envelopes) {
@@ -344,8 +384,16 @@ export class SyncEngine implements Backend {
           if (unchanged) await d.delete('outbox', id);
           else if (current) await d.put('outbox', { ...current, base_rev: result.rev }, id);
         } else if (result.status === 'conflict') {
-          await this.resolve(id, result.current, current, remoteUpserts, remoteRemoved);
-        } else if (result.reason === 'stale_key') {
+          const held = await this.resolve(
+            id,
+            result.current,
+            current,
+            remoteUpserts,
+            remoteRemoved,
+          );
+          // Can't merge without the key: hold it, don't resend in a loop (L5).
+          if (held) stale = true;
+        } else if (result.reason === 'stale_key' || result.reason === 'unknown_key') {
           // Keys were rotated elsewhere. Keep the change: it is re-sealed
           // once this device has the new keys.
           stale = true;
@@ -374,21 +422,27 @@ export class SyncEngine implements Backend {
     pending: OutboxEntry | undefined,
     upserts: Entry[],
     removed: string[],
-  ): Promise<void> {
+  ): Promise<boolean> {
     const d = await db();
-    const remote = this.open(remoteEnv);
     const baseEnv = await d.get('envelopes', id);
-    await d.put('envelopes', remoteEnv, id);
+    // A copy under an older key than the one this device already has for
+    // the record is a rollback, never a real change (review 0005, M6).
+    if (baseEnv && baseEnv.scope === remoteEnv.scope && remoteEnv.key_version < baseEnv.key_version)
+      return false;
+    const remote = this.open(remoteEnv);
     if (!remote && this.unknownKey(remoteEnv)) {
-      // Re-encrypted under keys this device doesn't have yet: keep showing
-      // what it has (and any pending change) until the key update arrives.
+      // Under keys this device doesn't have yet: keep showing what it has
+      // (and any pending change) until the key update arrives. The stored
+      // base stays as it was, so the later merge is three-way against the
+      // true base (review 0005, M5).
       needsNewKeys.value = true;
-      return;
+      return true;
     }
+    await d.put('envelopes', remoteEnv, id);
     if (!remote) {
       if (pending) await d.delete('outbox', id);
       removed.push(id);
-      return;
+      return false;
     }
     const local = pending ? this.open(pending.envelope) : baseEnv ? this.open(baseEnv) : null;
     const base = baseEnv ? (this.open(baseEnv) ?? undefined) : undefined;
@@ -409,6 +463,7 @@ export class SyncEngine implements Backend {
     const entry = this.toEntry(remoteEnv, outcome.record);
     if (entry) upserts.push(entry);
     else removed.push(id);
+    return false;
   }
 
   private async pull(): Promise<void> {
@@ -420,9 +475,14 @@ export class SyncEngine implements Backend {
       );
       const upserts: Entry[] = [];
       const removed: string[] = [];
+      let held = false;
       for (const env of page.envelopes) {
         const pending = await d.get('outbox', env.id);
-        await this.resolve(env.id, env, pending, upserts, removed);
+        if (await this.resolve(env.id, env, pending, upserts, removed)) held = true;
+      }
+      if (held) {
+        const from = await kvGet<number>(this.repullKey());
+        if (from === undefined || since < from) await kvSet(this.repullKey(), since);
       }
       applyRemote(upserts, removed);
       since = page.cursor;
