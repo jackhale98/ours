@@ -20,12 +20,14 @@ import {
   createSpace,
   currentSafetyCode,
   invitePartner,
+  me,
   pendingInvite,
   restoreFromPhrase,
   saveBackup,
   setPendingInvite,
   signInWithPasskey,
   startEmail,
+  unlockThisDevice,
   verifyEmail,
 } from '../../account/session';
 import { mountTurnstile, turnstileEnabled } from '../../account/turnstile';
@@ -428,13 +430,37 @@ function RestoreKeys() {
   const [phrase, setPhrase] = useState('');
   const [busy, setBusy] = useState(false);
   const link = pendingInvite();
+  // Offered when the account has a passkey (it may or may not be set up to unlock).
+  const canUnlock =
+    !!me.value?.passkey_unlock && (me.value?.passkeys ?? 0) > 0 && 'credentials' in navigator;
   return (
     <section class="card">
       <h2 class="h3">Welcome back</h2>
       <p class="d">
-        This device doesn’t have your keys yet. Open or paste a link from another of your devices
-        (Privacy → Link a new device), or enter your recovery phrase.
+        This device doesn’t have your keys yet.
+        {canUnlock ? ' Unlock them with your passkey, ' : ' '}
+        Open or paste a link from another of your devices (Privacy → Link a new device), or enter
+        your recovery phrase.
       </p>
+      {canUnlock && (
+        <button
+          type="button"
+          class="btn primary"
+          disabled={busy}
+          onClick={async () => {
+            setBusy(true);
+            try {
+              await unlockThisDevice();
+            } catch (err) {
+              toast(err instanceof Error ? err.message : 'That passkey couldn’t unlock your keys.');
+            } finally {
+              setBusy(false);
+            }
+          }}
+        >
+          Unlock with a passkey
+        </button>
+      )}
       {link && (
         <button
           type="button"

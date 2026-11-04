@@ -22,11 +22,14 @@ import {
   openDeviceInvite,
   openPartnerInvite,
   openRekeyInvite,
+  openUnlock,
   parseInviteFragment,
   recoveryKeyFromPhrase,
   safetyCode,
   sealBackup,
+  sealUnlock,
   toBase64Url,
+  UNLOCK_SALT,
 } from '@ours/core/crypto';
 import { signal } from '@preact/signals';
 import type { Slot } from '../app/model';
@@ -70,6 +73,8 @@ interface MeResponse {
   device_id: string;
   /** When this session signed in or last confirmed with a passkey. */
   signed_in_at?: number;
+  /** Whether passkeys may be set up to unlock keys (ADR 0015). */
+  passkey_unlock?: boolean;
   devices: { id: string; label: string; created_at: number; last_seen: number | null }[];
   spaces: {
     space_id: string;
@@ -302,15 +307,28 @@ export async function signInWithPasskey(): Promise<void> {
     challenge_id: string;
     options: Parameters<typeof startAuthentication>[0]['optionsJSON'];
   }>('/auth/passkey/login/options', { auth: false, body: {} });
-  const response = await startAuthentication({ optionsJSON: opts.options });
-  const res = await api<Session>('/auth/passkey/login/verify', {
-    auth: false,
-    body: { challenge_id: opts.challenge_id, response, device_label: deviceLabel() },
+  // The same touch can unlock this account's keys, if the passkey was set up
+  // for it (ADR 0015): ask the passkey for its unlock secret too.
+  const response = await startAuthentication({
+    optionsJSON: { ...opts.options, extensions: { ...opts.options.extensions, ...prfRequest() } },
   });
-  const session: Session = { token: res.token, user: res.user, device_id: res.device_id };
-  await kvSet('session', session);
-  setToken(session.token);
-  await refresh(session);
+  const prf = takePrf(response.clientExtensionResults);
+  try {
+    const res = await api<Session>('/auth/passkey/login/verify', {
+      auth: false,
+      body: { challenge_id: opts.challenge_id, response, device_label: deviceLabel() },
+    });
+    const session: Session = { token: res.token, user: res.user, device_id: res.device_id };
+    await kvSet('session', session);
+    setToken(session.token);
+    await refresh(session);
+    if (prf && account.value.status === 'needs-keys')
+      await unlockWith(response.id, prf).catch(() => {
+        // Not set up for this passkey: the Welcome back screen offers the rest.
+      });
+  } finally {
+    prf?.fill(0);
+  }
 }
 
 export async function addPasskey(): Promise<void> {
@@ -319,7 +337,16 @@ export async function addPasskey(): Promise<void> {
     challenge_id: string;
     options: Parameters<typeof startRegistration>[0]['optionsJSON'];
   }>('/auth/passkey/register/options', { body: {} });
-  const response = await startRegistration({ optionsJSON: opts.options });
+  // Made able to unlock keys later (ADR 0015): some passkeys, like security
+  // keys, only answer PRF requests if asked for it when they're created.
+  const response = await startRegistration({
+    optionsJSON: {
+      ...opts.options,
+      extensions: { ...opts.options.extensions, prf: {} } as NonNullable<
+        typeof opts.options.extensions
+      >,
+    },
+  });
   await api('/auth/passkey/register/verify', {
     body: { challenge_id: opts.challenge_id, response },
   });
@@ -702,6 +729,9 @@ async function commitStaged(
   await setRotation(spaceId, { stage: 'securing', version: floor.space });
   // The server dropped reminders sealed under the old key: send them again (L2).
   await forgetReminders();
+  // And every passkey unlock (ADR 0015): they're set up again on purpose.
+  await kvSet('unlock-versions', {});
+  passkeyUnlocks.value = [];
   // The backup was made over these keys before the server moved.
   phraseStale.value = false;
   await kvSet('phrase-stale', false);
@@ -1103,6 +1133,144 @@ async function keepAside(
 
 /** The pending link, waiting for the person to compare the code and confirm. */
 export const keyLinkOffer = signal<KeyLinkOffer | null>(null);
+
+/* ---------- passkey unlock (ADR 0015) ---------- */
+
+/** Which passkeys can unlock this account's keys. */
+export const passkeyUnlocks = signal<{ passkey_id: string; created_at: number }[] | null>(null);
+/** This account's passkeys. */
+export const passkeyList = signal<{ id: string; created_at: number }[] | null>(null);
+/** The keys changed since a passkey's copy was sealed: it unlocks old ones only. */
+export const unlockStale = signal(false);
+
+/** The PRF request every unlock carries (the same fixed input for every passkey). */
+function prfRequest(): AuthenticationExtensionsClientInputs {
+  return { prf: { eval: { first: UNLOCK_SALT } } } as AuthenticationExtensionsClientInputs;
+}
+
+/**
+ * The passkey's unlock secret, taken out of the extension results so it is
+ * never sent anywhere (the server must never see it).
+ */
+function takePrf(results: object | undefined): Uint8Array | null {
+  const r = results as
+    | { prf?: { results?: { first?: ArrayBuffer | ArrayBufferView } } }
+    | undefined;
+  const first = r?.prf?.results?.first;
+  if (r?.prf) delete r.prf;
+  if (!first) return null;
+  return first instanceof ArrayBuffer
+    ? new Uint8Array(first.slice(0))
+    : new Uint8Array(first.buffer.slice(first.byteOffset, first.byteOffset + first.byteLength));
+}
+
+/** Asks a passkey (with face, fingerprint or passcode) for its unlock secret. */
+async function unlockCeremony(): Promise<{ id: string; prf: Uint8Array }> {
+  const cred = (await navigator.credentials.get({
+    publicKey: {
+      challenge: crypto.getRandomValues(new Uint8Array(32)),
+      userVerification: 'required',
+      timeout: 120_000,
+      extensions: prfRequest(),
+    },
+  })) as PublicKeyCredential | null;
+  if (!cred) throw new Error('No passkey was chosen.');
+  const prf = takePrf(cred.getClientExtensionResults());
+  if (!prf)
+    throw new Error(
+      'That passkey can’t unlock keys. Try another one, or use your recovery phrase or a device link.',
+    );
+  return { id: toBase64Url(new Uint8Array(cred.rawId)), prf };
+}
+
+const versionsOf = (r: KeyRing, spaceId: string) =>
+  `${r.currentSpaceKey(spaceId).version}:${r.currentPersonalKey().version}`;
+
+/** Fetches a passkey's sealed copy and opens it on this device. */
+async function unlockWith(passkeyId: string, prf: Uint8Array): Promise<void> {
+  const state = account.value;
+  if (state.status !== 'needs-keys') return;
+  const res = await api<{ wrapped: { nonce: string; ciphertext: string } }>(
+    `/keys/unlock/${encodeURIComponent(passkeyId)}`,
+  );
+  const r = openUnlock(prf, state.session.user.id, passkeyId, {
+    nonce: fromBase64Url(res.wrapped.nonce),
+    ciphertext: fromBase64Url(res.wrapped.ciphertext),
+  });
+  await saveRing(r);
+  ring = r;
+  await refresh(state.session);
+}
+
+/** Welcome back: unlock this device's keys with a passkey instead of a link or the phrase. */
+export async function unlockThisDevice(): Promise<void> {
+  const { id, prf } = await unlockCeremony();
+  try {
+    await unlockWith(id, prf);
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 404)
+      throw new Error(
+        'That passkey isn’t set up to unlock your keys. Use a device link or your recovery phrase.',
+      );
+    throw err;
+  } finally {
+    prf.fill(0);
+  }
+}
+
+/** Lets a passkey unlock this account's keys on a new device. */
+export async function enablePasskeyUnlock(): Promise<void> {
+  const state = account.value;
+  if (state.status !== 'ready' || !ring) throw new Error('Not ready yet.');
+  const { id, prf } = await unlockCeremony();
+  try {
+    const sealed = sealUnlock(prf, ring, id);
+    await api(`/keys/unlock/${encodeURIComponent(id)}`, {
+      method: 'PUT',
+      body: {
+        wrapped: { nonce: toBase64Url(sealed.nonce), ciphertext: toBase64Url(sealed.ciphertext) },
+      },
+    });
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 404)
+      throw new Error('That passkey belongs to another account.');
+    throw err;
+  } finally {
+    prf.fill(0);
+  }
+  const versions = (await kvGet<Record<string, string>>('unlock-versions')) ?? {};
+  await kvSet('unlock-versions', { ...versions, [id]: versionsOf(ring, state.spaceId) });
+  await loadPasskeys();
+}
+
+export async function disablePasskeyUnlock(passkeyId: string): Promise<void> {
+  await api(`/keys/unlock/${encodeURIComponent(passkeyId)}`, { method: 'DELETE' });
+  await loadPasskeys();
+}
+
+export async function removePasskey(passkeyId: string): Promise<void> {
+  await api(`/auth/passkeys/${encodeURIComponent(passkeyId)}`, { method: 'DELETE' });
+  if (me.value) me.value = { ...me.value, passkeys: Math.max(0, me.value.passkeys - 1) };
+  await loadPasskeys();
+}
+
+/** Passkeys, which can unlock, and whether any copy is behind the current keys. */
+export async function loadPasskeys(): Promise<void> {
+  const state = account.value;
+  const [list, unlocks] = await Promise.all([
+    api<{ passkeys: { id: string; created_at: number }[] }>('/auth/passkeys'),
+    api<{ unlocks: { passkey_id: string; created_at: number }[] }>('/keys/unlocks'),
+  ]);
+  passkeyList.value = list.passkeys;
+  passkeyUnlocks.value = unlocks.unlocks;
+  const versions = (await kvGet<Record<string, string>>('unlock-versions')) ?? {};
+  const now = state.status === 'ready' && ring ? versionsOf(ring, state.spaceId) : null;
+  unlockStale.value =
+    !!now &&
+    unlocks.unlocks.some(
+      (u) => versions[u.passkey_id] !== undefined && versions[u.passkey_id] !== now,
+    );
+}
 
 /** Checks whether the partner has joined (polled while showing the invite). */
 export async function checkPartner(): Promise<boolean> {

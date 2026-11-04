@@ -12,6 +12,8 @@ export interface Env {
   ALLOW_SIGNUPS: 'open' | 'invite_only' | 'closed';
   /** Key rotation (ADR 0013): allowed only when 'on'. */
   ROTATION?: string;
+  /** Passkey unlock (ADR 0015): allowed only when 'on'. */
+  PASSKEY_UNLOCK?: string;
   /** Public URL of the web app, used in magic links, e.g. https://you.github.io/ours/ */
   APP_URL?: string;
   /** WebAuthn relying party id (the web app's hostname) and display name. */

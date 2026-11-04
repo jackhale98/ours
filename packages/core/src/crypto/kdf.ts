@@ -16,6 +16,7 @@ export const LABELS = {
   notify: 'ours/notify/v1',
   safety: 'ours/safety-code/v1',
   keyId: 'ours/key-id/v1',
+  unlock: 'ours/passkey-unlock/v1',
   export: 'ours/export/v1',
 } as const;
 

@@ -538,3 +538,76 @@ test('a partner invite can be made again later, from Privacy or Waiting on you',
     jo.locator('.wo-card').getByRole('button', { name: 'Make an invite link' }),
   ).toBeVisible();
 });
+
+test('a passkey can sign in and unlock the keys, without a link or the phrase', async ({
+  browser,
+}) => {
+  const page = await newPage(browser);
+  // A virtual passkey with PRF, like iCloud Keychain or Google Password Manager.
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send('WebAuthn.enable');
+  await cdp.send('WebAuthn.addVirtualAuthenticator', {
+    options: {
+      protocol: 'ctap2',
+      transport: 'internal',
+      hasResidentKey: true,
+      hasUserVerification: true,
+      isUserVerified: true,
+      hasPrf: true,
+      automaticPresenceSimulation: true,
+    },
+  });
+  await page.goto('/#start');
+  await signUp(page, `kim-${Date.now()}@example.com`);
+  await page.getByRole('textbox', { name: 'Your first name' }).fill('Kim');
+  await page.getByRole('button', { name: 'Create our space' }).click();
+  await recoveryPhrase(page);
+  await page.getByRole('button', { name: 'Do this later' }).click();
+  await page.getByRole('button', { name: 'Add a passkey' }).click();
+  await expect(page.getByRole('heading', { name: 'This week', exact: true })).toBeVisible();
+
+  // Something to find again.
+  await page.keyboard.press('n');
+  await page.getByRole('textbox', { name: 'What’s the plan?' }).fill('Brunch saturday 11am');
+  await page
+    .getByRole('dialog')
+    .getByRole('button', { name: /Add plan|Send to/ })
+    .click();
+  await expect(page.locator('.rail .demo')).toHaveText('Synced', { timeout: 20_000 });
+
+  // Turn on unlocking with the passkey, after reading what it means.
+  await page.goto('/#privacy');
+  const card = page.locator('section[aria-labelledby="pk-h"]');
+  await expect(card).toContainText('signs in');
+  await card.getByRole('button', { name: 'Let a passkey unlock my keys' }).click();
+  await expect(card).toContainText('Leave it off if someone close to you knows your passcode');
+  await card.getByRole('button', { name: 'Choose a passkey' }).click();
+  await expect(page.locator('.toast-host')).toContainText('can now unlock your keys', {
+    timeout: 20_000,
+  });
+  await expect(card).toContainText('signs in and unlocks your keys');
+
+  // Signing out removes everything from this device...
+  await page
+    .locator('section[aria-labelledby="acct-h"]')
+    .getByRole('button', { name: 'Sign out' })
+    .click();
+  await page.getByRole('button', { name: 'Tap again to sign out' }).click();
+  // ...and one touch of the passkey brings it all back.
+  await page.goto('/#start');
+  await page.reload();
+  // The passkey's unlock secret never leaves the device: not in the sign-in.
+  const sent: string[] = [];
+  page.on('request', (r) => {
+    if (r.method() !== 'GET') sent.push(r.postData() ?? '');
+  });
+  await page.getByRole('button', { name: 'Sign in with a passkey' }).click();
+  await expect(page.getByRole('heading', { name: 'Welcome back' })).toHaveCount(0);
+  await page.goto('/#plan');
+  await expect(page.getByRole('button', { name: /Brunch/ }).first()).toBeVisible({
+    timeout: 20_000,
+  });
+  expect(sent.some((b) => b.includes('authenticatorData'))).toBe(true);
+  for (const b of sent) expect(b).not.toMatch(/"prf"|"results"/);
+  await page.context().close();
+});

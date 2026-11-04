@@ -76,3 +76,4 @@ export {
   sealBackup,
 } from './recovery';
 export { keyId, safetyCode } from './safety';
+export { openUnlock, sealUnlock, UNLOCK_SALT } from './unlock';

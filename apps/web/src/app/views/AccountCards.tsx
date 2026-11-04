@@ -5,7 +5,7 @@ import {
   generateRecoveryPhrase,
   pickConfirmationIndices,
 } from '@ours/core/crypto';
-import { useState } from 'preact/hooks';
+import { useEffect, useState } from 'preact/hooks';
 import { ApiError, api } from '../../account/api';
 import {
   disablePush,
@@ -20,25 +20,33 @@ import {
 import {
   abandonRotation,
   account,
+  addPasskey,
   commitRotation,
   comparedVersion,
   confirmItsYou,
   currentSafetyCode,
+  disablePasskeyUnlock,
   dismissPhraseKept,
+  enablePasskeyUnlock,
   keyUpdateLink,
   linkDevice,
+  loadPasskeys,
   markCompared,
   me,
   needsConfirm,
   partnerNeedsKeyLink,
+  passkeyList,
+  passkeyUnlocks,
   phraseKept,
   prepareRotation,
+  removePasskey,
   replacedFeed,
   retryRotation,
   rotation,
   rotationBlocked,
   saveBackup,
   signOut,
+  unlockStale,
 } from '../../account/session';
 import { needsNewKeys } from '../../account/sync';
 import { nameOf, partner, settings, updateSettings, viewer } from '../model';
@@ -118,6 +126,156 @@ export function DevicesCard() {
           Link a new device
         </button>
       )}
+    </section>
+  );
+}
+
+/**
+ * Passkeys, and letting one unlock your keys on a new device (ADR 0015).
+ * Off unless turned on, with the trade-off said plainly.
+ */
+export function PasskeysCard() {
+  const info = me.value;
+  const [busy, setBusy] = useState(false);
+  const [armed, setArmed] = useState(false);
+  useEffect(() => {
+    void loadPasskeys().catch(() => {});
+  }, []);
+  if (!info) return null;
+  const list = passkeyList.value ?? [];
+  const unlocks = new Set((passkeyUnlocks.value ?? []).map((u) => u.passkey_id));
+  const partnerName = nameOf(partner.value);
+  const run = async (fn: () => Promise<void>, ok: string) => {
+    setBusy(true);
+    try {
+      await fn();
+      toast(ok);
+    } catch (err) {
+      if (err instanceof ApiError && err.code === 'reauth_required')
+        toast(
+          'For safety, adding a passkey needs a fresh sign-in. Sign out and in, then try again.',
+        );
+      else toast(err instanceof Error ? err.message : 'That didn’t work. Try again.');
+    } finally {
+      setBusy(false);
+      setArmed(false);
+    }
+  };
+  return (
+    <section class="card" aria-labelledby="pk-h">
+      <h2 class="h3" id="pk-h">
+        Passkeys
+      </h2>
+      <p class="d">
+        A passkey signs you in with your face, fingerprint or device passcode.
+        {info.passkey_unlock
+          ? ' It can also unlock your keys on a new device, so you don’t need a device link or your recovery phrase.'
+          : ''}
+      </p>
+      {list.length ? (
+        <ul class="devs">
+          {list.map((p, i) => (
+            <li key={p.id}>
+              <Icon name="lock" />
+              <span>
+                Passkey {i + 1}
+                <span class="small muted">
+                  {' '}
+                  · added {when(p.created_at)} ·{' '}
+                  {unlocks.has(p.id) ? 'signs in and unlocks your keys' : 'signs in'}
+                </span>
+              </span>
+              <span class="btnrow">
+                {unlocks.has(p.id) && (
+                  <button
+                    type="button"
+                    class="linkbtn"
+                    disabled={busy}
+                    onClick={() =>
+                      void run(() => disablePasskeyUnlock(p.id), 'It no longer unlocks your keys.')
+                    }
+                  >
+                    Stop unlocking
+                  </button>
+                )}
+                <button
+                  type="button"
+                  class="iconbtn"
+                  aria-label={`Remove passkey ${i + 1}`}
+                  disabled={busy}
+                  onClick={() => void run(() => removePasskey(p.id), 'Passkey removed.')}
+                >
+                  <Icon name="x" size={16} />
+                </button>
+              </span>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p class="d small">No passkeys yet.</p>
+      )}
+      {unlockStale.value && (
+        <p class="note">
+          <Icon name="lock" size={15} />
+          <span>
+            Your keys changed. Use your passkey again so it unlocks the new ones.{' '}
+            <button
+              type="button"
+              class="linkbtn"
+              disabled={busy}
+              onClick={() => void run(enablePasskeyUnlock, 'Updated.')}
+            >
+              Update
+            </button>
+          </span>
+        </p>
+      )}
+      {list.length > 0 &&
+        info.passkey_unlock &&
+        (armed ? (
+          <div class="stack gap">
+            <p class="d small">
+              Turning this on means anyone who can use this passkey can read your plans on a new
+              device: with your Apple, Google or password manager account plus one of your device
+              passcodes, or your phone and its passcode. Leave it off if someone close to you knows
+              your passcode. Don’t share this passkey with {partnerName} (a shared passwords group):
+              it would open your private plans too.
+            </p>
+            <div class="btnrow">
+              <button
+                type="button"
+                class="btn sm primary"
+                disabled={busy}
+                onClick={() =>
+                  void run(enablePasskeyUnlock, 'Done. That passkey can now unlock your keys.')
+                }
+              >
+                Choose a passkey
+              </button>
+              <button type="button" class="btn sm ghost" onClick={() => setArmed(false)}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        ) : (
+          <button type="button" class="btn sm" disabled={busy} onClick={() => setArmed(true)}>
+            Let a passkey unlock my keys
+          </button>
+        ))}
+      {!list.length && (
+        <button
+          type="button"
+          class="btn sm"
+          disabled={busy}
+          onClick={() => void run(addPasskey, 'Passkey added.')}
+        >
+          Add a passkey
+        </button>
+      )}
+      <p class="d small">
+        Changing your keys (Secure your space) turns unlocking off for every passkey, so a lost
+        phone can’t use one. Remove passkeys the lost phone could use before turning it on again.
+      </p>
     </section>
   );
 }

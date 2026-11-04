@@ -96,6 +96,9 @@ export function rotateStatements(
     db
       .prepare('UPDATE memberships SET key_version = ?3 WHERE space_id = ?1 AND user_id = ?2')
       .bind(r.spaceId, r.userId, space),
+    // A lost phone's synced passkey could unlock the new keys from these:
+    // they go, and are set up again on purpose (ADR 0015).
+    db.prepare('DELETE FROM key_unlocks WHERE user_id = ?1').bind(r.userId),
     // Sealed under keys that are now old: my reminders (personal key) and
     // anything held for quiet hours in this space (space key) (L2).
     db

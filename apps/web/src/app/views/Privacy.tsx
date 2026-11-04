@@ -9,6 +9,7 @@ import {
   AccountCard,
   DevicesCard,
   NotificationsCard,
+  PasskeysCard,
   RecoveryCard,
   SecureCard,
 } from './AccountCards';
@@ -103,6 +104,7 @@ export function PrivacyView() {
           <>
             <PartnerInviteCard />
             <DevicesCard />
+            <PasskeysCard />
             <SecureCard />
             <NotificationsCard />
           </>

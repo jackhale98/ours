@@ -49,6 +49,8 @@ me.get('/me', requireAuth, async (c) => {
     device_id: session.device_id,
     /** When this session last signed in or confirmed with a passkey. */
     signed_in_at: Math.max(session.created_at, session.reauth_at ?? 0),
+    /** Whether passkeys may be set up to unlock keys (ADR 0015). */
+    passkey_unlock: c.env.PASSKEY_UNLOCK === 'on',
     devices: devices?.results ?? [],
     spaces: ((spaces?.results ?? []) as Record<string, unknown>[]).map((s) => ({
       ...s,
