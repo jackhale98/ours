@@ -365,7 +365,8 @@ describe('rotation switch', () => {
       });
       expect(link.status).toBe(403);
     } finally {
-      e.ROTATION = before;
+      if (before === undefined) delete e.ROTATION;
+      else e.ROTATION = before;
     }
   });
 });
