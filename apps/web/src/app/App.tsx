@@ -9,6 +9,7 @@ import {
   consumeSignInLink,
   keyLinkOffer,
   newKeysFrom,
+  phraseKept,
   phraseStale,
   retryRotation,
   rotation,
@@ -302,6 +303,16 @@ function RotationBanner() {
 
 /** After taking new keys from a link, the old recovery phrase can't restore them (review 0005, M3). */
 function PhraseBanner() {
+  if (phraseKept.value)
+    return (
+      <div class="keybanner" role="status">
+        <Icon name="lock" size={16} />
+        <span>
+          The keys didn’t change, but your new recovery phrase was saved: keep it, it’s now the one
+          that restores your keys. <a href="#privacy">Details in Privacy</a>.
+        </span>
+      </div>
+    );
   if (!phraseStale.value || needsNewKeys.value) return null;
   return (
     <div class="keybanner" role="status">

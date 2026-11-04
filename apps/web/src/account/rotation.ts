@@ -129,6 +129,36 @@ export function stagedOutcome(
   return 'drop';
 }
 
+/**
+ * What to do with staged keys found at start or after a refresh (re-review
+ * 2, R1 and R3): commit them if they landed; otherwise decide only on a
+ * fresh answer from the server; drop them if another rotation won, or if
+ * the new backup was never confirmed (the person starts again, and is told
+ * if that backup may exist).
+ */
+export function stagedAction(
+  st: { backup: boolean },
+  outcome: 'landed' | 'retry' | 'drop',
+  fresh: boolean,
+): 'commit' | 'keep' | 'drop' {
+  if (outcome === 'landed') return 'commit';
+  if (!fresh) return 'keep';
+  if (outcome === 'drop' || !st.backup) return 'drop';
+  return 'keep';
+}
+
+/**
+ * What a refused rotation means (re-review 2, R2): a conflict is checked
+ * against the server (it may have landed); another space means it can't go
+ * ahead; anything else (a passkey check needed, the feature switched off)
+ * keeps the keys and the new phrase for later.
+ */
+export function refusal(code: string): 'check' | 'drop' | 'keep' {
+  if (code === 'rotation_conflict') return 'check';
+  if (code === 'multi_space') return 'drop';
+  return 'keep';
+}
+
 export class KeyLinkError extends Error {}
 
 /**

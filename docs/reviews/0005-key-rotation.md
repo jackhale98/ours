@@ -465,3 +465,15 @@ These are small and specific. The author can close them with tests, and no furth
 **Crypto review 0001 M1: closed.** Its requirements hold at HEAD and are tested: live records are re-encrypted until the server counts none left, old versions are decrypt-only, new ciphertexts under any version but the current one are refused, and notifications and reminders go only under the current version. The conditions above are about client recovery, not about these properties.
 
 **Switches.** Turn on `VITE_ROTATION` (UI) and `ROTATION` (server, `env.production`) only once conditions 1–4 are met. Turn them on together, in the same release. With the UI on and the server off, every attempt saves a new phrase and is then dropped (R2).
+
+## Fixes for the re-review 2 conditions
+
+| Item | Fix | Test |
+|---|---|---|
+| R1 | `refresh` says whether its `/me` answer is fresh. Staged keys are dropped only on a fresh answer (`stagedAction`). After a 409 `rotation_conflict`, the client refreshes; if the stage is still `staged` it says "Couldn't confirm the change" and keeps the keys. | Web `rotation.test.ts` "never drops on a cached answer"; E2E: after the lost answer, `/me` fails twice; the keys survive and the next press commits (fails on the old code) |
+| R2 | A refusal is classified (`refusal`): `rotation_conflict` is checked against the server, `multi_space` drops, anything else (`reauth_required`, `rotation_off`) keeps the keys and the new phrase for "Try again". | Web "keeps the keys when a passkey check is needed or the feature is off" |
+| R3 | At start, a stage with `tried` but no confirmed `backup` is dropped, with the phrase notice. | Web "drops when another rotation won, or the backup was never confirmed" |
+| L7 | Committing a rotation sets `replace-feed`; the feed link is replaced after the feed's state has loaded, at that start or the next. | Reading |
+| Info | The phrase notice is also a banner. The floor written at commit goes through `mergeFloor`, so it never goes down. Records that won't open are pulled again once the app has updated (by build). A held unsynced change still shows "Synced": accepted. | Reading |
+
+Switches: both turned on in the same commit: the Secure your space card is no longer behind `VITE_ROTATION`, and `env.production` sets `ROTATION` to "on". Crypto review 0001 M1 is marked closed.

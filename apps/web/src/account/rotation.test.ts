@@ -6,6 +6,8 @@ import {
   dropUnconfirmed,
   KeyLinkError,
   mergeFloor,
+  refusal,
+  stagedAction,
   stagedOutcome,
   takeKeys,
 } from './rotation';
@@ -236,5 +238,29 @@ describe('a rotation whose answer was lost (re-review N1)', () => {
         personalKids: [],
       }),
     ).toBe('drop');
+  });
+});
+
+describe('staged keys after a refresh or a refusal (re-review 2)', () => {
+  it('commits what landed, even on a cached answer', () => {
+    expect(stagedAction({ backup: true }, 'landed', false)).toBe('commit');
+  });
+
+  it('never drops on a cached answer (R1)', () => {
+    expect(stagedAction({ backup: true }, 'drop', false)).toBe('keep');
+    expect(stagedAction({ backup: false }, 'retry', false)).toBe('keep');
+  });
+
+  it('drops when another rotation won, or the backup was never confirmed (R3)', () => {
+    expect(stagedAction({ backup: true }, 'drop', true)).toBe('drop');
+    expect(stagedAction({ backup: false }, 'retry', true)).toBe('drop');
+    expect(stagedAction({ backup: true }, 'retry', true)).toBe('keep');
+  });
+
+  it('keeps the keys when a passkey check is needed or the feature is off (R2)', () => {
+    expect(refusal('rotation_conflict')).toBe('check');
+    expect(refusal('multi_space')).toBe('drop');
+    expect(refusal('reauth_required')).toBe('keep');
+    expect(refusal('rotation_off')).toBe('keep');
   });
 });

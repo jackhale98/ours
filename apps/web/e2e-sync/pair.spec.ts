@@ -397,6 +397,14 @@ test('sign up, pair, compare safety codes, and sync plans both ways', async ({ b
   await expect(secure.getByRole('button', { name: 'Save and use the new keys' })).toBeEnabled({
     timeout: 20_000,
   });
+  // Pressing again while the server can't be asked what happened keeps the
+  // new keys (re-review 2, R1).
+  await sam.route('**/me', (route) => route.abort(), { times: 2 });
+  await secure.getByRole('button', { name: 'Save and use the new keys' }).click();
+  await expect(sam.locator('.toast-host')).toContainText('Couldn’t confirm the change', {
+    timeout: 20_000,
+  });
+  await expect(secure.getByRole('button', { name: 'Save and use the new keys' })).toBeEnabled();
   await secure.getByRole('button', { name: 'Save and use the new keys' }).click();
   await expect(sam.locator('.toast-host')).toContainText('Your space has new keys', {
     timeout: 20_000,

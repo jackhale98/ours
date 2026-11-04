@@ -10,6 +10,7 @@
  * - Triggers: start, visibility regained, every 30 s while visible, 500 ms
  *   after local writes, and on demand (e.g. a push notification).
  */
+
 import {
   CryptoError,
   fromBase64Url,
@@ -30,6 +31,7 @@ import {
   type Slot,
   setBackend,
 } from '../app/model';
+import { BUILD } from '../config';
 import { ApiError, api } from './api';
 import { db, kvGet, kvSet, type OutboxEntry } from './db';
 
@@ -130,6 +132,10 @@ export class SyncEngine implements Backend {
     return `repull:${this.ctx.spaceId}`;
   }
 
+  private unreadableKey() {
+    return `unreadable:${this.ctx.spaceId}`;
+  }
+
   /** Decrypts and validates an envelope. Null if this device can't or shouldn't show it. */
   private open(e: Envelope | EnvelopeInput): DecodedRecord | null {
     // After a rotation, old keys are decrypt-only: a record under an old
@@ -176,6 +182,14 @@ export class SyncEngine implements Backend {
     const d = await db();
     // Records skipped for want of keys are pulled again from where they
     // began, so they merge against the true base now (review 0005, M5).
+    // Records this app couldn't read are pulled again once it has updated
+    // (review 0005 re-review 2, Info).
+    const unreadable = await kvGet<{ since: number; build: string }>(this.unreadableKey());
+    if (unreadable && unreadable.build !== BUILD.commit) {
+      const cursor = (await kvGet<number>(this.cursorKey())) ?? 0;
+      await kvSet(this.cursorKey(), Math.min(cursor, unreadable.since));
+      await d.delete('kv', this.unreadableKey());
+    }
     const repull = await kvGet<number>(this.repullKey());
     if (repull !== undefined) {
       const cursor = (await kvGet<number>(this.cursorKey())) ?? 0;
@@ -485,9 +499,18 @@ export class SyncEngine implements Backend {
       const upserts: Entry[] = [];
       const removed: string[] = [];
       let held = false;
+      let unreadable = false;
       for (const env of page.envelopes) {
         const pending = await d.get('outbox', env.id);
-        if ((await this.resolve(env.id, env, pending, upserts, removed)) === 'key') held = true;
+        const r = await this.resolve(env.id, env, pending, upserts, removed);
+        if (r === 'key') held = true;
+        if (r === 'unreadable') unreadable = true;
+      }
+      if (unreadable) {
+        // Pulled again after the app updates: it may be from a newer app.
+        const prev = await kvGet<{ since: number; build: string }>(this.unreadableKey());
+        if (!prev || since < prev.since)
+          await kvSet(this.unreadableKey(), { since, build: BUILD.commit });
       }
       if (held) {
         const from = await kvGet<number>(this.repullKey());

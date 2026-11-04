@@ -14,7 +14,6 @@ import {
 } from './AccountCards';
 
 /** Key rotation UI (ADR 0013): off until security review 0005's findings are fixed. */
-const ROTATION_ENABLED = import.meta.env.VITE_ROTATION === 'on';
 
 import { PartnerInviteCard } from '../invite';
 import { VersionCard } from '../version';
@@ -104,8 +103,7 @@ export function PrivacyView() {
           <>
             <PartnerInviteCard />
             <DevicesCard />
-            {/* Key rotation is held back until security review 0005 is resolved. */}
-            {ROTATION_ENABLED && <SecureCard />}
+            <SecureCard />
             <NotificationsCard />
           </>
         )}

@@ -1,6 +1,6 @@
 # 0013. Key rotation after losing a device or a partner leaving
 
-- Status: Accepted. Review 0005 findings fixed (see "After review 0005"); the UI stays switched off until the re-review signs off
+- Status: Accepted. Signed off in security review 0005 after two re-reviews (see "After review 0005")
 - Date: 2026-11-03
 
 ## Context

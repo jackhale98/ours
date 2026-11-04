@@ -52,6 +52,8 @@ import {
   type KeyState,
   type Kid,
   mergeFloor,
+  refusal,
+  stagedAction,
   stagedOutcome,
   takeKeys,
 } from './rotation';
@@ -141,9 +143,11 @@ export async function restore(): Promise<void> {
 /** Works out where this account is in setup and starts sync when ready. */
 async function refresh(session: Session): Promise<void> {
   let info: MeResponse;
+  let fresh = true;
   try {
     info = await api<MeResponse>('/me');
   } catch (err) {
+    fresh = false;
     if (err instanceof ApiError && err.status === 401) {
       await signOut(false);
       return;
@@ -175,7 +179,7 @@ async function refresh(session: Session): Promise<void> {
     personal: info.user.personal_key_version ?? 1,
     rotatedRev: space.rotated_rev ?? 0,
   });
-  await settleStaged(info, space.space_id, floor);
+  await settleStaged(info, space.space_id, floor, fresh);
   if (dropUnconfirmed(ring, space.space_id, floor)) await saveRing(ring);
   const kids = { space: space.kids ?? [], personal: info.user.personal_kids ?? [] };
   const active = activeRing(ring, space.space_id, floor, kids);
@@ -207,7 +211,9 @@ async function refresh(session: Session): Promise<void> {
           ?.members.find((m) => m.user_id !== session.user.id)?.user_id ?? null,
       synced: () => e.sync(),
     });
-    void startFeeds();
+    void startFeeds()
+      .then(replaceFeedIfAsked)
+      .catch(() => {});
   }
   account.value = {
     status: 'ready',
@@ -625,7 +631,12 @@ const newestOf = (
  * if the versions moved on without it, or no backup was made yet, they're
  * dropped; otherwise they wait for "Try again".
  */
-async function settleStaged(info: MeResponse, spaceId: string, floor: Floor): Promise<void> {
+async function settleStaged(
+  info: MeResponse,
+  spaceId: string,
+  floor: Floor,
+  fresh: boolean,
+): Promise<void> {
   const st = await kvGet<RotationState>(rotationKey(spaceId));
   if (st?.stage !== 'staged' || !ring) return;
   const staged = await loadRing('staged');
@@ -638,7 +649,8 @@ async function settleStaged(info: MeResponse, spaceId: string, floor: Floor): Pr
         personalKids: info.user.personal_kids ?? [],
       })
     : 'drop';
-  if (staged && outcome === 'landed') {
+  const action = staged ? stagedAction(st, outcome, fresh) : 'drop';
+  if (staged && action === 'commit') {
     await commitStaged(staged, spaceId, st, space?.rotated_rev ?? 0);
     // The engine running now seals under the old keys: start a new one (N2).
     if (engine) {
@@ -647,9 +659,9 @@ async function settleStaged(info: MeResponse, spaceId: string, floor: Floor): Pr
     }
     return;
   }
-  // Kept for "Try again" only once a backup may hold them; otherwise nothing
-  // was committed and the person starts again.
-  if (outcome === 'drop' || !(st.backup || st.tried)) await dropRotation(spaceId, st);
+  // Dropped only on a fresh answer: another rotation won, or the new backup
+  // was never confirmed (the person is told if it may exist, R3).
+  if (action === 'drop') await dropRotation(spaceId, st);
 }
 
 /** Forgets a rotation that didn't happen, saying so if its phrase is now the one (N4). */
@@ -680,11 +692,12 @@ async function commitStaged(
   await saveRing(next);
   ring = next;
   await dropStaged();
-  const floor: Floor = {
+  // Never lower than a floor learned since (re-review 2, Info).
+  const floor = mergeFloor(await kvGet<Floor>(floorKey(spaceId)), {
     space: st.spaceFrom + 1,
     personal: st.personalFrom + 1,
     rotatedRev,
-  };
+  });
   await kvSet(floorKey(spaceId), floor);
   await setRotation(spaceId, { stage: 'securing', version: floor.space });
   // The server dropped reminders sealed under the old key: send them again (L2).
@@ -692,12 +705,16 @@ async function commitStaged(
   // The backup was made over these keys before the server moved.
   phraseStale.value = false;
   await kvSet('phrase-stale', false);
-  // A lost phone may follow the busy feed: replace its link (L7).
-  if (feedOn.value)
-    void newFeedLink().then(
-      (url) => (replacedFeed.value = url),
-      () => {},
-    );
+  // A lost phone may follow the busy feed: its link is replaced once the
+  // feed's state is known, at this start or the next (L7).
+  await kvSet('replace-feed', true);
+}
+
+/** Replaces the feed link after a rotation, if the feed is on (L7). */
+async function replaceFeedIfAsked(): Promise<void> {
+  if (!(await kvGet<boolean>('replace-feed'))) return;
+  if (feedOn.value) replacedFeed.value = await newFeedLink();
+  await kvSet('replace-feed', false);
 }
 
 /** Why this device can't start a rotation now, or null if it can. */
@@ -845,20 +862,25 @@ async function sendRotation(
       },
     });
   } catch (err) {
-    if (err instanceof ApiError && err.status === 409 && err.code === 'rotation_conflict') {
+    const why =
+      err instanceof ApiError && err.status >= 400 && err.status < 500 ? refusal(err.code) : null;
+    if (why === 'check') {
       // Refused: maybe because an earlier try landed and its answer was lost
-      // (re-review N1). Ask the server what happened before dropping anything.
+      // (re-review N1). Ask the server what happened; only a fresh answer
+      // can drop anything (re-review 2, R1).
       await refresh(session);
-      if (rotation.value?.stage !== 'staged') return; // it had landed
-      await dropRotation(spaceId, { backup: true });
-      throw new Error(
-        'Keys were changed on another device first. Your new recovery phrase is the one to keep.',
-      );
+      const now = rotation.value;
+      if (now?.stage === 'securing') return; // it had landed
+      if (!now)
+        throw new Error(
+          'Keys were changed on another device first. Your new recovery phrase is the one to keep.',
+        );
+      throw new Error('Couldn’t confirm the change. Check your connection and try again.');
     }
-    // Any other refusal (e.g. another space joined since): it can't go ahead.
-    if (err instanceof ApiError && err.status >= 400 && err.status < 500)
-      await dropRotation(spaceId, { backup: true });
-    // Offline or a lost answer: kept for "Try again", which checks first.
+    // It can't go ahead (another space joined since).
+    if (why === 'drop') await dropRotation(spaceId, { backup: true });
+    // A passkey check needed, switched off, offline or a lost answer: the
+    // keys and the new phrase stay for "Try again" (R2), which checks first.
     throw err;
   }
   await commitStaged(staged, spaceId, st, res.rotated_rev);

@@ -65,8 +65,8 @@
         "MAX_SPACE_BYTES": "20971520",
         "MAX_PUSHES_PER_MINUTE": "120",
         "MAX_PUSHES_PER_HOUR": "60",
-        // Key rotation stays off until security review 0005 signs off.
-        "ROTATION": "off"
+        // Key rotation (ADR 0013), signed off in security review 0005.
+        "ROTATION": "on"
         // VAPID_PUBLIC_KEY and VAPID_PRIVATE_KEY are secrets here, made by the
         // "Create Worker secrets" workflow; a var of the same name would clash.
       },
