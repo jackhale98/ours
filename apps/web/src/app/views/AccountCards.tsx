@@ -24,12 +24,14 @@ import {
   comparedVersion,
   confirmItsYou,
   currentSafetyCode,
+  dismissPhraseKept,
   keyUpdateLink,
   linkDevice,
   markCompared,
   me,
   needsConfirm,
   partnerNeedsKeyLink,
+  phraseKept,
   prepareRotation,
   replacedFeed,
   retryRotation,
@@ -562,6 +564,18 @@ export function SecureCard() {
           </p>
           <button type="button" class="btn sm" onClick={() => void markCompared()}>
             We compared, they match
+          </button>
+        </div>
+      )}
+
+      {phraseKept.value && !words && (
+        <div class="stack gap">
+          <p class="d">
+            The keys didn’t change, but your new recovery phrase was saved. Keep it: it’s now the
+            one that restores your keys, and the old one no longer does.
+          </p>
+          <button type="button" class="btn sm" onClick={() => void dismissPhraseKept()}>
+            Got it
           </button>
         </div>
       )}

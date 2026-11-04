@@ -1,7 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 import { generateKey, KeyRing, keyId } from '@ours/core/crypto';
 import { describe, expect, it } from 'vitest';
-import { activeRing, dropUnconfirmed, KeyLinkError, mergeFloor, takeKeys } from './rotation';
+import {
+  activeRing,
+  dropUnconfirmed,
+  KeyLinkError,
+  mergeFloor,
+  stagedOutcome,
+  takeKeys,
+} from './rotation';
 
 const SPACE = 'space-1';
 const USER = 'user-1';
@@ -79,7 +86,7 @@ describe('keys from a link (review 0005, H1 and M4)', () => {
   it('takes the current version when this device needs it and the fingerprint matches', () => {
     const { r, keys } = ringWith([1], [1]);
     const v2 = generateKey();
-    const next = takeKeys(
+    const { next } = takeKeys(
       r,
       SPACE,
       floor,
@@ -149,7 +156,7 @@ describe('keys from a link (review 0005, H1 and M4)', () => {
     // real v2 then arrives.
     const { r, keys } = ringWith([1, 2], [1]);
     const real = generateKey();
-    const next = takeKeys(
+    const { next, setAside } = takeKeys(
       r,
       SPACE,
       floor,
@@ -162,6 +169,8 @@ describe('keys from a link (review 0005, H1 and M4)', () => {
       },
     );
     expect(next.spaceKey(SPACE, 2)).toEqual(real);
+    // The replaced key is kept aside, not lost, in case the server lied (N5).
+    expect(setAside).toEqual([{ scope: 'space', version: 2, key: keys.get('s2') }]);
   });
 
   it('takes personal keys from a device link, checked the same way', () => {
@@ -170,7 +179,7 @@ describe('keys from a link (review 0005, H1 and M4)', () => {
     const p2 = generateKey();
     const kids = { space: [sk(2, s2)], personal: [pk(2, p2)] };
     const f = { space: 2, personal: 2, rotatedRev: 10 };
-    const next = takeKeys(r, SPACE, f, kids, {
+    const { next } = takeKeys(r, SPACE, f, kids, {
       space: [{ version: 2, key: s2 }],
       personal: [
         { version: 1, key: keys.get('p1') as Uint8Array },
@@ -184,5 +193,48 @@ describe('keys from a link (review 0005, H1 and M4)', () => {
         personal: [{ version: 2, key: generateKey() }],
       }),
     ).toThrow(KeyLinkError);
+  });
+});
+
+describe('a rotation whose answer was lost (re-review N1)', () => {
+  const st = { spaceFrom: 1, personalFrom: 1 };
+  const staged = () => {
+    const r = new KeyRing(USER);
+    const s2 = generateKey();
+    const p2 = generateKey();
+    r.addSpaceKey(SPACE, { version: 2, key: s2 });
+    r.addPersonalKey({ version: 2, key: p2 });
+    return { r, s2, p2 };
+  };
+
+  it('counts as landed when the server holds these keys’ fingerprints', () => {
+    const { r, s2, p2 } = staged();
+    expect(
+      stagedOutcome(r, SPACE, st, {
+        space: 2,
+        personal: 2,
+        spaceKids: [sk(2, s2)],
+        personalKids: [pk(2, p2)],
+      }),
+    ).toBe('landed');
+  });
+
+  it('can be sent again while the versions haven’t moved', () => {
+    const { r } = staged();
+    expect(
+      stagedOutcome(r, SPACE, st, { space: 1, personal: 1, spaceKids: [], personalKids: [] }),
+    ).toBe('retry');
+  });
+
+  it('is dead when someone else’s rotation came first', () => {
+    const { r } = staged();
+    expect(
+      stagedOutcome(r, SPACE, st, {
+        space: 2,
+        personal: 1,
+        spaceKids: [sk(2, generateKey())],
+        personalKids: [],
+      }),
+    ).toBe('drop');
   });
 });

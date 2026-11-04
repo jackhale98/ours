@@ -52,6 +52,7 @@ import {
   type KeyState,
   type Kid,
   mergeFloor,
+  stagedOutcome,
   takeKeys,
 } from './rotation';
 import { needsNewKeys, SyncEngine } from './sync';
@@ -182,6 +183,7 @@ async function refresh(session: Session): Promise<void> {
   keyState.value = { space: active.space, personal: active.personal };
   rotation.value = (await kvGet<RotationState>(rotationKey(space.space_id))) ?? null;
   phraseStale.value = !!(await kvGet<boolean>('phrase-stale'));
+  phraseKept.value = !!(await kvGet<boolean>('phrase-kept'));
   void acknowledgeKeys(info, space.space_id, floor, active.space);
   if (!engine) {
     engine = new SyncEngine({
@@ -543,7 +545,14 @@ export async function acceptDeviceLink(fragment: string): Promise<void> {
  * - securing: the server made them current; re-encrypting what's left.
  */
 export type RotationState =
-  | { stage: 'staged'; spaceFrom: number; personalFrom: number; backup: boolean }
+  | {
+      stage: 'staged';
+      spaceFrom: number;
+      personalFrom: number;
+      /** The new phrase's backup is saved (or `tried`: it may have been). */
+      backup: boolean;
+      tried?: boolean;
+    }
   | { stage: 'securing'; version: number };
 
 export const rotation = signal<RotationState | null>(null);
@@ -558,6 +567,11 @@ export const keyState = signal<{ space: KeyState; personal: KeyState }>({
 export const phraseStale = signal(false);
 /** The space key version both people last confirmed comparing safety codes for (I3). */
 export const comparedVersion = signal(1);
+/**
+ * The new phrase's backup was saved but the rotation didn't happen: that
+ * phrase is now the one that restores this account (re-review N4).
+ */
+export const phraseKept = signal(false);
 /** A calendar feed link made to replace one a lost phone may follow (L7). */
 export const replacedFeed = signal<string | null>(null);
 
@@ -616,25 +630,41 @@ async function settleStaged(info: MeResponse, spaceId: string, floor: Floor): Pr
   if (st?.stage !== 'staged' || !ring) return;
   const staged = await loadRing('staged');
   const space = info.spaces.find((x) => x.space_id === spaceId);
-  if (staged) {
-    const k = newestOf(staged, spaceId, st);
-    const landed =
-      !!k.space &&
-      !!k.personal &&
-      space?.kids?.find((x) => x.version === k.space?.version)?.kid ===
-        keyId('space', spaceId, k.space.version, k.space.key) &&
-      info.user.personal_kids?.find((x) => x.version === k.personal?.version)?.kid ===
-        keyId('user', staged.userId, k.personal.version, k.personal.key);
-    if (landed) {
-      await commitStaged(staged, spaceId, st, space?.rotated_rev ?? 0);
-      return;
+  const outcome = staged
+    ? stagedOutcome(staged, spaceId, st, {
+        space: floor.space,
+        personal: floor.personal,
+        spaceKids: space?.kids ?? [],
+        personalKids: info.user.personal_kids ?? [],
+      })
+    : 'drop';
+  if (staged && outcome === 'landed') {
+    await commitStaged(staged, spaceId, st, space?.rotated_rev ?? 0);
+    // The engine running now seals under the old keys: start a new one (N2).
+    if (engine) {
+      engine.stop(true);
+      engine = null;
     }
+    return;
   }
-  const unchanged = floor.space === st.spaceFrom && floor.personal === st.personalFrom;
-  if (!staged || !unchanged || !st.backup) {
-    await dropStaged();
-    await setRotation(spaceId, null);
+  // Kept for "Try again" only once a backup may hold them; otherwise nothing
+  // was committed and the person starts again.
+  if (outcome === 'drop' || !(st.backup || st.tried)) await dropRotation(spaceId, st);
+}
+
+/** Forgets a rotation that didn't happen, saying so if its phrase is now the one (N4). */
+async function dropRotation(spaceId: string, st: { backup: boolean; tried?: boolean }) {
+  await dropStaged();
+  await setRotation(spaceId, null);
+  if (st.backup || st.tried) {
+    phraseKept.value = true;
+    await kvSet('phrase-kept', true);
   }
+}
+
+export async function dismissPhraseKept(): Promise<void> {
+  phraseKept.value = false;
+  await kvSet('phrase-kept', false);
 }
 
 /** The server confirmed: the new keys join the ring and are used from now on. */
@@ -662,6 +692,12 @@ async function commitStaged(
   // The backup was made over these keys before the server moved.
   phraseStale.value = false;
   await kvSet('phrase-stale', false);
+  // A lost phone may follow the busy feed: replace its link (L7).
+  if (feedOn.value)
+    void newFeedLink().then(
+      (url) => (replacedFeed.value = url),
+      () => {},
+    );
 }
 
 /** Why this device can't start a rotation now, or null if it can. */
@@ -713,6 +749,21 @@ export async function prepareRotation(): Promise<string[]> {
   const space = info.spaces.find((x) => x.space_id === state.spaceId);
   const spaceFrom = space?.key_version ?? 1;
   const personalFrom = info.user.personal_key_version ?? 1;
+  // Checked again against the server's versions now, not when the app
+  // started: the partner may have rotated since (re-review N3).
+  const floor = await learnFloor(state.spaceId, {
+    space: spaceFrom,
+    personal: personalFrom,
+    rotatedRev: space?.rotated_rev ?? 0,
+  });
+  const held = ring
+    ? activeRing(ring, state.spaceId, floor, {
+        space: space?.kids ?? [],
+        personal: info.user.personal_kids ?? [],
+      })
+    : null;
+  if (!held || held.space !== 'ok' || held.personal !== 'ok' || floor.space !== spaceFrom)
+    throw new Error('This device needs the current keys before it can make new ones.');
   const staged = new KeyRing(state.session.user.id);
   staged.addSpaceKey(state.spaceId, { version: spaceFrom + 1, key: generateKey() });
   staged.addPersonalKey({ version: personalFrom + 1, key: generateKey() });
@@ -726,24 +777,37 @@ export async function prepareRotation(): Promise<string[]> {
  * then ask the server to make the new keys current. Whatever happens after,
  * the new phrase restores everything.
  */
-export async function commitRotation(words: string[]): Promise<void> {
+export function commitRotation(words: string[]): Promise<void> {
+  return oneAtATime(() => commitRotationNow(words));
+}
+
+async function commitRotationNow(words: string[]): Promise<void> {
   const state = account.value;
   if (state.status !== 'ready' || !ring) throw new Error('Not ready yet.');
   const st = rotation.value;
   const staged = await loadRing('staged');
   if (st?.stage !== 'staged' || !staged)
     throw new Error('Start again: the new keys weren’t found.');
-  if (!st.backup) {
-    const full = copyRing(ring);
-    full.mergeFrom(staged);
-    await saveBackup(words, full);
-    await setRotation(state.spaceId, { ...st, backup: true });
+  if (st.backup) {
+    // A second press after an error: check whether the first one landed (N1).
+    await retryRotationNow();
+    return;
   }
+  const full = copyRing(ring);
+  full.mergeFrom(staged);
+  // Marked first: if the answer is lost, the backup may already hold them (N4).
+  await setRotation(state.spaceId, { ...st, tried: true });
+  await saveBackup(words, full);
+  await setRotation(state.spaceId, { ...st, tried: true, backup: true });
   await sendRotation(state.session, state.spaceId, staged, st);
 }
 
 /** After a lost answer or a network error: check whether it landed, else send it again. */
-export async function retryRotation(): Promise<void> {
+export function retryRotation(): Promise<void> {
+  return oneAtATime(retryRotationNow);
+}
+
+async function retryRotationNow(): Promise<void> {
   const state = account.value;
   if (state.status !== 'ready') throw new Error('Not ready yet.');
   await refresh(state.session);
@@ -781,20 +845,34 @@ async function sendRotation(
       },
     });
   } catch (err) {
-    if (err instanceof ApiError && err.status === 409) {
-      // Another rotation came first: these keys never became real, and are
-      // dropped (the new phrase still restores everything else).
-      await dropStaged();
-      await setRotation(spaceId, null);
+    if (err instanceof ApiError && err.status === 409 && err.code === 'rotation_conflict') {
+      // Refused: maybe because an earlier try landed and its answer was lost
+      // (re-review N1). Ask the server what happened before dropping anything.
+      await refresh(session);
+      if (rotation.value?.stage !== 'staged') return; // it had landed
+      await dropRotation(spaceId, { backup: true });
+      throw new Error(
+        'Keys were changed on another device first. Your new recovery phrase is the one to keep.',
+      );
     }
+    // Any other refusal (e.g. another space joined since): it can't go ahead.
+    if (err instanceof ApiError && err.status >= 400 && err.status < 500)
+      await dropRotation(spaceId, { backup: true });
     // Offline or a lost answer: kept for "Try again", which checks first.
     throw err;
   }
   await commitStaged(staged, spaceId, st, res.rotated_rev);
   await restartSync(session);
-  // A lost phone may follow the busy feed: replace its link (L7).
-  if (feedOn.value) replacedFeed.value = await newFeedLink().catch(() => null);
   void finishSecuring();
+}
+
+let busy: Promise<void> | null = null;
+/** Presses while a call is running join it instead of sending another (N1). */
+function oneAtATime(fn: () => Promise<void>): Promise<void> {
+  busy ??= fn().finally(() => {
+    busy = null;
+  });
+  return busy;
 }
 
 let securing = false;
@@ -939,26 +1017,33 @@ export async function openKeyLink(fragment: string): Promise<KeyLinkOffer> {
     ciphertext: fromBase64Url(inv.wrapped.ciphertext),
   };
   const current = ring;
-  let next: KeyRing;
+  const before = activeRing(current, state.spaceId, floor, kids).space;
+  let taken: ReturnType<typeof takeKeys>;
   if (inv.kind === 'rekey' && inv.space_id === state.spaceId) {
     const payload = openRekeyInvite(secret, state.spaceId, wrapped);
-    next = takeKeys(current, state.spaceId, floor, kids, { space: payload.keys });
+    taken = takeKeys(current, state.spaceId, floor, kids, { space: payload.keys });
   } else if (inv.kind === 'device') {
     const theirs = openDeviceInvite(secret, state.session.user.id, wrapped);
-    next = takeKeys(current, state.spaceId, floor, kids, {
+    taken = takeKeys(current, state.spaceId, floor, kids, {
       space: theirs.spaceKeys(state.spaceId),
       personal: theirs.personalKeys(),
     });
   } else {
     throw new KeyLinkError('That link isn’t a key update for this space.');
   }
+  const { next, setAside } = taken;
   const k = next.currentSpaceKey(state.spaceId);
   const kind = inv.kind;
+  // The fingerprints come from the server, so comparing codes is the check
+  // that doesn't depend on it: shown whenever the shared key changes, from
+  // the partner or from one of my own devices (re-review N5).
+  const changes = kind === 'rekey' || before !== 'ok';
   return {
     kind,
-    code: kind === 'rekey' ? safetyCode(state.spaceId, k.version, k.key) : null,
+    code: changes ? safetyCode(state.spaceId, k.version, k.key) : null,
     apply: async () => {
       await api(`/invites/${inviteId}/accept`, { body: {} });
+      if (setAside.length) await keepAside(state.session.user.id, state.spaceId, setAside);
       await saveRing(next);
       ring = next;
       setPendingInvite(null);
@@ -970,6 +1055,28 @@ export async function openKeyLink(fragment: string): Promise<KeyLinkOffer> {
       await restartSync(state.session);
     },
   };
+}
+
+/**
+ * Keys this device held that a link replaced, because the server said they
+ * weren't the real ones: kept in their own slot, never used, in case the
+ * server lied (re-review N5).
+ */
+async function keepAside(
+  userId: string,
+  spaceId: string,
+  keys: { scope: 'space' | 'user'; version: number; key: Uint8Array }[],
+): Promise<void> {
+  const aside = (await loadRing('aside')) ?? new KeyRing(userId);
+  for (const k of keys) {
+    try {
+      if (k.scope === 'space') aside.addSpaceKey(spaceId, k);
+      else aside.addPersonalKey(k);
+    } catch {
+      // Already set aside.
+    }
+  }
+  await saveRing(aside, 'aside');
 }
 
 /** The pending link, waiting for the person to compare the code and confirm. */

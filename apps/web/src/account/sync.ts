@@ -366,6 +366,7 @@ export class SyncEngine implements Backend {
       const remoteUpserts: Entry[] = [];
       const remoteRemoved: string[] = [];
       let stale = false;
+      let stuck = false;
       for (const [i, result] of res.results.entries()) {
         const sent = items[i];
         if (!result || !sent) continue;
@@ -394,7 +395,10 @@ export class SyncEngine implements Backend {
             remoteRemoved,
           );
           // Can't merge without the key: hold it, don't resend in a loop (L5).
-          if (held) stale = true;
+          if (held === 'key') stale = true;
+          // Can't merge with a copy that won't open: keep the change, and
+          // stop this pass instead of resending it (re-review N6).
+          if (held === 'unreadable') stuck = true;
         } else if (result.reason === 'stale_key' || result.reason === 'unknown_key') {
           // Keys were rotated elsewhere. Keep the change: it is re-sealed
           // once this device has the new keys.
@@ -414,6 +418,7 @@ export class SyncEngine implements Backend {
         needsNewKeys.value = true;
         return;
       }
+      if (stuck) return;
     }
   }
 
@@ -424,13 +429,13 @@ export class SyncEngine implements Backend {
     pending: OutboxEntry | undefined,
     upserts: Entry[],
     removed: string[],
-  ): Promise<boolean> {
+  ): Promise<'done' | 'key' | 'unreadable'> {
     const d = await db();
     const baseEnv = await d.get('envelopes', id);
     // A copy under an older key than the one this device already has for
     // the record is a rollback, never a real change (review 0005, M6).
     if (baseEnv && baseEnv.scope === remoteEnv.scope && remoteEnv.key_version < baseEnv.key_version)
-      return false;
+      return 'unreadable';
     const remote = this.open(remoteEnv);
     if (!remote && this.unknownKey(remoteEnv)) {
       // Under keys this device doesn't have yet: keep showing what it has
@@ -438,14 +443,16 @@ export class SyncEngine implements Backend {
       // base stays as it was, so the later merge is three-way against the
       // true base (review 0005, M5).
       needsNewKeys.value = true;
-      return true;
+      return 'key';
+    }
+    if (!remote) {
+      // Won't open with keys this device holds: damaged, refused as written
+      // under an old key after the rotation, or from a newer app. It is not
+      // a deletion: what this device has, and any unsynced change, stay
+      // (review 0005 re-review, N6). A real deletion opens as one.
+      return 'unreadable';
     }
     await d.put('envelopes', remoteEnv, id);
-    if (!remote) {
-      if (pending) await d.delete('outbox', id);
-      removed.push(id);
-      return false;
-    }
     const local = pending ? this.open(pending.envelope) : baseEnv ? this.open(baseEnv) : null;
     const base = baseEnv ? (this.open(baseEnv) ?? undefined) : undefined;
     const outcome = mergeRecord(base, local ?? undefined, remote, !!pending, {
@@ -465,7 +472,7 @@ export class SyncEngine implements Backend {
     const entry = this.toEntry(remoteEnv, outcome.record);
     if (entry) upserts.push(entry);
     else removed.push(id);
-    return false;
+    return 'done';
   }
 
   private async pull(): Promise<void> {
@@ -480,7 +487,7 @@ export class SyncEngine implements Backend {
       let held = false;
       for (const env of page.envelopes) {
         const pending = await d.get('outbox', env.id);
-        if (await this.resolve(env.id, env, pending, upserts, removed)) held = true;
+        if ((await this.resolve(env.id, env, pending, upserts, removed)) === 'key') held = true;
       }
       if (held) {
         const from = await kvGet<number>(this.repullKey());

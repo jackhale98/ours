@@ -204,16 +204,18 @@ function KeyLinkPrompt() {
   const offer = keyLinkOffer.value;
   if (!offer) return null;
   const who = nameOf(partner.value);
+  const mine = offer.kind === 'device';
   return (
     <section class="keybanner keylink" aria-labelledby="kl-h">
       <Icon name="lock" size={16} />
       <div>
         <h2 class="h3" id="kl-h">
-          New keys from {who}
+          {mine ? 'New keys from your other device' : `New keys from ${who}`}
         </h2>
         <p>
-          Before using them, compare this safety code with the one on {who}’s phone, in person or on
-          a call:
+          {mine
+            ? `Before using them, compare this safety code with the one in Privacy on your other device, or on ${who}’s phone:`
+            : `Before using them, compare this safety code with the one on ${who}’s phone, in person or on a call:`}
         </p>
         <p class="fp">
           <span class="code">{offer.code}</span>
@@ -229,7 +231,11 @@ function KeyLinkPrompt() {
               try {
                 await offer.apply();
                 keyLinkOffer.value = null;
-                toast('New keys added. Make a new recovery phrase in Privacy.');
+                toast(
+                  offer.kind === 'rekey'
+                    ? 'New keys added. Make a new recovery phrase in Privacy.'
+                    : 'This device has the new keys.',
+                );
               } catch (err) {
                 toast(err instanceof Error ? err.message : 'That link couldn’t be used.');
               }

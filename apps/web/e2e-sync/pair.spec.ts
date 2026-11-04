@@ -162,13 +162,14 @@ async function openWebPush(
 
 test('sign up, pair, compare safety codes, and sync plans both ways', async ({ browser }) => {
   const stamp = Date.now();
+  const samEmail = `sam-${stamp}@example.com`;
   const sam = await newPage(browser);
   const alex = await newPage(browser);
   await fakePushManager(alex);
 
   // Sam creates the space.
   await sam.goto('/#start');
-  await signUp(sam, `sam-${stamp}@example.com`);
+  await signUp(sam, samEmail);
   await sam.getByRole('textbox', { name: 'Your first name' }).fill('Sam');
   await sam.getByRole('button', { name: 'Create our space' }).click();
   await recoveryPhrase(sam);
@@ -381,6 +382,21 @@ test('sign up, pair, compare safety codes, and sync plans both ways', async ({ b
     const n = Number(label.replace(/\D/g, ''));
     await secure.getByRole('textbox', { name: label, exact: true }).fill(words[n - 1] ?? '');
   }
+  // The first answer is lost on the way back, though the server rotated
+  // (re-review N1). Pressing again finds that out instead of losing the keys.
+  await sam.route(
+    '**/spaces/*/rotate',
+    async (route) => {
+      await route.fetch();
+      await route.abort();
+    },
+    { times: 1 },
+  );
+  await secure.getByRole('button', { name: 'Save and use the new keys' }).click();
+  await expect(sam.locator('.toast-host')).not.toContainText('Your space has new keys');
+  await expect(secure.getByRole('button', { name: 'Save and use the new keys' })).toBeEnabled({
+    timeout: 20_000,
+  });
   await secure.getByRole('button', { name: 'Save and use the new keys' }).click();
   await expect(sam.locator('.toast-host')).toContainText('Your space has new keys', {
     timeout: 20_000,
@@ -449,6 +465,20 @@ test('sign up, pair, compare safety codes, and sync plans both ways', async ({ b
     await expect(sheet.getByLabel(/^Due/)).toHaveValue('2031-05-20');
     await page.keyboard.press('Escape');
   }
+
+  // A new device restores everything from the new phrase alone (H2).
+  const fresh = await newPage(browser);
+  await fresh.goto('/#start');
+  await signUp(fresh, samEmail);
+  await expect(fresh.getByRole('heading', { name: 'Welcome back' })).toBeVisible({
+    timeout: 20_000,
+  });
+  await fresh.getByRole('textbox', { name: 'Recovery phrase' }).fill(words.join(' '));
+  await fresh.getByRole('button', { name: 'Unlock' }).click();
+  await fresh.goto('/#lists');
+  await expect(fresh.getByText('Picture hooks (brass)')).toBeVisible({ timeout: 20_000 });
+  await expect(fresh.locator('.keybanner')).not.toContainText('changed', { timeout: 20_000 });
+  await fresh.context().close();
 
   // Both see the same new safety code; Sam stops being offered the link (M3).
   await alex.goto('/#privacy');

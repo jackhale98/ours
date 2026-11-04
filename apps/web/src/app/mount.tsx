@@ -32,14 +32,14 @@ export async function mountApp(root: HTMLElement): Promise<void> {
   }
 
   // A key update or device link opened on a device that is already set up.
-  // Its keys are checked first; a key update from the partner then waits
-  // for the two of you to compare the new safety code (review 0005, M4).
+  // Its keys are checked first; a link that changes the shared key then
+  // waits for the new safety code to be compared (review 0005, M4 and N5).
   const link = pendingInvite();
   if (link && account.value.status === 'ready') {
     startRequested.value = false;
     try {
       const offer = await openKeyLink(link);
-      if (offer.kind === 'rekey') keyLinkOffer.value = offer;
+      if (offer.code) keyLinkOffer.value = offer;
       else {
         await offer.apply();
         toast('This device has the new keys.');

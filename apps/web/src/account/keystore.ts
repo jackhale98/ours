@@ -8,6 +8,8 @@
 import { KeyRing, parseKeyRing, serializeKeyRing } from '@ours/core/crypto';
 import { kvGet, kvSet } from './db';
 
+type Slot = 'keyring' | 'staged' | 'aside';
+
 async function wrappingKey(): Promise<CryptoKey> {
   const existing = await kvGet<CryptoKey>('device-key');
   if (existing) return existing;
@@ -20,13 +22,11 @@ async function wrappingKey(): Promise<CryptoKey> {
 }
 
 /**
- * `slot` 'staged' holds keys made for a rotation the server hasn't confirmed
- * yet: never used to seal anything (review 0005, H1).
+ * Slots: 'keyring' is the ring in use; 'staged' holds keys made for a rotation the server hasn't confirmed
+ * yet, never used to seal anything (review 0005, H1); 'aside' holds keys a
+ * link replaced, never used, in case the server lied (re-review N5).
  */
-export async function saveRing(
-  ring: KeyRing,
-  slot: 'keyring' | 'staged' = 'keyring',
-): Promise<void> {
+export async function saveRing(ring: KeyRing, slot: Slot = 'keyring'): Promise<void> {
   const iv = crypto.getRandomValues(new Uint8Array(12));
   const data = Uint8Array.from(serializeKeyRing(ring));
   const ct = new Uint8Array(
@@ -40,7 +40,7 @@ export async function saveRing(
   await kvSet(slot, { iv, ct });
 }
 
-export async function loadRing(slot: 'keyring' | 'staged' = 'keyring'): Promise<KeyRing | null> {
+export async function loadRing(slot: Slot = 'keyring'): Promise<KeyRing | null> {
   const stored = await kvGet<{ iv: Uint8Array<ArrayBuffer>; ct: Uint8Array<ArrayBuffer> }>(slot);
   if (!stored) return null;
   const pt = new Uint8Array(

@@ -99,6 +99,36 @@ export function activeRing(
   return { ring: active, space, personal };
 }
 
+/**
+ * What became of a rotation whose keys were made here (review 0005, H1 and
+ * re-review N1): it landed (the server's fingerprints for the new versions
+ * are these keys), it can still be sent (the versions haven't moved), or it
+ * is dead (someone else's rotation came first).
+ */
+export function stagedOutcome(
+  staged: KeyRing,
+  spaceId: string,
+  st: { spaceFrom: number; personalFrom: number },
+  server: {
+    space: number;
+    personal: number;
+    spaceKids: readonly Kid[];
+    personalKids: readonly Kid[];
+  },
+): 'landed' | 'retry' | 'drop' {
+  const s = staged.spaceKeys(spaceId).find((k) => k.version === st.spaceFrom + 1);
+  const p = staged.personalKeys().find((k) => k.version === st.personalFrom + 1);
+  if (
+    s &&
+    p &&
+    kidOf(server.spaceKids, s.version) === keyId('space', spaceId, s.version, s.key) &&
+    kidOf(server.personalKids, p.version) === keyId('user', staged.userId, p.version, p.key)
+  )
+    return 'landed';
+  if (server.space === st.spaceFrom && server.personal === st.personalFrom) return 'retry';
+  return 'drop';
+}
+
 export class KeyLinkError extends Error {}
 
 /**
@@ -117,8 +147,9 @@ export function takeKeys(
     space: readonly { version: number; key: Uint8Array }[];
     personal?: readonly { version: number; key: Uint8Array }[];
   },
-): KeyRing {
+): { next: KeyRing; setAside: { scope: 'space' | 'user'; version: number; key: Uint8Array }[] } {
   const now = activeRing(ring, spaceId, floor, kids);
+  const setAside: { scope: 'space' | 'user'; version: number; key: Uint8Array }[] = [];
   const newest = Math.max(0, ...incoming.space.map((k) => k.version));
   if (newest !== floor.space)
     throw new KeyLinkError('That link isn’t for the current keys. Ask for a new one.');
@@ -143,9 +174,12 @@ export function takeKeys(
         );
       const mine = held.find((h) => h.version === k.version);
       if (mine && !sameKey(mine.key, k.key)) {
-        // Mine is the impostor only if the server's fingerprint says so.
-        if (fp && keyId(scope, owner, mine.version, mine.key) !== fp) drop(k.version);
-        else
+        // Mine is the impostor only if the server's fingerprint says so. It
+        // is set aside, not forgotten, in case the server lied (N5).
+        if (fp && keyId(scope, owner, mine.version, mine.key) !== fp) {
+          setAside.push({ scope, version: mine.version, key: mine.key });
+          drop(k.version);
+        } else
           throw new KeyLinkError(
             'That link’s keys conflict with the ones on this device. Don’t use it.',
           );
@@ -177,7 +211,7 @@ export function takeKeys(
       (v) => next.dropPersonalKey(v),
       (k) => next.addPersonalKey(k),
     );
-  return next;
+  return { next, setAside };
 }
 
 function sameKey(a: Uint8Array, b: Uint8Array): boolean {
