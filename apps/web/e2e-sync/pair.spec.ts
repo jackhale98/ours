@@ -459,8 +459,27 @@ test('sign up, pair, compare safety codes, and sync plans both ways', async ({ b
     .getByRole('button', { name: /Add plan|Send to Sam/ })
     .click();
   await expect(alex.getByRole('button', { name: /Picnic/ })).toBeVisible();
-  // Alex, still on the old keys, gives the same item a due date.
+  // Alex, still on the old keys, gives the same item a due date. It waits on
+  // the device for the keys: let it reach the device's storage before
+  // leaving the page (a slow machine could otherwise still be writing it).
+  const pending = (page: Page) =>
+    page.evaluate(
+      () =>
+        new Promise<number>((res, rej) => {
+          const r = indexedDB.open('ours');
+          r.onerror = () => rej(r.error);
+          r.onsuccess = () => {
+            const q = r.result.transaction('outbox').objectStore('outbox').count();
+            q.onsuccess = () => {
+              res(q.result);
+              r.result.close();
+            };
+          };
+        }),
+    );
+  const before = await pending(alex);
   await editItem(alex, /^Due/, '2031-05-20');
+  await expect.poll(() => pending(alex), { timeout: 10_000 }).toBeGreaterThan(before);
 
   // Alex opens the key update link, compares the code with Sam's, and uses it.
   await alex.goto(rekeyLink);
