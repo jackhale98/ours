@@ -12,9 +12,18 @@ concurrency:
   group: pages
   cancel-in-progress: false
 
+# Two targets, chosen by the repository variable WEB_HOST:
+#   "cloudflare" → the `cloudflare` job: an assets-only Worker with real
+#                  security headers (ADR 0014), in the `production`
+#                  environment so it can read that environment's secrets.
+#   anything else → the `build` and `deploy` jobs: GitHub Pages (forks).
+# Both build the same way and publish the hash of every file they ship.
+
 jobs:
-  build:
+  cloudflare:
+    if: vars.WEB_HOST == 'cloudflare'
     runs-on: ubuntu-latest
+    environment: production
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -24,9 +33,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
         env:
-          # GitHub Pages serves the app under /<repo>/; Cloudflare (WEB_HOST) and
-          # custom domains at the root. A repository variable overrides both.
-          OURS_BASE: ${{ vars.OURS_BASE || (vars.WEB_HOST == 'cloudflare' && '/' || format('/{0}/', github.event.repository.name)) }}
+          OURS_BASE: ${{ vars.OURS_BASE || '/' }}
           VITE_API_URL: ${{ vars.API_URL }}
           VITE_TURNSTILE_SITE_KEY: ${{ vars.TURNSTILE_SITE_KEY }}
           OURS_OPERATOR: ${{ vars.OURS_OPERATOR }}
@@ -41,24 +48,49 @@ jobs:
           find . -type f -print0 | sort -z | xargs -0 sha256sum > ../build-hashes.txt
           cat ../build-hashes.txt
           cp ../build-hashes.txt ./build-hashes.txt
-      # Cloudflare (ADR 0014): an assets-only Worker with real security headers.
       - name: Deploy to Cloudflare
-        if: vars.WEB_HOST == 'cloudflare'
         working-directory: apps/api
         run: pnpm exec wrangler deploy --config ../web/wrangler.jsonc
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-      - if: vars.WEB_HOST != 'cloudflare'
-        uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
-      - if: vars.WEB_HOST != 'cloudflare'
-        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+
+  build:
+    if: vars.WEB_HOST != 'cloudflare'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+        env:
+          # GitHub Pages serves the app under /<repo>/. A repository variable
+          # overrides it (a custom domain on Pages uses "/").
+          OURS_BASE: ${{ vars.OURS_BASE || format('/{0}/', github.event.repository.name) }}
+          VITE_API_URL: ${{ vars.API_URL }}
+          VITE_TURNSTILE_SITE_KEY: ${{ vars.TURNSTILE_SITE_KEY }}
+          OURS_OPERATOR: ${{ vars.OURS_OPERATOR }}
+          OURS_CONTACT: ${{ vars.OURS_CONTACT }}
+          OURS_GOVERNING_LAW: ${{ vars.OURS_GOVERNING_LAW }}
+          OURS_REGION: ${{ vars.OURS_REGION }}
+          OURS_EMAIL_PROVIDER: ${{ vars.OURS_EMAIL_PROVIDER }}
+          OURS_LEGAL_DATE: ${{ vars.OURS_LEGAL_DATE }}
+      - name: Record build hashes
+        run: |
+          cd apps/web/dist
+          find . -type f -print0 | sort -z | xargs -0 sha256sum > ../build-hashes.txt
+          cat ../build-hashes.txt
+          cp ../build-hashes.txt ./build-hashes.txt
+      - uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
+      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:
           path: apps/web/dist
 
   deploy:
     needs: build
-    if: vars.WEB_HOST != 'cloudflare'
     runs-on: ubuntu-latest
     permissions:
       pages: write
