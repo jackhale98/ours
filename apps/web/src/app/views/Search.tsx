@@ -41,7 +41,7 @@ function when(ms: number | null): string {
   return time === '00:00' ? day : `${day}, ${fmtTime(time)}`;
 }
 
-function Result({ hit }: { hit: Hit }) {
+export function Result({ hit }: { hit: Hit }) {
   switch (hit.kind) {
     case 'plan':
       return (

@@ -60,7 +60,10 @@ export function matches(words: string[], ...fields: (string | null | undefined)[
 }
 
 /** When a plan next happens (or last happened), and that day's original start. */
-function nextTime(e: Entry, at: number): { when: number | null; occ: string | null; up: boolean } {
+export function nextTime(
+  e: Entry,
+  at: number,
+): { when: number | null; occ: string | null; up: boolean } {
   if (e.rec.kind !== 'event') return { when: null, occ: null, up: false };
   const d = e.rec.data;
   try {

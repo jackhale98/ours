@@ -2866,6 +2866,16 @@ fieldset.reminders > legend {
 .find-row:hover {
   background: var(--sunk);
 }
+/* "New from …": the partner's changes since this device last looked. */
+.news {
+  margin-bottom: 14px;
+}
+.news-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
 @media (min-width: 880px) {
   main.v-search {
     max-width: 760px;

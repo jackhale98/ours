@@ -2,10 +2,12 @@
 
 import { addDays } from '@ours/core/time';
 import { signal } from '@preact/signals';
+import { useState } from 'preact/hooks';
 import { tasksFor, waiting } from '../inbox';
 import { itemSheet } from '../itemsheet';
 import { dueOf, dueText } from '../lists';
 import { commentsFor, nameOf, names, partner, viewer } from '../model';
+import { markSeen, news } from '../news';
 import { planMode } from '../planview';
 import {
   agenda,
@@ -24,6 +26,7 @@ import {
 import { accept, decline, openEvent, openFreeTime, openImport, openPlanForm } from '../sheets';
 import { Icon, Marker, MarkerKey } from '../ui';
 import { MonthView, ViewSwitch, WeekView } from './Calendar';
+import { Result } from './Search';
 
 const weeks = signal<1 | 2>(1);
 
@@ -214,6 +217,43 @@ function SideCards() {
   );
 }
 
+/**
+ * What the partner changed since this device last looked, so opening the
+ * app after "Something changed" shows what it was.
+ */
+function WhatsNew() {
+  const hits = news.value;
+  const [all, setAll] = useState(false);
+  if (!hits.length) return null;
+  const shown = all ? hits : hits.slice(0, 4);
+  return (
+    <section class="card news" aria-labelledby="news-h">
+      <div class="news-head">
+        <h2 class="h3" id="news-h">
+          New from {nameOf(partner.value)}
+        </h2>
+        <button type="button" class="linkbtn" onClick={markSeen}>
+          Got it
+        </button>
+      </div>
+      <div class="find-group">
+        <ul>
+          {shown.map((h) => (
+            <li key={h.id}>
+              <Result hit={h} />
+            </li>
+          ))}
+        </ul>
+      </div>
+      {hits.length > shown.length && (
+        <button type="button" class="linkbtn" onClick={() => setAll(true)}>
+          {hits.length - shown.length} more
+        </button>
+      )}
+    </section>
+  );
+}
+
 export function PlanView() {
   const t = today.value;
   const mode = planMode.value;
@@ -252,6 +292,7 @@ export function PlanView() {
     return (
       <>
         {header}
+        <WhatsNew />
         {mode === 'week' ? <WeekView /> : <MonthView />}
         <MarkerKey names={names.value} />
       </>
@@ -262,6 +303,7 @@ export function PlanView() {
   return (
     <>
       {header}
+      <WhatsNew />
       <div class="plan-grid">
         <div class="plan-side">
           {/* biome-ignore lint/a11y/noNoninteractiveTabindex: a horizontally scrolling region must be keyboard-focusable (WCAG 2.1.1, axe scrollable-region-focusable) */}

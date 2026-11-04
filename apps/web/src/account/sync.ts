@@ -161,7 +161,15 @@ export class SyncEngine implements Backend {
 
   private toEntry(e: Envelope | EnvelopeInput, rec: DecodedRecord): Entry | null {
     if (rec.deleted) return null;
-    return { id: e.id, scope: e.scope, owner: this.slotFor(e.owner_user_id), rec: rec as Live };
+    // Unsent changes are this person's; synced ones say who wrote them last.
+    const by = 'updated_by' in e ? this.slotFor(e.updated_by) : this.ctx.slot;
+    return {
+      id: e.id,
+      scope: e.scope,
+      owner: this.slotFor(e.owner_user_id),
+      rec: rec as Live,
+      ...(by ? { by } : {}),
+    };
   }
 
   private seal(entry: { id: string; scope: 'space' | 'user' }, rec: DecodedRecord): EnvelopeInput {

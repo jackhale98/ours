@@ -31,6 +31,8 @@ export interface Entry {
   /** Owning slot for user-scope records; null for shared ones. */
   owner: Slot | null;
   rec: LiveRecord;
+  /** Who last changed it, from the synced envelope (absent in the demo). */
+  by?: Slot;
 }
 
 export interface StoreData {

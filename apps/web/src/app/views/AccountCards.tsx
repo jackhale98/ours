@@ -7,6 +7,7 @@ import {
 } from '@ours/core/crypto';
 import { useEffect, useState } from 'preact/hooks';
 import { ApiError, api } from '../../account/api';
+import { kvGet } from '../../account/db';
 import {
   disablePush,
   enablePush,
@@ -495,6 +496,66 @@ const PUSH_HINT: Record<PushState, string> = {
   on: 'On for this device. The text is encrypted: the server only knows when to send.',
 };
 
+/** Why this device's last notification was or wasn't shown in full (from the service worker). */
+const PUSH_OUTCOME: Record<string, string> = {
+  shown: 'shown in full.',
+  'keys-unreadable':
+    'it could only say “Something changed”: this browser wouldn’t let notifications read your keys in the background. Open Ours to see what changed: it’s listed at the top of the plan.',
+  'no-keys': 'it could only say “Something changed”: this device didn’t have your keys yet.',
+  'key-missing':
+    'it could only say “Something changed”: it was sealed with keys this device doesn’t have yet.',
+  'not-authentic': 'it didn’t check out, so only “Something changed” was shown.',
+  early: 'it could only say “Something changed”: its time didn’t fit. Check this device’s clock.',
+  expired:
+    'it could only say “Something changed”: it arrived too late (or check this device’s clock).',
+  duplicate: 'it arrived twice; the copy said “Something changed”.',
+  'no-payload': 'it could only say “Something changed”.',
+};
+
+function LastPush() {
+  const [last, setLast] = useState<{ at: number; outcome: string } | null>(null);
+  useEffect(() => {
+    const read = () =>
+      void kvGet<{ at: number; outcome: string }>('push-last')
+        .then((v) => setLast(v ?? null))
+        .catch(() => {});
+    read();
+    // Read again when a push arrives (the service worker says so) or the app comes back.
+    const onMessage = (e: MessageEvent) => {
+      if ((e.data as { type?: string } | null)?.type === 'ours-sync') read();
+    };
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') read();
+    };
+    navigator.serviceWorker?.addEventListener('message', onMessage);
+    document.addEventListener('visibilitychange', onVisible);
+    // And now and then while shown: a local read, nothing is sent.
+    const every = setInterval(() => {
+      if (document.visibilityState === 'visible') read();
+    }, 5_000);
+    return () => {
+      clearInterval(every);
+      navigator.serviceWorker?.removeEventListener('message', onMessage);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, []);
+  if (!last) return null;
+  const mins = Math.round((Date.now() - last.at) / 60_000);
+  const ago =
+    mins < 1
+      ? 'just now'
+      : mins < 60
+        ? `${mins} min ago`
+        : mins < 48 * 60
+          ? `${Math.round(mins / 60)} h ago`
+          : `${Math.round(mins / 1440)} days ago`;
+  return (
+    <p class="d small">
+      Last notification here ({ago}): {PUSH_OUTCOME[last.outcome] ?? 'unknown.'}
+    </p>
+  );
+}
+
 export function NotificationsCard() {
   const state = pushState.value;
   const quiet = quietHours.value;
@@ -535,6 +596,7 @@ export function NotificationsCard() {
       )}
       {state === 'on' && (
         <>
+          <LastPush />
           <Switch
             checked={settings.value.notify_notes?.[viewer.value] !== false}
             onChange={(on) =>

@@ -288,6 +288,12 @@ test('sign up, pair, compare safety codes, and sync plans both ways', async ({ b
       expect.stringMatching(/^Sam asked: Dinner\|/),
     ]);
 
+  // Privacy says why the last notification only said "Something changed".
+  await alex.goto('/#privacy');
+  await expect(alex.locator('section[aria-labelledby="notif-h"]')).toContainText('arrived twice', {
+    timeout: 10_000,
+  });
+
   // Sam also adds a private plan.
   await sam.keyboard.press('n');
   await sam
@@ -304,6 +310,14 @@ test('sign up, pair, compare safety codes, and sync plans both ways', async ({ b
   await expect(alex.getByText('Sam asked · needs your answer')).toBeVisible({ timeout: 15_000 });
   await expect(alex.getByText('Surprise shopping')).toHaveCount(0);
   await expect(alex.locator('.ev.is-masked').first()).toContainText('Busy');
+  // What Sam changed is listed at the top, for when a notification could
+  // only say "Something changed"; never the private plan.
+  const news = alex.locator('section[aria-labelledby="news-h"]');
+  await expect(news).toContainText('New from Sam');
+  await expect(news).toContainText('Dinner');
+  await expect(news).not.toContainText('Surprise');
+  await news.getByRole('button', { name: 'Got it' }).click();
+  await expect(news).toHaveCount(0);
   await alex.locator('.ask').getByRole('button', { name: 'Yes, add it' }).click();
   await expect(alex.locator('.rail .demo')).toHaveText('Synced', { timeout: 15_000 });
 

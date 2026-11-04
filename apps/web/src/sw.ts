@@ -99,6 +99,24 @@ async function tellClients(): Promise<void> {
   for (const c of clients) c.postMessage({ type: 'ours-sync' });
 }
 
+/**
+ * Why the last notification was shown in full or not, kept on this device
+ * only (a reason code, never content), for Privacy → Notifications.
+ */
+type PushOutcome =
+  | 'shown'
+  | 'no-payload'
+  | 'no-keys'
+  | 'keys-unreadable'
+  | 'key-missing'
+  | 'not-authentic'
+  | 'early'
+  | 'expired'
+  | 'duplicate';
+async function note(outcome: PushOutcome): Promise<void> {
+  await kvSet('push-last', { at: Date.now(), outcome }).catch(() => {});
+}
+
 /** Browsers require a visible notification for every push; say as little as possible. */
 async function showGeneric(): Promise<void> {
   await self.registration.showNotification('Ours', {
@@ -117,7 +135,14 @@ async function withSeenLock<T>(fn: () => Promise<T>): Promise<T> {
 async function handlePush(data: PushMessageData | null): Promise<void> {
   const now = Date.now();
   const wrapper = parseWrapper(data);
-  const ring = wrapper ? await loadRing().catch(() => null) : null;
+  let unreadable = false;
+  const ring = wrapper
+    ? await loadRing().catch(() => {
+        // Some browsers can't read the stored device key from here (WebKit).
+        unreadable = true;
+        return null;
+      })
+    : null;
   let key: Uint8Array | null = null;
   try {
     if (wrapper && ring)
@@ -126,7 +151,10 @@ async function handlePush(data: PushMessageData | null): Promise<void> {
     key = null;
   }
   if (!wrapper || !ring || !key) {
-    // Signed out, or keys not on this device yet.
+    // Signed out, keys not on this device yet, or not readable here.
+    await note(
+      !wrapper ? 'no-payload' : unreadable ? 'keys-unreadable' : !ring ? 'no-keys' : 'key-missing',
+    );
     await showGeneric();
     return;
   }
@@ -152,9 +180,13 @@ async function handlePush(data: PushMessageData | null): Promise<void> {
       );
     } catch (err) {
       if (!(err instanceof CryptoError)) throw err;
+      await note('not-authentic');
       return null; // Not authentic, or not for this person.
     }
-    if (opened.status !== 'show') return null;
+    if (opened.status !== 'show') {
+      await note(opened.status);
+      return null;
+    }
     seen[opened.body.nid] = opened.body.expires_at;
     await kvSet('seen-nids', seen);
     return opened.body;
@@ -166,6 +198,7 @@ async function handlePush(data: PushMessageData | null): Promise<void> {
     await showGeneric();
     return;
   }
+  await note('shown');
   await self.registration.showNotification(shown.title, {
     body: shown.body,
     icon: ICON,
