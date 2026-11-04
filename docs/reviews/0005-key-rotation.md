@@ -8,9 +8,10 @@
   - client: `apps/web/src/account/session.ts` (`rotateKeys`, `keyUpdateLink`, `applyKeyLink`, `refresh`, `restartSync`), `account/sync.ts`, `app/mount.tsx`, `app/App.tsx` (banner), `app/views/AccountCards.tsx` (`SecureCard`)
   - tests: `apps/api/test/rotation.test.ts`, `pairing.test.ts`, the end of `e2e-sync/pair.spec.ts`
   - Uncommitted changes in the working tree (import, recurrence) were not reviewed.
-- Verdict (re-review, 2026-11-04): **No sign-off.** Commit 8693ec3 fixes most findings. But retrying a rotation that already landed throws the new keys away and stops both people from writing (N1, High). Conditions: fix N1 with a test. Fix N2–N4 or accept them in THREAT_MODEL. Correct THREAT_MODEL for N5 and L1. See "Re-review" at the end.
+- Verdict (re-review 2, 2026-11-04): **Sign-off with conditions.** Commits e7bed9a and 9ea66f7 fix N1–N6 in the main. Conditions: fix R1–R3 and the start-up path of L7, with tests. Then turn on `VITE_ROTATION` and `ROTATION` together. Crypto review 0001 M1 is closed. See "Re-review 2" at the end.
+- Re-review verdict (2026-11-04): no sign-off. Retrying a rotation that already landed threw the new keys away (N1, High).
 - First verdict (2026-11-03): no sign-off. Conditions: fix H1 and H2, and M1–M6, with regression tests. Fix the Lows or record them as accepted risks in THREAT_MODEL.
-- Fixes: commit 8693ec3, listed in "Fixes" at the end. Re-reviewed in "Re-review (commits 8693ec3, 199fb4f)".
+- Fixes: commit 8693ec3, listed in "Fixes" at the end. Re-reviewed in "Re-review (commits 8693ec3, 199fb4f)"; its fixes in "Re-review 2 (commits e7bed9a, 9ea66f7)".
 
 The reviewer ran the existing suites, all green: `pnpm test:api` (85 tests), `pnpm test` (596) and `e2e:sync` (1, including the rotation part). Seven probe tests ran against the Worker in vitest pool workers from a scratch config outside the repo, and were then deleted. They are referenced as P1–P7 below. Nothing in the repo changed apart from this file.
 
@@ -400,3 +401,67 @@ A re-review can be limited to the N1 fix and its test, plus the THREAT_MODEL cha
 | L1 | The immediate-notification race is recorded in THREAT_MODEL. | — |
 | L7 | The feed link is replaced whenever the rotation is committed, on either path. | Reading |
 | Info | Backdating and the stuck re-encrypting step are recorded in THREAT_MODEL. The server now has a `ROTATION` switch, "off" in production, for the rotate route and key update links. | API "refuses rotating and key update links when switched off" |
+
+## Re-review 2 (commits e7bed9a, 9ea66f7)
+
+- Reviewer: the same independent agent as the re-review above. It did not write the fixes.
+- Date: 2026-11-04
+- Scope: `git show e7bed9a 9ea66f7`, and the server switch in ece0cf6 and 6916843. Checked against N1–N6 and the other items listed in the re-review's verdict. The table "Fixes after the re-review" was treated as claims to check.
+- Suites, all green at HEAD: `pnpm test:api` (101), `TZ=UTC pnpm test` (668), `e2e:sync` (2). No probes were needed. The client flows in `session.ts` still have no unit tests, so the findings below come from reading.
+- Line numbers are at HEAD (9ea66f7). Other people's uncommitted work was in the working tree (notes, places, notification settings). It doesn't touch the rotation paths and was not reviewed.
+
+### Items
+
+| Item | Verdict | Evidence |
+|---|---|---|
+| N1 | **Partly fixed** | On 409 `rotation_conflict`, `sendRotation` now refreshes and runs `stagedOutcome` before dropping anything (`session.ts:848-857`, `rotation.ts` `stagedOutcome`). A second press with the backup saved goes through `retryRotationNow` (`:791`). Presses during a call join it (`oneAtATime`, `:871`). E2E: the first `/rotate` answer is dropped after the server rotated, the second press commits, and sync, re-encryption and the link work after. Unit tests cover `stagedOutcome`. **Gap:** if `/me` fails right after the 409, the decision uses stale data and still drops the landed keys (R1). |
+| N2 | **Fixed** | When `settleStaged` finds the rotation landed, it stops the running engine; `refresh` then starts a new one with the new ring (`:645`). Same E2E. |
+| N3 | **Fixed** | `prepareRotation` checks the keys again after `settle()` and a fresh `/me`, and refuses unless both are `ok` for the versions being rotated from (`:752-766`). Reading. |
+| N4 | **Partly fixed** | `tried` is set before the backup PUT (`:799`). A dropped rotation shows "your new recovery phrase was saved… keep it" (`AccountCards.tsx:571`). **Gap:** after a reload with `tried` but not `backup`, the stage is kept but nothing shows it and nothing says the phrase may have changed (R3). The notice is only in Privacy, not in a banner. |
+| N5 | **Fixed** | THREAT_MODEL now says the fingerprints don't bind the server. A device link that changes the shared key shows the safety code first (`:1040`, `mount.tsx`, `KeyLinkPrompt`). A replaced key goes to the `aside` slot (`keepAside`, `:1065`). The `aside` slot is never read except to add to it. It is not in device links, invites or backups, so nothing leaks. It is deleted on sign-out with the rest of the database, so "never deleted" in THREAT_MODEL holds only until then. There is no way in the app to use it again. Web test "replaces this device's orphan key…". |
+| N6 | **Fixed, with trade-offs** | `resolve` returns `'unreadable'` and leaves the base and the unsynced change alone (`sync.ts:438`, `:453`). The push loop stops that pass (`:401`, `:421`). Deletes still apply, because a real deletion opens. Merges stay three-way, because the base isn't replaced. The M5 re-pull only follows `'key'` holds (`:490`), so the two don't mix. Trade-offs are in Info. Reading; E2E unchanged and green. |
+| H2 test | **Fixed** | E2E: after the rotation, a new device signs in, restores from the new phrase alone, and shows the item renamed after the rotation. |
+| L1 | **Fixed** | The race for immediate notifications is in THREAT_MODEL. |
+| L7 | **Partly fixed** | `commitStaged` now replaces the feed link (`:696`). But when a lost answer is resolved at app start, `settleStaged` runs before `startFeeds` loads `feedOn` (`:210`), so `feedOn` is still false and the link isn't replaced. |
+| THREAT_MODEL | **Fixed** | Fingerprints, backdating, held records, the notification race, the stuck re-encrypting step and the switch are all recorded. One overstatement: see N5 above. |
+| Server switch | **Fixed** | `ROTATION !== 'on'` refuses `/rotate` and rekey links with 403 `rotation_off` (`spaces.ts:136`, `invites.ts:90`). It is "off" in `env.production`, and the API deploy uses `--env production`. Test "refuses rotating and key update links when switched off". `keys-ack` and `/rotation` stay open, which is fine: they only read, or record. |
+| I6 | **Improved** | Unit tests for `stagedOutcome`; E2E for the lost answer and the restore. `sendRotation`'s 409 path and the reload paths have no test. |
+
+### New findings
+
+**R1 (Low): a 409 followed by a failed `/me` still drops a rotation that landed.**
+- Location: `sendRotation` (`session.ts:848-857`); `refresh`'s offline fallback (`:152`).
+- What happens: after the 409, `refresh` asks `/me`. If that request fails (offline, 5xx), `refresh` uses the cached copy, which still shows the old versions. `stagedOutcome` then says `'retry'`, so the stage stays `staged`, and `sendRotation` goes on to `dropRotation`. The 409 itself proved the versions moved. The result is N1's lockout. The message now says to keep the new phrase, which helps, but the only way back is still to sign out and restore.
+- Fix: drop only when `stagedOutcome`, run on a fresh `/me`, returns `'drop'`. If `/me` failed, keep the stage for "Try again". Add a test.
+
+**R2 (Low): any other 4xx drops the rotation, including "confirm it's you".**
+- Location: `sendRotation` (`:859`); `SecureCard` (`AccountCards.tsx:391`).
+- What happens: a 403 `reauth_required` now drops the staged keys. The card still says "Confirm it's you with your passkey, then press Save again", but the form is gone, so the person must start over with yet another phrase. This happens when the client's clock runs behind the server's, because `needsConfirm` compares the server's `signed_in_at` with the local clock. The same happens with 403 `rotation_off` if the UI is on while the server switch is off: every attempt saves a new phrase, then drops.
+- Fix: keep the stage on `reauth_required`, as before. Drop only on refusals that mean the rotation can't go ahead. Turn the two switches on together, or have the client check the server switch before saving the backup.
+
+**R3 (Low): a reload after a lost backup answer leaves the N4 case open.**
+- Location: `settleStaged` (`:652`); `RotationBanner` (`App.tsx:268`); `SecureCard` (`AccountCards.tsx:467`).
+- What happens: with `tried` set and `backup` not set, the stage is kept at start. But the banner and the card show "Try again" only when `backup` is set, and `phraseKept` is not set. So the person isn't told that the backup may now be under the new phrase. If they start again, the `tried` flag is overwritten. A blind "Try again" would be wrong here anyway: the backup may not exist, which would reopen H2.
+- Fix: at start, treat `tried` without `backup` as dropped: call `dropRotation`, which shows the phrase notice.
+
+### Info
+
+- **N6 trade-offs.** A record that won't open is now neither stored nor pulled again. A record from the partner's newer app stays invisible after this app updates, until it changes again. Before N6 it was stored and shown at the next start. A held unsynced change leaves the status at "Synced". It also makes `settle()` fail, which blocks starting a rotation and finishing the re-encrypting step until the app updates. Consider keeping unreadable copies apart and pulling them again after an app update.
+- **Phrase notice placement.** `phraseKept` shows only in Privacy. A drop found at app start may go unseen. A banner like `PhraseBanner` would be safer.
+- **Floor written down on commit.** If a lost answer is found only after the partner rotated again, `commitStaged` writes a floor one version lower than the one just learned. The next `refresh` corrects it, and nothing is sealed wrongly. It breaks "never goes down" for a moment.
+
+### Verdict
+
+**Sign-off with conditions.** No High or Medium findings are left. The remaining problems are narrow recovery paths in the client. None of them can seal under a key the server didn't confirm, or let the server destroy data.
+
+Conditions, before turning anything on:
+1. Fix R1, with a test: a 409 followed by a failed `/me` keeps the staged keys.
+2. Fix R2: keep the stage on `reauth_required`.
+3. Fix R3: at start, a stage with `tried` but no `backup` is dropped, with the phrase notice.
+4. Replace the feed link on the start-up path too (L7).
+
+These are small and specific. The author can close them with tests, and no further full review is needed. The Info items are at the owner's discretion.
+
+**Crypto review 0001 M1: closed.** Its requirements hold at HEAD and are tested: live records are re-encrypted until the server counts none left, old versions are decrypt-only, new ciphertexts under any version but the current one are refused, and notifications and reminders go only under the current version. The conditions above are about client recovery, not about these properties.
+
+**Switches.** Turn on `VITE_ROTATION` (UI) and `ROTATION` (server, `env.production`) only once conditions 1–4 are met. Turn them on together, in the same release. With the UI on and the server off, every attempt saves a new phrase and is then dropped (R2).
