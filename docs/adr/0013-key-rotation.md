@@ -1,6 +1,6 @@
 # 0013. Key rotation after losing a device or a partner leaving
 
-- Status: Accepted, implementation under review (review 0005 did not sign off; the UI is switched off until it does)
+- Status: Accepted. Review 0005 findings fixed (see "After review 0005"); the UI stays switched off until the re-review signs off
 - Date: 2026-11-03
 
 ## Context
@@ -26,5 +26,14 @@ Option 3, using only primitives and flows that have already been reviewed.
 ## Consequences
 - After losing a phone, a person does three things: secure the space, send the link, write down the new phrase. The UI walks through it.
 - The removed device cannot read anything written after rotation, even with a later copy of the database, because nothing after rotation is sealed under its keys and the server refuses old-version writes. It can still read what it already had, and history in D1 Time Travel (30 days) until that expires.
-- A malicious server can delay or withhold the key update (denial of service), but cannot read the new keys: the link secret never reaches it. It could also lie about `rotated_rev`; clients additionally refuse old-version writes newer than their own last-seen rotation.
+- A malicious server can delay or withhold the key update (denial of service), but cannot read the new keys: the link secret never reaches it. Devices keep the floor they have seen and never accept a lower one, pin the rotation point (`rotated_rev`) for a version the first time they learn it, and refuse a record whose key version is lower than the copy they already hold. A device that first hears of a rotation from a lying server can't check the rotation point it is given; see THREAT_MODEL.
 - Option 2 remains a path to make rotation seamless later.
+
+## After review 0005
+The flow above is kept; review 0005 found its edges unsafe, and these were changed:
+- **Order (H2).** Rotating is three steps, and the state of each is kept on the device so it resumes after a reload or a lost answer: (1) after a full sync, new keys are made and kept apart, never used to seal anything; (2) the new phrase is shown, two words are checked, and the backup is saved over old and new keys; (3) only then does the server make the new versions current. Re-encryption then runs until the server reports no live record below the new versions (`GET /spaces/:id/rotation`), and every device that holds the current keys re-seals what it has under old ones.
+- **Exact versions and fingerprints (H1).** The server accepts writes, notifications and reminders under the current version only: not older, and not newer. A rotation records a fingerprint per new key, `kid = SHA-256(AAD(label, scope, owner, version) || key)[0..16]`, which `/me` returns. A device drops keys above the floor (a rotation that never happened), doesn't use a key whose fingerprint differs, and takes keys from a link only for the current version, only when it needs them, and only if the fingerprints match. The fingerprint is not in the record AAD: records keep their format, and the exact-version rule plus the checks above stop a device from sealing under a key that isn't the real one.
+- **Atomic (M1).** The rotation is one batch behind a guard row that aborts it if either version moved.
+- **Delivery (M3, M4).** Only the member who made the latest rotation can make key update links, for the current version, for 14 days after, as often as needed until the partner confirms holding the key (`POST /spaces/:id/keys-ack`, checked against the fingerprint). The partner sees the new safety code before the keys are used, and is then asked for a new recovery phrase. Rotating needs a recent sign-in or passkey check when the account has a passkey; both members are emailed.
+- **Stale period (M5).** A device without the new keys keeps its stored copy of a record it can't open as the merge base, and pulls those records again once the keys arrive.
+- **Housekeeping (L2, L4, L7).** Reminders and held notifications under old keys are deleted with the rotation; an account in more than one space can't rotate (the personal key is shared by all of them); the calendar feed link is replaced.

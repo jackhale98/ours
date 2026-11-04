@@ -9,6 +9,7 @@
   - tests: `apps/api/test/rotation.test.ts`, `pairing.test.ts`, the end of `e2e-sync/pair.spec.ts`
   - Uncommitted changes in the working tree (import, recurrence) were not reviewed.
 - Verdict: **No sign-off yet.** Conditions: fix H1 and H2, and M1–M6, with regression tests. Fix the Lows or record them as accepted risks in THREAT_MODEL.
+- Fixes: commit 8693ec3, listed in "Fixes" at the end. Awaiting re-review.
 
 The reviewer ran the existing suites, all green: `pnpm test:api` (85 tests), `pnpm test` (596) and `e2e:sync` (1, including the rotation part). Seven probe tests ran against the Worker in vitest pool workers from a scratch config outside the repo, and were then deleted. They are referenced as P1–P7 below. Nothing in the repo changed apart from this file.
 
@@ -254,3 +255,33 @@ The rest is about completeness and delivery:
 ## Sign-off
 
 No sign-off until H1, H2 and M1–M6 are fixed with regression tests. Fix L1–L7 or record them as accepted risks in THREAT_MODEL, and correct ADR 0013's "last-seen rotation" claim to match the implementation. The Info items are at the owner's discretion. Crypto review 0001 M1 stays **open** until then.
+
+## Fixes (commit 8693ec3)
+
+Tests: `apps/api/test/rotation.test.ts` (server), `apps/web/src/account/rotation.test.ts` (key checks), `packages/core/src/crypto/safety.test.ts` (fingerprints), and the rotation part of `apps/web/e2e-sync/pair.spec.ts` (two browsers, end to end).
+
+| ID | Fix | Test |
+|---|---|---|
+| H1 | (1) Push, notify and reminders accept only `key_version == floor` (`unknown_key` / `stale_key`). (2) New keys are staged in a separate wrapped slot and never sealed under; the ring gains them only when `POST /rotate` succeeds, or when `/me` shows the rotation landed (fingerprints match) after a lost answer. Staged keys are dropped if the versions moved without them or no backup was made. (3) Each rotation stores `kid = SHA-256(AAD('ours/key-id/v1', scope, owner, version) ‖ key)[0..16]` per new key in `key_ids`; `/me` returns them. On every start a device drops keys above its floor and doesn't use a key whose kid differs. Not done: the kid is not in the record AAD (format change); the exact-version rule and the checks make it unnecessary for the collision described. (4) Links: `takeKeys` refuses a conflicting key for a held version, except that a held key whose kid doesn't match is replaced by one that does. | API "refuses writes under a version newer…", "records key fingerprints…"; web "drops keys above the floor", "sets aside a key whose fingerprint differs", "refuses a conflicting key…", "replaces this device's orphan key…" |
+| H2 | `prepareRotation` (after a full sync) stages keys and makes the phrase; `commitRotation` checks two words, saves the backup over old + staged keys, then calls `/rotate`. The stage (`staged` with `backup`, then `securing`) is kept in IndexedDB; a banner offers "Try again" for a rotation the server didn't confirm, and re-encryption resumes on start. Restoring from the new phrase after an abort gives a ring whose staged keys are dropped at start if the rotation never happened. | E2E (phrase, two words, then rotation); reading |
+| M1 | `rotateStatements` is one batch led by a `quota_guard` insert that aborts it unless both versions are still the expected ones. | API "rolls the whole rotation back when the partner rotated in between" (replays the batch after the partner's rotation) |
+| M2 | Before rotating: `engine.settle()` (caught up, outbox empty) or refuse. After: re-encrypt, settle, `GET /spaces/:id/rotation` → `{space_below, mine_below}`, up to five rounds, resumed on every start while the stage is `securing`, with a banner showing what's left. Every device holding the current keys sweeps its stored records below them once caught up. | API "counts what is still under old keys…"; E2E (banner clears) |
+| M3 | "Make key update link" is shown to the rotator whenever the partner hasn't confirmed the current version (`memberships.key_version`, set by `POST /spaces/:id/keys-ack` with a matching kid, sent automatically by a device that holds it). After using a link the partner sees "Make a new phrase" until they save a new backup. The banner mentions linking from another device (L6). | API "…takes acknowledgements"; E2E (link offered, then gone after the partner has the keys; phrase prompt) |
+| M4 | Server: rekey invites only from `spaces.rotated_by`, within 14 days of `rotated_at`, for the current version (stored on the invite; a stale one can't be claimed). `/rotate` needs a sign-in or in-session passkey check (`POST /auth/passkey/reauth/*`) in the last 10 minutes when the account has a passkey, and emails both members. Client: a link is used only when this device needs the current keys, its newest version equals the floor and the kids match; the new safety code is shown with "They match, use these keys" before anything is applied. "Secure your space" warns about passkeys and email left on the lost device. Residual risk in THREAT_MODEL. | API "only the rotator sends key update links…", "needs a recent passkey check…", "emails both members…"; web "refuses keys the server doesn't know", "refuses a link above or below the current version, or when nothing is needed"; E2E (code compared before use) |
+| M5 | `resolve` no longer stores a remote envelope it can't open for want of a key: the stored base stays, and the pull records where such records began (`repull:`); the next engine start re-pulls from there, so the merge is three-way against the true base. | E2E: Sam renames a shared item after rotating, stale Alex sets its due date, both survive on both sides (fails without the fix) |
+| M6 | The floor is kept per space in IndexedDB and merged monotonically (`mergeFloor`); `rotated_rev` is pinned per version the first time it is learned (from the device's own rotation, or `/me`). A remote copy under a lower key version than the stored one is refused. The suggested "cursor when the key was first held" bound was tried and dropped: a device that is behind would hide legitimate pre-rotation records (it broke the M5 merge in the E2E). ADR 0013 and THREAT_MODEL now describe what a fresh device can't check. | web "never goes down, and pins the rotation point of a version"; reading |
+| L1 | The push batch's guard also aborts if either floor moved since it was read (503 `keys_changed`, retried); deferred notifications and reminders are inserted behind a guard on their key version (409 `stale_key`). Immediate sends can't be made atomic with delivery: accepted (a rotation landing mid-request sends one notification under the old key to the partner's current devices). | Reading |
+| L2 | The rotate batch deletes the rotator's `reminder` rows and the space's `deferred` rows; the client resets its reminders signature so they are uploaded again under the new key. | API "drops reminders and held notifications under the old keys" |
+| L3 | Rotation is refused while the device lacks the current keys. `unknownKey` means "the ring has no key for this version", so a gap keeps local data. | Reading |
+| L4 | `/rotate` refuses accounts in more than one space (`multi_space`). | API "refuses rotation for an account in more than one space" |
+| L5 | A conflict whose current copy is under an unknown key marks the push as held and leaves the loop. | Reading |
+| L6 | Banner: "…or a device link from your other device that already has the new keys." | E2E text |
+| L7 | When the feed is on, rotating replaces its link and says so. | Reading |
+| I1 | `GET /invites/:id/kind` answers without claiming; a set-up device refuses a partner invite before claiming it. | API (rekey test) |
+| I2 | Expired and used invites are already purged hourly; the link screen recommends sharing in person. | — |
+| I3 | Privacy keeps "Compare your safety code… / We compared, they match" until confirmed for the current version. | Reading |
+| I4 | Documented in THREAT_MODEL. | — |
+| I5 | Stale requests are refused before the rate limit counts them. | API "doesn't count refused attempts…" |
+| I6 | See the tests above. | — |
+
+Also fixed while testing: the push route's idempotent-retry check ignored `key_version`, so re-sending the same bytes under a new version was reported as written without being written.
