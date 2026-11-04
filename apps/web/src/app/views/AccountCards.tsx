@@ -15,6 +15,7 @@ import {
 } from '../../account/notify';
 import { linkDevice, me, rotateKeys, saveBackup, signOut } from '../../account/session';
 import { nameOf, partner } from '../model';
+import { PhraseWords } from '../phrase';
 import { Icon, Switch, toast } from '../ui';
 
 const when = (ms: number | null) => (ms ? new Date(ms).toLocaleDateString() : 'never');
@@ -104,15 +105,11 @@ export function RecoveryCard() {
       </h2>
       <p class="d">
         Your 12 words are the only way back to your private plans and lists if you lose every
-        device. We never store them. Lost the paper? Make a new phrase; the old one stops working.
+        device. We never store them. Lost them? Make a new phrase; the old one stops working.
       </p>
       {words ? (
         <>
-          <ol class="words" aria-label="New recovery phrase">
-            {words.map((w, i) => (
-              <li key={`${i}-${w}`}>{w}</li>
-            ))}
-          </ol>
+          <PhraseWords words={words} label="New recovery phrase" />
           <button
             type="button"
             class="btn primary"
@@ -122,7 +119,7 @@ export function RecoveryCard() {
               try {
                 await saveBackup(words);
                 setWords(null);
-                toast('New recovery phrase saved. Keep the paper safe.');
+                toast('New recovery phrase saved. Keep your copy safe.');
               } catch (err) {
                 toast(err instanceof ApiError ? err.message : 'Couldn’t save the new phrase.');
               } finally {
@@ -130,7 +127,7 @@ export function RecoveryCard() {
               }
             }}
           >
-            I’ve written these down
+            I’ve saved these
           </button>
         </>
       ) : (
@@ -382,14 +379,10 @@ export function SecureCard() {
       {stage === 'phrase' && words && (
         <>
           <p class="d">
-            Your old recovery phrase can’t restore the new keys. Write these 12 words down instead.
-            Your other devices also need the new keys: link them again from Devices above.
+            Your old recovery phrase can’t restore the new keys. Save these 12 words instead. Your
+            other devices also need the new keys: link them again from Devices above.
           </p>
-          <ol class="words" aria-label="New recovery phrase">
-            {words.map((w, i) => (
-              <li key={`${i}-${w}`}>{w}</li>
-            ))}
-          </ol>
+          <PhraseWords words={words} label="New recovery phrase" />
           <button
             type="button"
             class="btn primary"
@@ -408,7 +401,7 @@ export function SecureCard() {
               }
             }}
           >
-            I’ve written these down
+            I’ve saved these
           </button>
         </>
       )}

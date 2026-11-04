@@ -2908,3 +2908,16 @@ fieldset.reminders > legend {
 .ft-idea:hover .ft-go {
   text-decoration: underline;
 }
+
+/* A recovery phrase, with its copy button and a note on the clipboard. */
+.phrase {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.phrase-copy {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}

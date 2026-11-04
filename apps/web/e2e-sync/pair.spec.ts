@@ -35,15 +35,20 @@ async function signUp(page: Page, email: string) {
 }
 
 async function recoveryPhrase(page: Page) {
-  await expect(
-    page.getByRole('heading', { name: 'Write down your recovery phrase' }),
-  ).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Save your recovery phrase' })).toBeVisible();
   const words = await page
     .getByRole('list', { name: 'Recovery phrase' })
     .getByRole('listitem')
     .allTextContents();
   expect(words).toHaveLength(12);
-  await page.getByRole('button', { name: 'I’ve written them down' }).click();
+  // One click copies all 12 words, in order, ready to paste back in.
+  await page.context().grantPermissions(['clipboard-read', 'clipboard-write'], {
+    origin: new URL(page.url()).origin,
+  });
+  await page.getByRole('button', { name: 'Copy all 12 words' }).click();
+  await expect(page.getByRole('button', { name: 'Copied' })).toBeVisible();
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(words.join(' '));
+  await page.getByRole('button', { name: 'I’ve saved them' }).click();
   for (const label of await page.locator('label[for^="rc-"]').allTextContents()) {
     const n = Number(label.replace(/\D/g, ''));
     await page.getByRole('textbox', { name: label, exact: true }).fill(words[n - 1] ?? '');
@@ -345,7 +350,7 @@ test('sign up, pair, compare safety codes, and sync plans both ways', async ({ b
   const rekeyLink = (await secure.locator('.url code').textContent({ timeout: 20_000 })) ?? '';
   expect(rekeyLink).toMatch(/\/join\/#[A-Za-z0-9_-]+\.[A-Za-z0-9_-]{43}$/);
   await secure.getByRole('button', { name: 'Next: new recovery phrase' }).click();
-  await secure.getByRole('button', { name: 'I’ve written these down' }).click();
+  await secure.getByRole('button', { name: 'I’ve saved these' }).click();
   await expect(secure).toContainText('Your space has new keys');
   await expect(sam.locator('.rail .demo')).toHaveText('Synced', { timeout: 20_000 });
 

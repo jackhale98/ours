@@ -28,6 +28,7 @@ import {
 } from '../../account/session';
 import { mountTurnstile, turnstileEnabled } from '../../account/turnstile';
 import { HAS_API } from '../../config';
+import { PhraseWords } from '../phrase';
 import { Icon, toast } from '../ui';
 
 const errorText = (err: unknown) =>
@@ -167,17 +168,13 @@ function Recovery({ onDone }: { onDone: () => void }) {
   if (step === 'show') {
     return (
       <section class="card">
-        <h2 class="h3">Write down your recovery phrase</h2>
+        <h2 class="h3">Save your recovery phrase</h2>
         <p class="d">
           These 12 words are the only way back to your private plans and lists if you lose all your
-          devices. We don’t keep them, so we can’t show them again. Write them on paper and keep it
-          somewhere safe.
+          devices. We don’t keep them, so we can’t show them again. Write them on paper or save them
+          in a password manager, and keep them somewhere safe.
         </p>
-        <ol class="words" aria-label="Recovery phrase">
-          {words.map((w, i) => (
-            <li key={`${i}-${w}`}>{w}</li>
-          ))}
-        </ol>
+        <PhraseWords words={words} label="Recovery phrase" />
         <p class="note">
           <Icon name="lock" size={15} />
           <span>
@@ -185,7 +182,7 @@ function Recovery({ onDone }: { onDone: () => void }) {
           </span>
         </p>
         <button type="button" class="btn primary big" onClick={() => setStep('confirm')}>
-          I’ve written them down
+          I’ve saved them
         </button>
       </section>
     );
@@ -202,7 +199,7 @@ function Recovery({ onDone }: { onDone: () => void }) {
             ask.map((index, i) => ({ index, word: answers[i] ?? '' })),
           );
           if (!ok) {
-            toast('Those don’t match. Check your paper and try again.');
+            toast('Those don’t match. Check your copy and try again.');
             return;
           }
           setBusy(true);
