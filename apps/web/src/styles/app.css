@@ -65,7 +65,7 @@
 /* ---------- shell ---------- */
 
 .shell {
-  max-width: 1060px;
+  max-width: 1480px;
   margin: 0 auto;
   padding-left: max(16px, env(safe-area-inset-left, 0px));
   padding-right: max(16px, env(safe-area-inset-right, 0px));
@@ -94,7 +94,8 @@ main:focus {
 @media (min-width: 880px) {
   .shell {
     grid-template-columns: 220px minmax(0, 1fr);
-    gap: 56px;
+    gap: clamp(28px, 4vw, 56px);
+    padding-right: clamp(16px, 3vw, 40px);
   }
 
   .rail {
@@ -109,6 +110,13 @@ main:focus {
 
   main {
     padding-block: 34px 64px;
+    max-width: 1180px;
+  }
+
+  /* Pages that read best at a single, comfortable width. */
+  main.v-inbox,
+  main.v-start {
+    max-width: 720px;
   }
 
   .tabbar,
@@ -445,8 +453,6 @@ kbd {
   gap: 12px;
   padding-block: 12px;
   border-top: 1px solid var(--line);
-  content-visibility: auto;
-  contain-intrinsic-size: auto 80px;
 }
 
 .dhead {
@@ -601,9 +607,12 @@ kbd {
   --c: var(--person-a);
 }
 
-/* Person B is a square everywhere, so the two people differ by shape, not just colour. */
 .mk i.b {
   --c: var(--person-b);
+}
+
+/* "Tell us apart by shape too": person B is a square everywhere. */
+:root[data-shapes="on"] .mk i.b {
   border-radius: 2px;
 }
 
@@ -1865,7 +1874,7 @@ dialog.sheet::backdrop {
 .month-wrap.phone .mstage {
   --grid-h: max(
     300px,
-    calc(100dvh - var(--top, 300px) - 92px - 57px - env(safe-area-inset-bottom, 0px) - 8px)
+    calc(100dvh - var(--top, 300px) - 80px - 57px - env(safe-area-inset-bottom, 0px) - 8px)
   );
   height: var(--grid-h);
   touch-action: pan-y;
@@ -2154,7 +2163,7 @@ button.cd-item {
 
 /* The chosen day on phones: a drawer above the tab bar (pattern from fasti). */
 .drawer {
-  --col-h: 92px;
+  --col-h: 80px;
   position: fixed;
   left: 0;
   right: 0;
@@ -2179,7 +2188,7 @@ button.cd-item {
 .drawer.dragging {
   transition: none;
 }
-.dhead {
+.drawer .dhead {
   flex: none;
   height: var(--col-h);
   box-sizing: border-box;
@@ -2210,7 +2219,7 @@ button.cd-item {
   border-radius: 3px;
   background: var(--control);
 }
-.dhead .h3 {
+.drawer .dhead .h3 {
   margin: 0;
 }
 .preview {
@@ -2384,6 +2393,7 @@ fieldset.reminders > legend {
   font-weight: 600;
 }
 .it-sub svg {
+  display: inline-block;
   vertical-align: -2px;
   margin-right: 2px;
 }
@@ -2392,4 +2402,338 @@ fieldset.reminders > legend {
   width: var(--tap);
   height: var(--tap);
   color: var(--muted);
+}
+
+/* ---------- desktop: use the width ---------- */
+
+/* Plan (agenda): the week in the main column; countdowns, what's waiting and
+   this week's tasks beside it. Phones keep one column: countdowns on top. */
+.plan-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+.plan-main {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  min-width: 0;
+}
+.side-cards {
+  display: none;
+}
+@media (min-width: 1200px) {
+  .plan-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(260px, 320px);
+    grid-template-areas: "main side";
+    align-items: start;
+    gap: 32px;
+  }
+  .plan-main {
+    grid-area: main;
+  }
+  .plan-side {
+    grid-area: side;
+    position: sticky;
+    top: 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+  .plan-side .cd-wrap {
+    overflow: visible;
+    margin: 0;
+  }
+  .plan-side .cd {
+    flex-direction: column;
+    width: auto;
+  }
+  .plan-side .cd-item {
+    width: 100%;
+    max-width: none;
+  }
+  .side-cards {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+}
+.card.side {
+  gap: 8px;
+}
+.card.side .btn {
+  align-self: flex-start;
+}
+.side-tasks {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.side-tasks button {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  width: 100%;
+  min-height: var(--tap);
+  padding: 6px 0;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+}
+.side-tasks b {
+  font-weight: 600;
+  font-size: 0.875rem;
+}
+.side-tasks .late {
+  color: var(--danger);
+  font-weight: 600;
+}
+
+/* Month: on big screens the chosen day sits beside the grid, and cells grow
+   with the window so titles have room. */
+@media (min-width: 1200px) {
+  .month-wrap:not(.phone) {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 300px;
+    gap: 24px;
+    align-items: start;
+  }
+  .month-wrap:not(.phone) .daypanel {
+    margin-top: 28px;
+    position: sticky;
+    top: 24px;
+    padding: 16px;
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    background: var(--surface);
+  }
+  .month.wide .mcell {
+    height: clamp(96px, calc((100dvh - 300px) / 6), 150px);
+  }
+}
+
+/* Lists: the lists down the side, the chosen one beside them. */
+.lists-pane {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+.lists-layout {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+@media (min-width: 1100px) {
+  .lists-layout {
+    display: grid;
+    grid-template-columns: 240px minmax(0, 760px);
+    gap: 32px;
+    align-items: start;
+  }
+  .lists-layout .ltabs {
+    position: sticky;
+    top: 24px;
+    flex-direction: column;
+    overflow: visible;
+    gap: 4px;
+  }
+  .lists-layout .ltab {
+    width: 100%;
+    height: 44px;
+    border-radius: 12px;
+    border-color: transparent;
+    background: transparent;
+    font-size: 0.9375rem;
+  }
+  .lists-layout .ltab:hover {
+    background: var(--sunk);
+  }
+  .lists-layout .ltab[aria-pressed="true"] {
+    background: var(--surface);
+    color: var(--ink);
+    border-color: var(--line);
+    box-shadow: 0 1px 3px var(--shadow);
+  }
+  .lists-layout .ltab .n {
+    margin-left: auto;
+  }
+  .lists-layout .ltab[aria-pressed="true"] .n {
+    color: var(--muted);
+  }
+}
+
+/* Check-in and Privacy: cards flow into two columns on big screens, read
+   top to bottom then on to the next column. */
+@media (min-width: 1200px) {
+  .steps,
+  .cards {
+    display: block;
+    columns: 2;
+    column-gap: 16px;
+  }
+  .steps > *,
+  .cards > * {
+    break-inside: avoid;
+    margin-bottom: 16px;
+  }
+  .steps > :last-child,
+  .cards > :last-child {
+    margin-bottom: 0;
+  }
+}
+
+/* ---------- waiting on you ---------- */
+
+.badge {
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--ours);
+  color: #fff;
+  font-size: 0.75rem;
+  font-weight: 700;
+  display: inline-grid;
+  place-items: center;
+  font-variant-numeric: tabular-nums;
+}
+.navbtn .badge {
+  margin-left: auto;
+}
+.wo-top {
+  position: relative;
+  width: var(--tap);
+  height: var(--tap);
+  color: var(--muted);
+  text-decoration: none;
+}
+.wo-top[aria-current="page"] {
+  color: var(--ink);
+}
+.wo-top .badge {
+  position: absolute;
+  top: 2px;
+  right: 0;
+  min-width: 18px;
+  height: 18px;
+  font-size: 0.6875rem;
+  padding: 0 4px;
+}
+.mtop .wo-top {
+  margin-left: auto;
+}
+.mtop .demo + .wo-top {
+  margin-left: 0;
+}
+.wo-card {
+  gap: 8px;
+}
+.wo-card .eyebrow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.wo-card .eyebrow.late {
+  color: var(--danger);
+}
+.wo-card .ask-when .ic {
+  display: inline-block;
+  vertical-align: -2px;
+}
+.wo-step {
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.wo-nav {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: -8px;
+}
+.wo-nav .btn {
+  gap: 4px;
+}
+.wo-all ul {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+}
+.wo-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 56px;
+  padding: 8px 10px;
+  border-radius: 12px;
+  text-align: left;
+  color: var(--muted);
+}
+.wo-row > span {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.wo-row b {
+  color: var(--ink);
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.wo-row:hover {
+  background: var(--sunk);
+}
+.wo-row[aria-current="step"] {
+  background: var(--surface);
+  box-shadow: 0 1px 3px var(--shadow);
+}
+.wo-done {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 24px 0;
+}
+.wo-tick {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: var(--sunk);
+  color: var(--good);
+}
+
+/* ---------- phones: month view room ---------- */
+
+@media (max-width: 879.98px) {
+  /* Every block above the grid costs a row of days: keep the gaps small. */
+  main:has(.month-wrap.phone) {
+    gap: 8px;
+  }
+  main:has(.month-wrap.phone) .viewsw {
+    margin: 0;
+  }
+  main:has(.month-wrap.phone) .phead {
+    margin-bottom: 0;
+  }
+  main:has(.month-wrap.phone) .mtop {
+    min-height: 44px;
+  }
+  .month-wrap.phone .mdow {
+    padding: 2px 0;
+  }
+  .month-wrap.phone .mnum {
+    font-size: 0.9375rem;
+  }
+}
+
+.mk-demo {
+  display: flex;
+  gap: 4px;
+}
+.mk-demo .mk {
+  margin-top: 0;
 }

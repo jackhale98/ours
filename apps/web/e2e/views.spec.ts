@@ -147,11 +147,21 @@ test('week: shows the week, moves between weeks, opens a plan', async ({ page })
   await expect(page.getByRole('dialog')).toBeVisible();
 });
 
-test('proposals stay visible in week and month', async ({ page }) => {
-  await page.goto('/#plan/month');
-  await page.getByRole('button', { name: /needs your answer/ }).click();
-  await expect(page).toHaveURL(/#plan$/);
+test('what’s waiting stays one tap away in week and month', async ({ page }, info) => {
+  await page.goto('/#plan/week');
+  await page.getByRole('button', { name: /waiting on you/ }).click();
+  await expect(page).toHaveURL(/#inbox$/);
   await expect(page.getByText('Alex asked · needs your answer')).toBeVisible();
+  await page.goto('/#plan/month');
+  // Phones give the month grid the room: the header's button does the same job.
+  const phone = info.project.name.includes('mobile');
+  if (phone) {
+    await expect(page.getByRole('button', { name: /waiting on you/ })).toHaveCount(0);
+    await page.getByRole('link', { name: /^Waiting on you: \d/ }).click();
+  } else {
+    await page.getByRole('button', { name: /waiting on you/ }).click();
+  }
+  await expect(page).toHaveURL(/#inbox$/);
 });
 
 for (const scheme of ['light', 'dark'] as const) {

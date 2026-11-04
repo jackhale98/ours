@@ -7,6 +7,7 @@ import { kvGet, kvSet } from '../account/db';
 import { account, consumeSignInLink, newKeysFrom, syncNow } from '../account/session';
 import { needsNewKeys, syncStatus } from '../account/sync';
 import { LogoMark } from '../Logo';
+import { waiting } from './inbox';
 import { ItemSheetHost } from './itemsheet';
 import { findEntry, mode, nameOf, names, partner, viewer } from './model';
 import { drawerOpen, type PlanMode, planHash, setPlanMode } from './planview';
@@ -17,20 +18,21 @@ import { PlanView } from './views/Plan';
 
 const ListsView = lazy(() => import('./views/Lists').then((m) => ({ default: m.ListsView })));
 const CheckinView = lazy(() => import('./views/Checkin').then((m) => ({ default: m.CheckinView })));
+const InboxView = lazy(() => import('./views/Inbox').then((m) => ({ default: m.InboxView })));
 const PrivacyView = lazy(() => import('./views/Privacy').then((m) => ({ default: m.PrivacyView })));
 const StartView = lazy(() => import('./views/Start').then((m) => ({ default: m.StartView })));
 
 /** Show onboarding (sign-in, setup) instead of the tabs. */
 export const startRequested = signal(location.hash === '#start');
 
-export type Tab = 'plan' | 'lists' | 'checkin' | 'privacy';
+export type Tab = 'plan' | 'lists' | 'checkin' | 'privacy' | 'inbox';
 const TABS: [Tab, string, IconName][] = [
   ['plan', 'Plan', 'cal'],
   ['lists', 'Lists', 'list'],
   ['checkin', 'Check-in', 'rings'],
   ['privacy', 'Privacy', 'shield'],
 ];
-export const isTab = (h: string): h is Tab => TABS.some(([t]) => t === h);
+export const isTab = (h: string): h is Tab => h === 'inbox' || TABS.some(([t]) => t === h);
 
 export const tab = signal<Tab>('plan');
 /**
@@ -110,6 +112,33 @@ function Nav({ variant }: { variant: 'rail' | 'tabbar' }) {
   );
 }
 
+/** "Waiting on you", with how many: a rail entry on desktop, a header button on phones. */
+function WaitingLink({ variant }: { variant: 'rail' | 'top' }) {
+  const n = waiting.value.length;
+  const label = n ? `Waiting on you: ${n}` : 'Waiting on you: nothing';
+  const target: Tab = 'inbox';
+  return (
+    <a
+      href={`#${target}`}
+      class={variant === 'rail' ? 'navbtn wo-link' : 'iconbtn wo-top'}
+      aria-current={tab.value === 'inbox' ? 'page' : undefined}
+      aria-label={variant === 'top' ? label : undefined}
+      onClick={(e) => {
+        e.preventDefault();
+        go(target);
+      }}
+    >
+      <Icon name="inbox" size={20} />
+      {variant === 'rail' && 'Waiting on you'}
+      {n > 0 && (
+        <span class="badge" aria-hidden={variant === 'top' ? 'true' : undefined}>
+          {n}
+        </span>
+      )}
+    </a>
+  );
+}
+
 /** Shown while this device lacks keys that were rotated elsewhere (ADR 0013). */
 function NewKeysBanner() {
   if (!needsNewKeys.value) return null;
@@ -182,9 +211,13 @@ export function App() {
   const acct = account.value.status;
   // Signed in but not set up yet (no space, or no keys on this device): onboarding only.
   const onboarding = startRequested.value || acct === 'needs-profile' || acct === 'needs-keys';
-  const View = { plan: PlanView, lists: ListsView, checkin: CheckinView, privacy: PrivacyView }[
-    tab.value
-  ];
+  const View = {
+    plan: PlanView,
+    lists: ListsView,
+    checkin: CheckinView,
+    privacy: PrivacyView,
+    inbox: InboxView,
+  }[tab.value];
   // Render the element directly (not a new component each render) so the
   // onboarding state, like a generated recovery phrase, survives re-renders.
   const content = onboarding ? (
@@ -221,6 +254,7 @@ export function App() {
             ours
           </a>
           <Nav variant="rail" />
+          <WaitingLink variant="rail" />
           <button type="button" class="btn primary newbtn" onClick={() => openQuick()}>
             <span class="row">
               <Icon name="plus" />
@@ -245,7 +279,7 @@ export function App() {
             </span>
           </div>
         </nav>
-        <main id="main" tabIndex={-1}>
+        <main id="main" tabIndex={-1} class={`v-${onboarding ? 'start' : tab.value}`}>
           <div class="mtop">
             <a class="logo" href="./" aria-label="Ours home">
               <LogoMark size={26} />
@@ -254,6 +288,7 @@ export function App() {
             <span class="demo" role={demo ? undefined : 'status'}>
               {statusText}
             </span>
+            <WaitingLink variant="top" />
             <span class="pair">
               <Avatar slot={me} />
               <Avatar slot={p} />

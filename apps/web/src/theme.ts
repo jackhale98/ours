@@ -32,3 +32,38 @@ export function setTheme(pref: ThemePref): void {
   }
   applyTheme(pref);
 }
+
+/**
+ * Shapes as well as colours for the two people's markers (circle and square).
+ * Off by default: both are circles in colours that stay distinct under
+ * colour-blindness simulations. People who still find them hard to tell
+ * apart turn this on.
+ */
+const SHAPES_KEY = 'ours-shapes';
+
+function readShapes(): boolean {
+  try {
+    return localStorage.getItem(SHAPES_KEY) === 'on';
+  } catch {
+    return false;
+  }
+}
+
+export const shapes = signal<boolean>(readShapes());
+
+export function applyShapes(on: boolean = shapes.value): void {
+  const root = document.documentElement;
+  if (on) root.dataset.shapes = 'on';
+  else delete root.dataset.shapes;
+}
+
+export function setShapes(on: boolean): void {
+  shapes.value = on;
+  try {
+    if (on) localStorage.setItem(SHAPES_KEY, 'on');
+    else localStorage.removeItem(SHAPES_KEY);
+  } catch {
+    // Storage blocked: the choice lasts for this visit.
+  }
+  applyShapes(on);
+}

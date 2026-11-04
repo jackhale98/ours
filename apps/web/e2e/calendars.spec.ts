@@ -94,9 +94,21 @@ test('privacy with calendars has no axe violations', async ({ page }) => {
   expect(results.violations.map((v) => `${v.id}: ${v.nodes[0]?.html}`)).toEqual([]);
 });
 
-test('the marker key explains shapes in words', async ({ page }) => {
+test('markers are circles; shapes can be turned on and the key says so', async ({ page }) => {
+  await page.goto('/#plan');
+  await page.getByText('What the marks mean').click();
+  await expect(page.getByText('Alex’s plan', { exact: true })).toBeVisible();
+  const b = page.locator('.key .mk i.b').first();
+  await expect(b).toHaveCSS('border-radius', '50%');
+
+  await page.goto('/#privacy');
+  await page.getByRole('switch', { name: 'Tell us apart by shape too' }).check();
   await page.goto('/#plan');
   await page.getByText('What the marks mean').click();
   await expect(page.getByText('Sam’s plan (circle)')).toBeVisible();
   await expect(page.getByText('Alex’s plan (square)')).toBeVisible();
+  await expect(page.locator('.key .mk i.b').first()).toHaveCSS('border-radius', '2px');
+  // A per-device choice: it survives a reload.
+  await page.reload();
+  await expect(page.locator('html')).toHaveAttribute('data-shapes', 'on');
 });

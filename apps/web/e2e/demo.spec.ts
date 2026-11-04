@@ -29,7 +29,7 @@ test.beforeEach(async ({ page }) => {
 test('landing links to the demo', async ({ page }) => {
   await page.goto('/');
   await page.getByRole('link', { name: 'Try the demo' }).click();
-  await expect(page.getByRole('heading', { name: 'This week' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'This week', exact: true })).toBeVisible();
 });
 
 for (const scheme of ['light', 'dark'] as const) {

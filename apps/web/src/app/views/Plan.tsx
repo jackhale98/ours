@@ -2,6 +2,9 @@
 
 import { addDays } from '@ours/core/time';
 import { signal } from '@preact/signals';
+import { tasksFor, waiting } from '../inbox';
+import { itemSheet } from '../itemsheet';
+import { dueText } from '../lists';
 import { commentsFor, nameOf, names, partner, viewer } from '../model';
 import { planMode } from '../planview';
 import {
@@ -148,6 +151,69 @@ function AskCard({ id }: { id: string }) {
   );
 }
 
+/**
+ * Wide screens only (hidden on phones, where the tab bar and the header's
+ * "Waiting on you" button cover the same ground): what's waiting, and list
+ * tasks coming up this week.
+ */
+function SideCards() {
+  const w = waiting.value;
+  const tasks = tasksFor(7);
+  return (
+    <div class="side-cards">
+      <section class="card side" aria-labelledby="sc-wait">
+        <h2 class="h3" id="sc-wait">
+          Waiting on you
+        </h2>
+        {w.length ? (
+          <>
+            <p class="small muted">
+              {w.length === 1 ? '1 thing needs' : `${w.length} things need`} your answer or a hand.
+            </p>
+            <a class="btn sm primary" href="#inbox">
+              Go through {w.length === 1 ? 'it' : 'them'}
+            </a>
+          </>
+        ) : (
+          <p class="small muted">Nothing right now.</p>
+        )}
+      </section>
+      <section class="card side" aria-labelledby="sc-tasks">
+        <h2 class="h3" id="sc-tasks">
+          On your lists this week
+        </h2>
+        {tasks.length ? (
+          <ul class="side-tasks">
+            {tasks.slice(0, 8).map(({ item, list }) => {
+              const due = dueText(item.rec.data.due ?? today.value);
+              return (
+                <li key={item.id}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      itemSheet.value = item.id;
+                    }}
+                  >
+                    <b>{item.rec.data.text}</b>
+                    <span class={`small${due.late ? ' late' : ' muted'}`}>
+                      {due.text} · {list.rec.data.name}
+                    </span>
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        ) : (
+          <p class="small muted">Nothing with a due date this week.</p>
+        )}
+        <a class="linkbtn" href="#lists">
+          All lists
+        </a>
+      </section>
+    </div>
+  );
+}
+
 export function PlanView() {
   const t = today.value;
   const mode = planMode.value;
@@ -196,103 +262,110 @@ export function PlanView() {
   return (
     <>
       {header}
-      {/* biome-ignore lint/a11y/noNoninteractiveTabindex: a horizontally scrolling region must be keyboard-focusable (WCAG 2.1.1, axe scrollable-region-focusable) */}
-      <section class="cd-wrap" aria-label="Countdowns" tabIndex={0}>
-        <ul class="cd">
-          {cds.map((c) => (
-            <li key={c.id}>
-              <button type="button" class="cd-item" onClick={() => openEvent(c.id)}>
-                <span class="cd-n">{c.days}</span>
-                <span class="cd-l">
-                  {c.days === 1 ? 'day' : 'days'} to
-                  <br />
-                  <b>{c.title}</b>
-                </span>
-              </button>
-            </li>
-          ))}
-          <li>
-            <button
-              type="button"
-              class="cd-item cd-add"
-              onClick={() =>
-                openPlanForm(null, {
-                  owner: 'both',
-                  all_day: true,
-                  start: addDays(t, 30),
-                  end: addDays(t, 31),
-                  countdown: true,
-                })
-              }
-            >
-              <Icon name="plus" size={18} />
-              <span class="cd-l">
-                {cds.length
-                  ? 'Add a milestone'
-                  : 'Count down to something: a trip, a birthday, a big day'}
-              </span>
-            </button>
-          </li>
-        </ul>
-      </section>
-      {awaitingMe.value.map((e) => (
-        <AskCard key={e.id} id={e.id} />
-      ))}
-      <div class="agenda">
-        {days.map((day, i) => (
-          <>
-            {i === 7 && (
-              <h2 class="wk" key="next">
-                Next week
-              </h2>
-            )}
-            <section
-              class={`day${i === 0 ? ' today' : ''}`}
-              aria-label={i === 0 ? `Today, ${fmtLong(day.date)}` : fmtLong(day.date)}
-              key={day.date}
-            >
-              <div class="dhead" aria-hidden="true">
-                <span class="dow">{i === 0 ? 'Today' : dowShort(day.date)}</span>
-                <span class="dnum">{dayNum(day.date)}</span>
-              </div>
-              <div class="dlist">
-                {day.rows.map((row) => (
-                  <EventRow key={row.key} row={row} date={day.date} />
-                ))}
-                {!day.rows.length && !day.bothFree && <p class="nothing">Nothing planned</p>}
-                {day.bothFree && (
-                  <button
-                    type="button"
-                    class="free"
-                    onClick={() =>
-                      openQuick({
-                        date: day.date,
-                        time: '19:00',
-                        who: 'ours',
-                        placeholder: 'Date night',
-                      })
-                    }
-                  >
-                    <Marker owner="both" mode="dash" />
-                    {i === 0 ? 'Both free tonight' : 'Both free this evening'}
-                    <span class="free-cta">Plan something</span>
+      <div class="plan-grid">
+        <div class="plan-side">
+          {/* biome-ignore lint/a11y/noNoninteractiveTabindex: a horizontally scrolling region must be keyboard-focusable (WCAG 2.1.1, axe scrollable-region-focusable) */}
+          <section class="cd-wrap" aria-label="Countdowns" tabIndex={0}>
+            <ul class="cd">
+              {cds.map((c) => (
+                <li key={c.id}>
+                  <button type="button" class="cd-item" onClick={() => openEvent(c.id)}>
+                    <span class="cd-n">{c.days}</span>
+                    <span class="cd-l">
+                      {c.days === 1 ? 'day' : 'days'} to
+                      <br />
+                      <b>{c.title}</b>
+                    </span>
                   </button>
+                </li>
+              ))}
+              <li>
+                <button
+                  type="button"
+                  class="cd-item cd-add"
+                  onClick={() =>
+                    openPlanForm(null, {
+                      owner: 'both',
+                      all_day: true,
+                      start: addDays(t, 30),
+                      end: addDays(t, 31),
+                      countdown: true,
+                    })
+                  }
+                >
+                  <Icon name="plus" size={18} />
+                  <span class="cd-l">
+                    {cds.length
+                      ? 'Add a milestone'
+                      : 'Count down to something: a trip, a birthday, a big day'}
+                  </span>
+                </button>
+              </li>
+            </ul>
+          </section>
+          <SideCards />
+        </div>
+        <div class="plan-main">
+          {awaitingMe.value.map((e) => (
+            <AskCard key={e.id} id={e.id} />
+          ))}
+          <div class="agenda">
+            {days.map((day, i) => (
+              <>
+                {i === 7 && (
+                  <h2 class="wk" key="next">
+                    Next week
+                  </h2>
                 )}
-              </div>
-            </section>
-          </>
-        ))}
+                <section
+                  class={`day${i === 0 ? ' today' : ''}`}
+                  aria-label={i === 0 ? `Today, ${fmtLong(day.date)}` : fmtLong(day.date)}
+                  key={day.date}
+                >
+                  <div class="dhead" aria-hidden="true">
+                    <span class="dow">{i === 0 ? 'Today' : dowShort(day.date)}</span>
+                    <span class="dnum">{dayNum(day.date)}</span>
+                  </div>
+                  <div class="dlist">
+                    {day.rows.map((row) => (
+                      <EventRow key={row.key} row={row} date={day.date} />
+                    ))}
+                    {!day.rows.length && !day.bothFree && <p class="nothing">Nothing planned</p>}
+                    {day.bothFree && (
+                      <button
+                        type="button"
+                        class="free"
+                        onClick={() =>
+                          openQuick({
+                            date: day.date,
+                            time: '19:00',
+                            who: 'ours',
+                            placeholder: 'Date night',
+                          })
+                        }
+                      >
+                        <Marker owner="both" mode="dash" />
+                        {i === 0 ? 'Both free tonight' : 'Both free this evening'}
+                        <span class="free-cta">Plan something</span>
+                      </button>
+                    )}
+                  </div>
+                </section>
+              </>
+            ))}
+          </div>
+          <button
+            type="button"
+            class="btn more"
+            onClick={() => {
+              weeks.value = weeks.value === 1 ? 2 : 1;
+            }}
+          >
+            {weeks.value === 1 ? 'Show next week' : 'Show less'}
+          </button>
+          <MarkerKey names={names.value} />
+        </div>
       </div>
-      <button
-        type="button"
-        class="btn more"
-        onClick={() => {
-          weeks.value = weeks.value === 1 ? 2 : 1;
-        }}
-      >
-        {weeks.value === 1 ? 'Show next week' : 'Show less'}
-      </button>
-      <MarkerKey names={names.value} />
     </>
   );
 }

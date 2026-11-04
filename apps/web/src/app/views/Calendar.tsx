@@ -7,11 +7,11 @@
 import { addDays, toInstant } from '@ours/core/time';
 import { signal } from '@preact/signals';
 import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
+import { waiting } from '../inbox';
 import { nameOf, partner } from '../model';
 import { drawerOpen, focusDate, type PlanMode, planMode, setPlanMode } from '../planview';
 import {
   agendaFrom,
-  awaitingMe,
   type Day,
   dayNum,
   dow,
@@ -66,6 +66,13 @@ export const selected = () => focusDate.value ?? today.value;
 
 /** Wide screens get the time grid and titles in month cells. */
 const wide = signal(typeof matchMedia === 'function' && matchMedia('(min-width: 720px)').matches);
+/** Big screens: taller month cells, room for a third title. */
+const desk = signal(typeof matchMedia === 'function' && matchMedia('(min-width: 1200px)').matches);
+if (typeof matchMedia === 'function') {
+  matchMedia('(min-width: 1200px)').addEventListener('change', (e) => {
+    desk.value = e.matches;
+  });
+}
 if (typeof matchMedia === 'function') {
   matchMedia('(min-width: 720px)').addEventListener('change', (e) => {
     wide.value = e.matches;
@@ -149,15 +156,25 @@ function PeriodNav({ unit, step }: { unit: 'week' | 'month'; step: (n: number) =
   );
 }
 
-/** Proposals stay visible in every view. */
+/**
+ * What's waiting on me stays visible in every view. Phones skip it in the
+ * month view, where the header's "Waiting on you" button does the same job
+ * and the grid needs the height.
+ */
 function NeedsAnswer() {
-  const n = awaitingMe.value.length;
+  const n = waiting.value.length;
   if (!n) return null;
   return (
-    <button type="button" class="needs" onClick={() => setPlanMode('agenda')}>
+    <button
+      type="button"
+      class="needs"
+      onClick={() => {
+        location.hash = 'inbox';
+      }}
+    >
       <Marker owner="both" mode="dash" />
-      {n === 1 ? '1 plan needs your answer' : `${n} plans need your answer`}
-      <span class="free-cta">Answer</span>
+      {n === 1 ? '1 thing is waiting on you' : `${n} things are waiting on you`}
+      <span class="free-cta">Go through</span>
     </button>
   );
 }
@@ -396,6 +413,8 @@ export function MonthView() {
   const ws = weekStartsOn.value;
   const selDay = days.find((d) => d.date === sel) ?? agendaFrom(sel, 1)[0];
   const phone = compact.value;
+  // Titles shown in each cell: the rest are counted as markers.
+  const titles = desk.value ? 3 : 2;
 
   // Phones: the six weeks share whatever height is left above the drawer.
   const [top, setTop] = useState(0);
@@ -437,7 +456,7 @@ export function MonthView() {
           }}
         />
       </div>
-      <NeedsAnswer />
+      {!phone && <NeedsAnswer />}
       <div class={`month-wrap${phone ? ' phone' : ''}`}>
         <div
           class="mstage"
@@ -522,12 +541,12 @@ export function MonthView() {
                           </span>
                           {wide.value && (
                             <span class="mtitles" aria-hidden="true">
-                              {plans.slice(0, 2).map((r) => (
+                              {plans.slice(0, titles).map((r) => (
                                 <span key={r.key}>{r.title}</span>
                               ))}
                             </span>
                           )}
-                          <Markers rows={wide.value ? plans.slice(2) : plans} />
+                          <Markers rows={wide.value ? plans.slice(titles) : plans} />
                           {day.bothFree && !out && day.date >= t && (
                             <span class="mfree" aria-hidden="true" />
                           )}

@@ -3,6 +3,7 @@
 import { signal } from '@preact/signals';
 import type { ComponentChildren } from 'preact';
 import { useLayoutEffect, useRef } from 'preact/hooks';
+import { shapes } from '../theme';
 import { nameOf, type Slot } from './model';
 
 const PATHS = {
@@ -29,6 +30,8 @@ const PATHS = {
   download: '<path d="M12 4v11M7 10l5 5 5-5M5 20h14"/>',
   prev: '<path d="M14.5 6l-6 6 6 6"/>',
   next: '<path d="M9.5 6l6 6-6 6"/>',
+  inbox:
+    '<path d="M3.5 13.5 6 5.5h12l2.5 8v5a1.5 1.5 0 0 1-1.5 1.5H5a1.5 1.5 0 0 1-1.5-1.5z"/><path d="M3.5 13.5h5l1.5 2.5h4l1.5-2.5h5"/>',
   flag: '<path d="M6 21V4.5M6 5h11l-2.5 4 2.5 4H6"/>',
 } as const;
 export type IconName = keyof typeof PATHS;
@@ -54,9 +57,10 @@ export function Icon({ name, size = 18 }: { name: IconName; size?: number }) {
 export const colorVar = (slot: Slot) => (slot === 'a' ? 'var(--person-a)' : 'var(--person-b)');
 
 /**
- * Ownership marker. Shape carries the meaning so colour is never needed:
- * person A = circle, person B = square, ours = both overlapping;
+ * Ownership marker: person A and person B in their colours (chosen to stay
+ * distinct under colour-blindness simulations), ours = both overlapping;
  * filled = confirmed, outline = tentative, hatched = private ("busy").
+ * With "Tell us apart by shape too" on, person B is a square.
  */
 export function Marker({ owner, mode }: { owner: Slot | 'both'; mode?: 'dash' | 'busy' }) {
   const cls = `mk${owner === 'both' ? ' mk-ours' : ''}${mode ? ` ${mode}` : ''}`;
@@ -75,8 +79,8 @@ export function Marker({ owner, mode }: { owner: Slot | 'both'; mode?: 'dash' | 
 /** Explains the markers in words; shown under the agenda. */
 export function MarkerKey({ names }: { names: Record<Slot, string> }) {
   const items: [ComponentChildren, string][] = [
-    [<Marker owner="a" key="a" />, `${names.a}’s plan (circle)`],
-    [<Marker owner="b" key="b" />, `${names.b}’s plan (square)`],
+    [<Marker owner="a" key="a" />, `${names.a}’s plan${shapes.value ? ' (circle)' : ''}`],
+    [<Marker owner="b" key="b" />, `${names.b}’s plan${shapes.value ? ' (square)' : ''}`],
     [<Marker owner="both" key="both" />, 'Ours, together'],
     [<Marker owner="both" mode="dash" key="dash" />, 'Tentative: waiting for a yes'],
     [<Marker owner="b" mode="busy" key="busy" />, 'Private: details hidden'],

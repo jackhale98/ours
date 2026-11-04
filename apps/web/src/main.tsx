@@ -4,9 +4,9 @@ import './styles/base.css';
 import './styles/landing.css';
 import { APP_NAME, HAS_API } from './config';
 import { LogoMark } from './Logo';
-import { applyTheme } from './theme';
+import { applyShapes, applyTheme } from './theme';
 
-const APP_ROUTES = new Set(['plan', 'lists', 'checkin', 'privacy', 'start']);
+const APP_ROUTES = new Set(['plan', 'lists', 'checkin', 'privacy', 'inbox', 'start']);
 const isAppRoute = () =>
   APP_ROUTES.has(location.hash.slice(1)) ||
   /^#plan[/&]/.test(location.hash) ||
@@ -82,6 +82,7 @@ function Landing() {
 }
 
 applyTheme();
+applyShapes();
 
 // Offline support: register the service worker (production builds only).
 if ('serviceWorker' in navigator && import.meta.env.PROD) {

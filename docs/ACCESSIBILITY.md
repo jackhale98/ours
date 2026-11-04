@@ -1,6 +1,6 @@
 # Accessibility
 
-Target: WCAG 2.2 level AA, plus colour-blind-safe design (shapes as well as colours). The public statement is at `/legal/accessibility/`.
+Target: WCAG 2.2 level AA, plus colour-blind-safe design (colours that stay distinct under colour-vision simulations, with shapes available). The public statement is at `/legal/accessibility/`.
 
 ## Checked automatically on every change
 
@@ -9,7 +9,7 @@ Target: WCAG 2.2 level AA, plus colour-blind-safe design (shapes as well as colo
 | axe (WCAG 2.0/2.1/2.2 A and AA, best practice) on the landing page, every app view (Plan, Lists, Check-in, Privacy, calendars) and the legal pages, in light and dark | `apps/web/e2e/*.spec.ts` |
 | Chromium and WebKit, desktop and phone viewports | `apps/web/playwright.config.ts` |
 | Colour contrast of every text/background token pair (56), in both themes | `scripts/check-contrast.mjs` |
-| The two partners' colours stay distinguishable under six colour-vision simulations (protanopia, deuteranopia, tritanopia and their anomalous forms; ΔE ≥ 10), and ownership is also shown by shape (circle, square) and words | `scripts/check-contrast.mjs`, `MarkerKey` |
+| The two partners' colours stay distinguishable under six colour-vision simulations (protanopia, deuteranopia, tritanopia and their anomalous forms; ΔE ≥ 10), and ownership is also given in words (screen-reader text, the marker key, avatars with initials). Both people's markers are circles by default; Privacy → Appearance → "Tell us apart by shape too" makes the partner's a square (a per-device choice) | `scripts/check-contrast.mjs`, `MarkerKey` |
 | Keyboard: quick add with `N`, Escape closes sheets and returns focus to what opened them, focus starts inside each sheet, skip link | `apps/web/e2e/demo.spec.ts` |
 | Lighthouse accessibility score in CI (demo mode) | `lighthouserc.json` |
 | Touch targets of at least 44 px (`--tap`) | design tokens |
@@ -36,3 +36,7 @@ Automated tests can't judge whether something makes sense when heard. Do these o
 - The week strip is a visual summary; the agenda below it carries the same information for screen readers.
 - Imported calendar events keep whatever titles their source calendar uses.
 - The optional Turnstile bot check on the sign-in page is Cloudflare's widget; it is designed to be accessible but is outside our control.
+
+## Known limitation: markers by colour by default
+
+By the owner's choice, both partners' markers are circles by default, because that looks cleaner. In the agenda and calendar grids, a sighted user who can't tell the two colours apart then has no non-colour cue at a glance. That falls short of WCAG 1.4.1 (Use of Color) for the default setting. Mitigations: the colours are tested under colour-vision simulations; ownership is given in words in plan details, in the marker key and to screen readers; and the "Tell us apart by shape too" switch (Privacy → Appearance) restores the circle-and-square shapes. Revisit if users report trouble.

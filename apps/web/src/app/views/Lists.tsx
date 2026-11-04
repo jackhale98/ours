@@ -11,6 +11,7 @@ import {
   completeItem,
   createList,
   deleteList,
+  dueText,
   type ItemEntry,
   inCheckin,
   itemsOf,
@@ -59,12 +60,6 @@ function AssignButton({ item }: { item: ItemEntry }) {
 }
 
 /** When an item is due, in words ("Overdue · was Mon", "Due today", "Due Fri"). */
-function dueText(due: string): { text: string; late: boolean } {
-  const t = today.value;
-  if (due < t) return { text: `Overdue · was ${relDay(due)}`, late: true };
-  return { text: due === t ? 'Due today' : `Due ${relDay(due)}`, late: false };
-}
-
 export function ItemRow({ item, assignable }: { item: ItemEntry; assignable: boolean }) {
   const d = item.rec.data;
   const [done, setDone] = useState(d.done);
@@ -540,7 +535,7 @@ export function ListsView() {
         </button>
       </header>
       {cur ? (
-        <>
+        <div class="lists-layout">
           {/* biome-ignore lint/a11y/useSemanticElements: toggle-button group (aria-pressed), labelled; fieldset/legend breaks the segmented layout */}
           <div class="ltabs" role="group" aria-label="Lists">
             {lists.map((l) => {
@@ -569,27 +564,29 @@ export function ListsView() {
               );
             })}
           </div>
-          <div class="listbar">
-            <span class="small muted">{typeOf(cur.rec.data.kind).label}</span>
-            <button
-              type="button"
-              class="linkbtn"
-              aria-label={`Edit list: ${cur.rec.data.name}`}
-              onClick={() => {
-                listSheet.value = { type: 'edit', id: cur.id };
-              }}
-            >
-              Edit list
-            </button>
+          <div class="lists-pane">
+            <div class="listbar">
+              <span class="small muted">{typeOf(cur.rec.data.kind).label}</span>
+              <button
+                type="button"
+                class="linkbtn"
+                aria-label={`Edit list: ${cur.rec.data.name}`}
+                onClick={() => {
+                  listSheet.value = { type: 'edit', id: cur.id };
+                }}
+              >
+                Edit list
+              </button>
+            </div>
+            <div class="listcard">
+              {typeOf(cur.rec.data.kind).behaviour === 'ideas' ? (
+                <IdeasList key={cur.id} list={cur} />
+              ) : (
+                <CheckList key={cur.id} list={cur} />
+              )}
+            </div>
           </div>
-          <div class="listcard">
-            {typeOf(cur.rec.data.kind).behaviour === 'ideas' ? (
-              <IdeasList key={cur.id} list={cur} />
-            ) : (
-              <CheckList key={cur.id} list={cur} />
-            )}
-          </div>
-        </>
+        </div>
       ) : (
         <p class="nothing">
           No lists yet. Make one for groceries, chores, to-dos, date ideas or gifts.

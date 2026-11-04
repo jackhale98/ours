@@ -3,7 +3,7 @@
 import type { ListKind } from '@ours/core/schema';
 import { nextDueDate } from '@ours/core/time';
 import { byKind, type Entry, findEntry, other, put, remove, store, update } from './model';
-import { today } from './select';
+import { relDay, today } from './select';
 
 export type ListEntry = Entry & { rec: { kind: 'list' } };
 export type ItemEntry = Entry & { rec: { kind: 'item' } };
@@ -158,4 +158,11 @@ export function completeItem(item: ItemEntry): { undo: () => void; next: string 
     next ? { due: next, last_done: t, assignee, done: false } : { done: true, last_done: t },
   );
   return { undo: () => update<'item'>(item.id, before), next };
+}
+
+/** "Due today", "Due Friday", "Overdue · was Mon, Nov 2". */
+export function dueText(due: string): { text: string; late: boolean } {
+  const t = today.value;
+  if (due < t) return { text: `Overdue · was ${relDay(due)}`, late: true };
+  return { text: due === t ? 'Due today' : `Due ${relDay(due)}`, late: false };
 }
