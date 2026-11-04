@@ -253,30 +253,41 @@ spaces.delete('/:id/membership', async (c) => {
   const id = c.req.param('id');
   const uid = c.var.user.id;
   await requireMember(c.env, id, uid);
-  await c.env.DB.batch([
-    c.env.DB.prepare('DELETE FROM records WHERE space_id = ? AND owner_user_id = ?').bind(id, uid),
-    c.env.DB.prepare('DELETE FROM memberships WHERE space_id = ? AND user_id = ?').bind(id, uid),
-    // Their calendar feed published this space's busy times: turn it off (review 0004, L3).
-    c.env.DB.prepare('DELETE FROM feed_busy WHERE user_id = ?').bind(uid),
-    c.env.DB.prepare(
-      'UPDATE feed_tokens SET revoked_at = ? WHERE user_id = ? AND revoked_at IS NULL',
-    ).bind(Date.now(), uid),
-    // Their reminders, and notifications they sent that are held for quiet hours.
-    c.env.DB.prepare(
-      'DELETE FROM reminders WHERE space_id = ? AND (target_user_id = ? OR sender_user_id = ?)',
-    ).bind(id, uid, uid),
-    c.env.DB.prepare(
-      'DELETE FROM spaces WHERE id = ? AND NOT EXISTS (SELECT 1 FROM memberships WHERE space_id = ?)',
-    ).bind(id, id),
-    c.env.DB.prepare(
-      "DELETE FROM key_ids WHERE scope = 'space' AND owner = ? AND NOT EXISTS (SELECT 1 FROM spaces WHERE id = ?)",
-    ).bind(id, id),
-    // Only the person who rotated may send key update links; that's no longer them.
-    c.env.DB.prepare('UPDATE spaces SET rotated_by = NULL WHERE id = ? AND rotated_by = ?').bind(
-      id,
-      uid,
-    ),
-    c.env.DB.prepare(`UPDATE spaces SET bytes = ${SPACE_BYTES_SQL} WHERE id = ?`).bind(id, id),
-  ]);
+  await c.env.DB.batch(leaveStatements(c.env.DB, id, uid));
   return c.json({ ok: true });
 });
+
+/**
+ * Everything leaving a space does, as statements for one batch (also used
+ * when joining a partner's space with an existing account, ADR 0016).
+ */
+export function leaveStatements(db: D1Database, id: string, uid: string): D1PreparedStatement[] {
+  return [
+    db.prepare('DELETE FROM records WHERE space_id = ? AND owner_user_id = ?').bind(id, uid),
+    db.prepare('DELETE FROM memberships WHERE space_id = ? AND user_id = ?').bind(id, uid),
+    // Their calendar feed published this space's busy times: turn it off (review 0004, L3).
+    db.prepare('DELETE FROM feed_busy WHERE user_id = ?').bind(uid),
+    db
+      .prepare('UPDATE feed_tokens SET revoked_at = ? WHERE user_id = ? AND revoked_at IS NULL')
+      .bind(Date.now(), uid),
+    // Their reminders, and notifications they sent that are held for quiet hours.
+    db
+      .prepare(
+        'DELETE FROM reminders WHERE space_id = ? AND (target_user_id = ? OR sender_user_id = ?)',
+      )
+      .bind(id, uid, uid),
+    db
+      .prepare(
+        'DELETE FROM spaces WHERE id = ? AND NOT EXISTS (SELECT 1 FROM memberships WHERE space_id = ?)',
+      )
+      .bind(id, id),
+    db
+      .prepare(
+        "DELETE FROM key_ids WHERE scope = 'space' AND owner = ? AND NOT EXISTS (SELECT 1 FROM spaces WHERE id = ?)",
+      )
+      .bind(id, id),
+    // Only the person who rotated may send key update links; that's no longer them.
+    db.prepare('UPDATE spaces SET rotated_by = NULL WHERE id = ? AND rotated_by = ?').bind(id, uid),
+    db.prepare(`UPDATE spaces SET bytes = ${SPACE_BYTES_SQL} WHERE id = ?`).bind(id, id),
+  ];
+}

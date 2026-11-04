@@ -680,8 +680,11 @@ test('someone whose own space is empty can join with the same account', async ({
   const { pat, lee, invite, oldWords } = await strayedPartner(browser, 'keep');
   await lee.goto(invite);
   const prompt = lee.locator('section[aria-labelledby="ji-h"]');
+  // Who it's from comes from inside the invite.
+  await expect(prompt).toContainText('Join Pat’s space?');
   await expect(prompt).toContainText('your sign-in, passkeys and devices stay');
   await prompt.getByRole('button', { name: 'Join with this account' }).click();
+  await prompt.getByRole('button', { name: 'Tap again to join Pat' }).click();
   // The old phrase doesn't hold the new space's keys: a new one is saved.
   const words = await recoveryPhrase(lee);
   expect(words).not.toEqual(oldWords);
@@ -718,8 +721,8 @@ test('someone whose own space is empty can join with the same account', async ({
   expect((me as { spaces: unknown[] }).spaces).toHaveLength(1);
 });
 
-test('someone whose own space has things in it can start over and join', async ({ browser }) => {
-  const { pat, lee, leeEmail, invite } = await strayedPartner(browser, 'over');
+test('someone whose own space has things in it can delete them and join', async ({ browser }) => {
+  const { pat, lee, invite } = await strayedPartner(browser, 'clear');
   await lee.keyboard.press('n');
   await lee.getByRole('textbox', { name: 'What’s the plan?' }).fill('Dentist tomorrow 9am');
   await lee.getByRole('button', { name: /Add plan|Send to/ }).click();
@@ -727,17 +730,69 @@ test('someone whose own space has things in it can start over and join', async (
 
   await lee.goto(invite);
   const prompt = lee.locator('section[aria-labelledby="ji-h"]');
-  await expect(prompt).toContainText('has 1 thing in it');
-  await expect(prompt.getByRole('button', { name: 'Join with this account' })).toHaveCount(0);
-  await prompt.getByRole('button', { name: 'Start over and join' }).click();
-  await prompt.getByRole('button', { name: 'Tap again: delete and start over' }).click();
-  await signUp(lee, leeEmail);
-  await lee.getByRole('textbox', { name: 'Your first name' }).fill('Lee');
-  await lee.getByRole('button', { name: 'Join' }).click();
+  await expect(prompt).toContainText('has 1 thing in it, which will be deleted');
+  await prompt.getByRole('button', { name: 'Delete them and join' }).click();
+  await prompt.getByRole('button', { name: 'Tap again: delete 1 and join' }).click();
   await recoveryPhrase(lee);
   await expect(lee.getByRole('heading', { name: 'Compare your safety code' })).toBeVisible();
   await expect(pat.getByRole('heading', { name: 'Compare your safety code' })).toBeVisible({
     timeout: 20_000,
   });
   expect(await pat.locator('.code').textContent()).toBe(await lee.locator('.code').textContent());
+  await lee.getByRole('button', { name: 'Done' }).click();
+  await lee.getByRole('button', { name: 'Not now' }).click();
+  await expect(lee.getByRole('heading', { name: 'This week', exact: true })).toBeVisible();
+  await expect(lee.getByRole('button', { name: /Dentist/ })).toHaveCount(0);
+});
+
+test('a join whose answer was lost is finished on the next start', async ({ browser }) => {
+  const { pat, lee, invite } = await strayedPartner(browser, 'lost');
+  // The server joins, but the answer never reaches the device.
+  await lee.route('**/invites/*/accept', async (route) => {
+    await route.fetch();
+    await route.abort('connectionreset');
+  });
+  await lee.goto(invite);
+  const prompt = lee.locator('section[aria-labelledby="ji-h"]');
+  await prompt.getByRole('button', { name: 'Join with this account' }).click();
+  await prompt.getByRole('button', { name: 'Tap again to join Pat' }).click();
+  await expect(lee.locator('.toast-host')).toBeVisible();
+  await lee.unroute('**/invites/*/accept');
+  // Next start: the server says it happened; the device catches up, asks
+  // for a new phrase and shows the safety code.
+  await lee.goto('/#plan');
+  await lee.reload();
+  await recoveryPhrase(lee);
+  await expect(lee.getByRole('heading', { name: 'Compare your safety code' })).toBeVisible();
+  await expect(pat.getByRole('heading', { name: 'Compare your safety code' })).toBeVisible({
+    timeout: 20_000,
+  });
+  expect(await pat.locator('.code').textContent()).toBe(await lee.locator('.code').textContent());
+});
+
+test('an invite kept for one address isn’t offered to someone else on the same browser', async ({
+  browser,
+}) => {
+  const stamp = Date.now();
+  const jo = await newPage(browser);
+  await jo.goto('/#start');
+  await signUp(jo, `jo3-${stamp}@example.com`);
+  await jo.getByRole('textbox', { name: 'Your first name' }).fill('Jo');
+  await jo.getByRole('button', { name: 'Create our space' }).click();
+  await recoveryPhrase(jo);
+  const invite = (await jo.locator('.url code').textContent()) ?? '';
+
+  // Kim opens the invite on a shared computer and asks for a sign-in link...
+  const shared = await newPage(browser);
+  await shared.goto(invite);
+  await shared.getByRole('textbox', { name: 'Email' }).fill(`kim3-${stamp}@example.com`);
+  await shared.getByRole('checkbox', { name: /16 or older/ }).check();
+  await shared.getByRole('button', { name: 'Email me a link' }).click();
+  await expect(shared.getByRole('heading', { name: 'Check your email' })).toBeVisible();
+  // ...but someone else signs in there with their own address.
+  const other = await shared.context().newPage();
+  await other.goto('/#start');
+  await signUp(other, `ash-${stamp}@example.com`);
+  await expect(other.getByRole('heading', { name: 'Set up your space' })).toBeVisible();
+  expect(await other.evaluate(() => localStorage.getItem('ours-pending-invite'))).toBeNull();
 });

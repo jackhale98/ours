@@ -19,8 +19,9 @@ import { num } from '../env';
 import { bytesOf, fromB64Url, hashToken, newId, toB64Url } from '../lib/crypto';
 import { body, HttpError } from '../lib/http';
 import { requireMember } from '../lib/members';
+import { isQuotaAbort } from '../lib/quota';
 import { rateLimit } from '../lib/ratelimit';
-import { REKEY_WINDOW_MS, rotationOff } from './spaces';
+import { leaveStatements, REKEY_WINDOW_MS, rotationOff } from './spaces';
 
 const INVITE_HOURS = 24;
 const NONCE_BYTES = 24;
@@ -214,6 +215,21 @@ invites.get('/:id/kind', async (c) => {
 /** Accepting adds the membership (partner) and erases the wrapped key blob. */
 invites.post('/:id/accept', async (c) => {
   const uid = c.var.user.id;
+  // Joining with an existing account (ADR 0016): the space it's alone in is
+  // left in the same batch, so there's never a half-done join (review 0007,
+  // H1). `records` is how many live records the person was shown and agreed
+  // to delete with it: more than that, and nothing happens (M2).
+  const input = await body(
+    c,
+    v.object({
+      leave: v.optional(
+        v.object({
+          space_id: v.pipe(v.string(), v.minLength(1), v.maxLength(64)),
+          records: v.pipe(v.number(), v.integer(), v.minValue(0), v.maxValue(1_000_000)),
+        }),
+      ),
+    }),
+  );
   const idHash = await hashToken(inviteId(c.req.param('id')));
   const row = await c.env.DB.prepare(
     'SELECT kind, space_id FROM invites WHERE id = ? AND claimed_by = ? AND used_at IS NULL AND expires_at > ?',
@@ -230,6 +246,25 @@ invites.post('/:id/accept', async (c) => {
         WHERE id = ?2 AND (kind IN ('device', 'rekey') OR EXISTS (SELECT 1 FROM memberships WHERE space_id = ?3 AND user_id = ?4))`,
     ).bind(now, idHash, row.space_id, uid),
   ];
+  const leave = row.kind === 'partner' ? input.leave : undefined;
+  if (leave) {
+    // Friendly answers first; the batch below checks the same atomically.
+    const own = await c.env.DB.prepare(
+      `SELECT (SELECT COUNT(*) FROM memberships WHERE space_id = ?1) AS members,
+              (SELECT COUNT(*) FROM memberships WHERE space_id = ?1 AND user_id = ?2) AS mine,
+              (SELECT COUNT(*) FROM records WHERE space_id = ?1 AND deleted = 0) AS live`,
+    )
+      .bind(leave.space_id, uid)
+      .first<{ members: number; mine: number; live: number }>();
+    if (!own?.mine || own.members !== 1)
+      throw new HttpError(409, 'not_alone', 'Someone else is in your space now.');
+    if (own.live > leave.records)
+      throw new HttpError(
+        409,
+        'space_changed',
+        'Your space has things this device hasn’t shown yet. Open Ours on your other devices so they sync, then try again.',
+      );
+  }
   if (row.kind === 'partner' && row.space_id) {
     // Space not full, and the joiner under their own space cap, checked atomically.
     statements.unshift(
@@ -248,8 +283,43 @@ invites.post('/:id/accept', async (c) => {
       ).bind(uid, row.space_id),
     );
   }
-  const results = await c.env.DB.batch(statements);
-  if (row.kind === 'partner' && !results[0]?.meta.changes) {
+  if (leave && row.space_id) {
+    const db = c.env.DB;
+    statements.unshift(
+      // Still alone in it, with nothing more in it than agreed: else abort.
+      db
+        .prepare(
+          `INSERT INTO quota_guard (x) SELECT NULL WHERE
+             (SELECT COUNT(*) FROM memberships WHERE space_id = ?1) != 1
+             OR NOT EXISTS (SELECT 1 FROM memberships WHERE space_id = ?1 AND user_id = ?2)
+             OR (SELECT COUNT(*) FROM records WHERE space_id = ?1 AND deleted = 0) > ?3`,
+        )
+        .bind(leave.space_id, uid, leave.records),
+    );
+    statements.push(
+      // Joined, or nothing at all (a full space, too many spaces).
+      db
+        .prepare(
+          'INSERT INTO quota_guard (x) SELECT NULL WHERE NOT EXISTS (SELECT 1 FROM memberships WHERE space_id = ?1 AND user_id = ?2)',
+        )
+        .bind(row.space_id, uid),
+      ...leaveStatements(db, leave.space_id, uid),
+    );
+  }
+  let results: D1Result[];
+  try {
+    results = await c.env.DB.batch(statements);
+  } catch (err) {
+    if (isQuotaAbort(err))
+      throw new HttpError(
+        409,
+        'cannot_join',
+        'This space is full, or yours changed. Nothing was changed: try again.',
+      );
+    throw err;
+  }
+  const insert = leave ? results[1] : results[0];
+  if (row.kind === 'partner' && !insert?.meta.changes) {
     throw new HttpError(
       409,
       'cannot_join',

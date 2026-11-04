@@ -113,28 +113,43 @@ const PENDING_INVITE = 'ours-pending-invite';
 const COLORS: Record<Slot, string> = { a: '#2b6e8c', b: '#b3486a' };
 
 /**
- * An opened invite or device link, kept until it's used. It's kept in
- * localStorage, not just this tab, because the email sign-in link often opens
- * in a new tab or the browser instead of the installed app: kept per tab, the
- * invite was lost and the partner made a space of their own. Links expire on
- * the server within a day; a kept one is dropped after two.
+ * An opened invite or device link, kept in this tab until it's used. When a
+ * sign-in link is asked for, it's also kept on the device for that email
+ * address, because the email's link often opens in a new tab or the browser
+ * instead of the installed app: kept per tab only, the invite was lost and
+ * the partner made a space of their own (ADR 0016). After signing in it's
+ * kept only if that's the address signed in with, and only in that tab; it's
+ * dropped after a day (invites expire on the server within one) and at sign
+ * out, so on a shared browser it doesn't reach someone else (review 0007, M3).
  */
-const PENDING_TTL_MS = 2 * 24 * 60 * 60 * 1000;
-export function pendingInvite(): string | null {
+const PENDING_TTL_MS = 24 * 60 * 60 * 1000;
+interface KeptInvite {
+  fragment: string;
+  at: number;
+  email: string;
+}
+function keptInvite(): KeptInvite | null {
   try {
-    const tab = sessionStorage.getItem(PENDING_INVITE);
-    if (tab) return tab;
     const raw = localStorage.getItem(PENDING_INVITE);
     if (!raw) return null;
-    const kept = JSON.parse(raw) as { fragment?: unknown; at?: unknown };
+    const k = JSON.parse(raw) as Partial<KeptInvite>;
     if (
-      typeof kept.fragment === 'string' &&
-      typeof kept.at === 'number' &&
-      Date.now() - kept.at < PENDING_TTL_MS
+      typeof k.fragment === 'string' &&
+      typeof k.email === 'string' &&
+      typeof k.at === 'number' &&
+      Date.now() - k.at < PENDING_TTL_MS
     )
-      return kept.fragment;
+      return k as KeptInvite;
     localStorage.removeItem(PENDING_INVITE);
-    return null;
+  } catch {
+    // Storage blocked.
+  }
+  return null;
+}
+/** This tab's invite. One kept for a sign-in link comes back only after signing in with that address. */
+export function pendingInvite(): string | null {
+  try {
+    return sessionStorage.getItem(PENDING_INVITE);
   } catch {
     return null;
   }
@@ -147,15 +162,47 @@ export function setPendingInvite(fragment: string | null): void {
     // ignore
   }
   try {
-    if (fragment)
-      localStorage.setItem(PENDING_INVITE, JSON.stringify({ fragment, at: Date.now() }));
-    else localStorage.removeItem(PENDING_INVITE);
+    if (!fragment) localStorage.removeItem(PENDING_INVITE);
+  } catch {
+    // ignore
+  }
+}
+/** Keeps this tab's invite on the device for the sign-in link asked for with this address. */
+function keepInviteFor(email: string): void {
+  const fragment = pendingInvite();
+  if (!fragment) return;
+  try {
+    localStorage.setItem(
+      PENDING_INVITE,
+      JSON.stringify({ fragment, at: Date.now(), email: email.trim().toLowerCase() }),
+    );
   } catch {
     // Private mode: kept in this tab only.
   }
 }
+/** Signed in: the kept invite stays (in this tab only) if it was kept for this address. */
+function claimKeptInvite(email: string): void {
+  const kept = keptInvite();
+  try {
+    localStorage.removeItem(PENDING_INVITE);
+  } catch {
+    // ignore
+  }
+  if (kept && kept.email === email.trim().toLowerCase()) {
+    try {
+      sessionStorage.setItem(PENDING_INVITE, kept.fragment);
+    } catch {
+      // ignore
+    }
+  }
+}
+/**
+ * The invite's id (not its secret) for sign-up when sign-ups need an invite.
+ * A kept one counts here, before signing in, since the email link may open
+ * in another tab; its secret stays put unless the address matches.
+ */
 const pendingInviteId = () => {
-  const f = pendingInvite();
+  const f = pendingInvite() ?? keptInvite()?.fragment;
   if (!f) return undefined;
   try {
     return parseInviteFragment(f).inviteId;
@@ -197,25 +244,25 @@ async function refresh(session: Session): Promise<void> {
     if (!cached) throw err;
     info = cached;
   }
-  // Joined a partner with this account, and the old space's leave didn't
-  // get through: finish it, and use the partner's space meanwhile.
-  const leaving = await kvGet<string>('leaving-space');
-  if (leaving && fresh) {
-    if (info.spaces.some((x) => x.space_id === leaving) && info.spaces.length > 1) {
-      try {
-        await api(`/spaces/${encodeURIComponent(leaving)}/membership`, { method: 'DELETE' });
-        info = await api<MeResponse>('/me');
-      } catch {
-        // Tried again next time.
+  // A join with this account (ADR 0016) whose answer this device didn't get:
+  // the server says whether it happened (review 0007, H1 and M1).
+  const joining = fresh ? await kvGet<Joining>('joining') : undefined;
+  let joinedNow: Joining | null = null;
+  if (joining) {
+    if (info.spaces.some((x) => x.space_id === joining.space)) joinedNow = joining;
+    else {
+      // It didn't happen: drop the keys it brought.
+      ring = ring ?? (await loadRing());
+      if (ring && joining.space !== info.spaces[0]?.space_id) {
+        ring.removeSpace(joining.space);
+        await saveRing(ring);
       }
+      await kvSet('joining', null);
     }
-    // Left, or the join never happened (it's the only space): nothing to do.
-    if (!info.spaces.some((x) => x.space_id === leaving) || info.spaces.length === 1)
-      await kvSet('leaving-space', null);
   }
   me.value = info;
   await kvSet('me', info);
-  const space = info.spaces.find((x) => x.space_id !== leaving) ?? info.spaces[0];
+  const space = info.spaces[0];
   if (!space) {
     account.value = { status: 'needs-profile', session };
     return;
@@ -245,7 +292,17 @@ async function refresh(session: Session): Promise<void> {
   phraseStale.value = !!(await kvGet<boolean>('phrase-stale'));
   phraseKept.value = !!(await kvGet<boolean>('phrase-kept'));
   void acknowledgeKeys(info, space.space_id, floor, active.space);
+  if (joinedNow) await afterJoin(joinedNow);
   if (!engine) {
+    // This device's local copy is of another space (this account joined a
+    // partner, here or on another device): it goes, unsent writes included,
+    // so nothing from the old space is pushed into the new one (review 0007, L2).
+    const local = await kvGet<string>('local-space');
+    if (local && local !== space.space_id) {
+      const d = await db();
+      await Promise.all([d.clear('envelopes'), d.clear('outbox')]);
+    }
+    if (local !== space.space_id) await kvSet('local-space', space.space_id);
     engine = new SyncEngine({
       ring: active.ring,
       userId: session.user.id,
@@ -278,6 +335,13 @@ async function refresh(session: Session): Promise<void> {
     slot: space.role,
     partnerJoined: space.members.length > 1,
   };
+  if (joinedNow) {
+    // Into the shared settings, then a new phrase and the safety code.
+    await syncNow()?.catch(() => {});
+    joinSettings(joinedNow.name, session.user.id);
+    await kvSet('joining', null);
+    joinedWithAccount.value = true;
+  }
   setPartnerPresent(space.members.length > 1);
   void keepStorage();
   // A rotation that was made but didn't finish re-encrypting carries on.
@@ -328,6 +392,7 @@ export async function startEmail(
   turnstile?: string,
 ): Promise<void> {
   const invite = pendingInviteId();
+  keepInviteFor(email);
   await api('/auth/email/start', {
     auth: false,
     body: {
@@ -346,6 +411,7 @@ export async function verifyEmail(token: string): Promise<{ newUser: boolean }> 
     body: { token, device_label: deviceLabel(), ...(invite ? { invite } : {}) },
   });
   const session: Session = { token: res.token, user: res.user, device_id: res.device_id };
+  claimKeptInvite(res.user.email);
   await kvSet('session', session);
   setToken(session.token);
   await refresh(session);
@@ -439,6 +505,7 @@ export async function signOut(callServer = true): Promise<void> {
   else await unsubscribeLocally().catch(() => {});
   stopNotifications();
   stopFeeds();
+  setPendingInvite(null);
   if (callServer) await api('/auth/logout', { body: {} }).catch(() => {});
   engine?.stop();
   engine = null;
@@ -1097,33 +1164,45 @@ export class JoinInsteadError extends Error {
     super('That’s an invite to join a space, and you have a space of your own.');
   }
 }
-/** The invite such a person could start over to join (shown as a prompt). */
-export const joinInsteadOffer = signal<string | null>(null);
 
-/** Whether this account's space holds nothing but its settings (so leaving it loses nothing). */
-export function ownSpaceEmpty(): boolean {
-  return store.value.entries.every((e) => e.rec.deleted || e.rec.kind === 'settings');
+/** Live records in this account's space, and how many are more than its settings. */
+function ownSpaceCounts(): { live: number; made: number } {
+  const live = store.value.entries.filter((e) => !e.rec.deleted);
+  return { live: live.length, made: live.filter((e) => e.rec.kind !== 'settings').length };
 }
 
 /** Set after joining with this account: the start flow asks for a new recovery phrase. */
 export const joinedWithAccount = signal(false);
 
+/** A join with this account in progress, kept on the device until it's settled. */
+interface Joining {
+  /** The space joined. */
+  space: string;
+  /** The space left. */
+  old: string;
+  /** The name to add to the shared settings. */
+  name: string;
+}
+
+/** A partner invite, opened and checked, waiting for "Join" (ADR 0016). */
+export interface JoinOffer {
+  fragment: string;
+  /** The inviter's name, from inside the invite (not from the server). */
+  inviter: string | null;
+  /** Things in this account's own space that joining deletes. */
+  made: number;
+}
+export const joinInsteadOffer = signal<JoinOffer | null>(null);
+
 /**
- * Joins a partner's space with this account, leaving its own empty space.
- * The account, its devices, passkeys and personal key stay. The new space's
- * keys come from the invite, as for any joiner; the old space's are dropped.
- * The recovery phrase's backup doesn't hold the new keys, so a new phrase is
- * asked for next; passkey unlock copies are dropped by the server and set up
- * again; other devices get the new keys with a device link.
+ * Opens a partner invite for someone alone in a space of their own, to show
+ * who it's from and what joining deletes (review 0007, L1). Syncs first so
+ * the count includes what's on the server (M2).
  */
-export async function joinWithThisAccount(fragment: string): Promise<void> {
+export async function openJoinOffer(fragment: string): Promise<JoinOffer> {
   const state = account.value;
-  if (state.status !== 'ready' || !ring || state.partnerJoined) throw new Error('Not available');
-  if (!ownSpaceEmpty())
-    throw new Error('Your space has plans or lists in it. Joining needs an empty space for now.');
-  const r = ring;
-  const old = state.spaceId;
-  const name = settings.value.members?.[state.slot]?.name ?? '';
+  if (state.status !== 'ready' || !ring) throw new Error('Not ready');
+  await syncNow()?.catch(() => {});
   const { inviteId, secret } = parseInviteFragment(fragment);
   const inv = await api<{
     kind: string;
@@ -1135,60 +1214,91 @@ export async function joinWithThisAccount(fragment: string): Promise<void> {
     nonce: fromBase64Url(inv.wrapped.nonce),
     ciphertext: fromBase64Url(inv.wrapped.ciphertext),
   });
+  return { fragment, inviter: payload.inviter_name ?? null, made: ownSpaceCounts().made };
+}
+
+/**
+ * Joins a partner's space with this account (ADR 0016). The account, its
+ * devices, passkeys and personal key stay; its own space is left, and the
+ * server deletes it with what's in it, in the same step as the join, only if
+ * nobody else is in it and it holds no more than the person agreed to delete
+ * (review 0007, H1 and M2). The new space's keys come from the invite, as for
+ * any joiner. A lost answer is settled on the next start from what the server
+ * says. Then: a new recovery phrase (the old backup lacks the new keys) and
+ * the safety code.
+ */
+export async function joinWithThisAccount(offer: JoinOffer): Promise<void> {
+  const state = account.value;
+  if (state.status !== 'ready' || !ring || state.partnerJoined) throw new Error('Not available');
+  if (rotation.value) throw new Error('Finish changing your keys first (see the banner).');
+  const r = ring;
+  const { inviteId, secret } = parseInviteFragment(offer.fragment);
+  const inv = await api<{
+    kind: string;
+    space_id: string;
+    wrapped: { nonce: string; ciphertext: string };
+  }>(`/invites/${inviteId}`);
+  if (inv.kind !== 'partner') throw new Error('That isn’t an invite to join a space.');
+  const payload = openPartnerInvite(secret, inv.space_id, {
+    nonce: fromBase64Url(inv.wrapped.nonce),
+    ciphertext: fromBase64Url(inv.wrapped.ciphertext),
+  });
+  await syncNow()?.catch(() => {});
+  const { live, made } = ownSpaceCounts();
+  // More than the person was shown: ask again rather than delete it.
+  if (made > offer.made) {
+    joinInsteadOffer.value = { ...offer, made };
+    throw new Error('Your space has more in it than shown. Check again before joining.');
+  }
+  const joining: Joining = {
+    space: payload.space_id,
+    old: state.spaceId,
+    name: settings.value.members?.[state.slot]?.name ?? '',
+  };
   for (const k of payload.keys) r.addSpaceKey(payload.space_id, k);
   await saveRing(r);
-  // Noted first, so the old space is left even if an answer below is lost.
-  await kvSet('leaving-space', old);
+  await kvSet('joining', joining);
   try {
-    await api(`/invites/${inviteId}/accept`, { body: {} });
+    await api(`/invites/${inviteId}/accept`, {
+      body: { leave: { space_id: state.spaceId, records: live } },
+    });
   } catch (err) {
-    // Refused (a full space, too many spaces): nothing changed, so stay.
-    // Without an answer it may have gone through: refresh sorts it out.
-    if (err instanceof ApiError) {
-      await kvSet('leaving-space', null);
+    // A clear "no" from the server: nothing changed. No answer (offline, a
+    // server error): it may have happened, so the next start asks the server.
+    if (err instanceof ApiError && err.status >= 400 && err.status < 500) {
       r.removeSpace(payload.space_id);
       await saveRing(r);
+      await kvSet('joining', null);
     }
     throw err;
   }
   setPendingInvite(null);
-  await api(`/spaces/${encodeURIComponent(old)}/membership`, { method: 'DELETE' }).catch(() => {
-    // Finished on the next start (see refresh).
-  });
-  // This device moves to the new space: the old one's local copy goes.
-  stopNotifications();
-  stopFeeds();
+  joinInsteadOffer.value = null;
+  // Settled like any start would: this device moves to the new space.
   engine?.stop();
   engine = null;
-  const d = await db();
-  await Promise.all([d.clear('envelopes'), d.clear('outbox')]);
-  r.removeSpace(old);
-  await saveRing(r);
-  // The backup holds the old keys: a new phrase is asked for next.
+  stopNotifications();
+  stopFeeds();
+  await refresh(state.session);
+}
+
+/** This device after a join with this account: the old space's keys and stale bits go. */
+async function afterJoin(j: Joining): Promise<void> {
+  engine?.stop();
+  engine = null;
+  stopNotifications();
+  stopFeeds();
+  if (ring) {
+    ring.removeSpace(j.old);
+    await saveRing(ring);
+  }
+  // The backup holds the old ring: a new phrase is asked for next.
   phraseStale.value = true;
   await kvSet('phrase-stale', true);
+  // The server dropped the passkey unlock copies (they lack the new keys).
   await kvSet('unlocks-made', {});
   unlocksMadeHere.value = {};
   passkeyUnlocks.value = [];
-  await refresh(state.session);
-  await syncNow();
-  joinSettings(name, state.session.user.id);
-  joinedWithAccount.value = true;
-  joinInsteadOffer.value = null;
-}
-
-/**
- * Starts over to join a partner's space: deletes this account (alone in its
- * space, so nothing is shared yet) and keeps the invite, so signing in again
- * joins the partner. The same as Delete account, then opening the invite.
- */
-export async function startOverToJoin(fragment: string): Promise<void> {
-  const state = account.value;
-  if (state.status !== 'ready' || state.partnerJoined) throw new Error('Not available');
-  await api('/me', { method: 'DELETE' });
-  await signOut(false);
-  setPendingInvite(fragment);
-  joinInsteadOffer.value = null;
 }
 
 export interface KeyLinkOffer {

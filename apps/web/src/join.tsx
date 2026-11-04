@@ -2,9 +2,9 @@
 /**
  * Separate entry for invite links (partner invites and device links). The
  * secret lives in the URL fragment, which browsers never send to a server.
- * We read it once, drop it from the address bar and history, keep it on this
- * device until it's used (see pendingInvite in account/session.ts: the email
- * sign-in link often opens in another tab), and continue in the app's onboarding.
+ * We read it once, drop it from the address bar and history, keep it in this
+ * tab (asking for a sign-in link keeps it for that address too: see
+ * pendingInvite in account/session.ts), and continue in the app's onboarding.
  */
 import { parseInviteFragment } from '@ours/core/crypto';
 import { render } from 'preact';
@@ -30,11 +30,6 @@ if (fragment && HAS_API) {
     sessionStorage.setItem('ours-pending-invite', fragment);
   } catch {
     // Storage blocked: fall through to the message below.
-  }
-  try {
-    localStorage.setItem('ours-pending-invite', JSON.stringify({ fragment, at: Date.now() }));
-  } catch {
-    // Private mode: kept in this tab only.
   }
   location.replace(new URL('../#start', location.href).href);
 }

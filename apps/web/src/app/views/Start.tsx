@@ -541,8 +541,8 @@ export function StartView({ onFinished }: { onFinished: () => void }) {
   // old one doesn't hold the new space's keys), then compare safety codes.
   const rejoined = joinedWithAccount.value;
   useEffect(() => {
+    // Cleared when the flow finishes (App), so the flow stays up until then.
     if (!rejoined) return;
-    joinedWithAccount.value = false;
     setJoined(true);
     setStep('recovery');
   }, [rejoined]);

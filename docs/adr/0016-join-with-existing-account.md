@@ -1,39 +1,42 @@
 # 0016. Joining a partner with an existing account
 
-- Status: Proposed; security review 0007 before release
+- Status: Accepted after security review 0007 (see "After review 0007"), pending its check of the fixes
 - Date: 2026-11-04
 
 ## Context
 A partner opens the invite link, then signs in with an email link. That link often opens in another tab, or in the browser instead of the installed app. The invite was kept only in the first tab, so it was lost: the partner was taken through "Set up your space" and made a space of their own. Opening the invite again then hit a dead end ("this device is already set up").
 
 Two fixes:
-1. The opened invite is kept in `localStorage` too (dropped after two days, or once used), so it survives the email link. The invite secret already lives on the device next to the keys it unlocks. It's single-use and expires on the server within a day.
-2. Someone already caught can still join, which is what this ADR is about.
+1. When a sign-in link is asked for, the opened invite is also kept in `localStorage` for that email address, for at most 24 h. After signing in it comes back only if the address matches, and only in that tab; sign-out drops it (review 0007, M3). On an iPhone, the Home Screen app and Safari don't share storage, so there the email link still can't carry it: pasting the sign-in link into the app (offered on that screen) or opening the invite again works.
+2. Someone already caught can join with the same account, which is what this ADR is about.
 
 ## Decision
-Opening a partner invite on a device that is set up, in a space with nobody else in it, offers:
+Opening a partner invite on a device that is set up, in a space with nobody else in it, opens the invite and shows who it's from (the name inside it, not from the server), and offers to **join with this account**. The account, its devices, passkeys and personal key stay; its own space is removed. If that space has anything in it, the prompt says how many things will be deleted. Either way it takes two taps. Bringing an existing space's plans and lists along is left for later.
 
-- **Join with this account**, only when that space is empty: no records besides the space's settings. The account, its devices, passkeys and personal key stay.
-- **Start over and join** otherwise. This is Delete account (two taps, it says what will be deleted), keeping the invite, so signing in again joins as a new account.
+Joining (`joinWithThisAccount` in `apps/web/src/account/session.ts`):
 
-Bringing an existing space's plans and lists along is left for later.
+1. Blocked while a key change is pending. Syncs first, so the count includes what's on the server and what this device hasn't sent (review 0007, M2). If there's more than the person was shown, it asks again instead.
+2. Opens the invite as a new joiner does (`GET /invites/:id`, `openPartnerInvite`), and adds the new space's keys to the key ring. The personal key is unchanged.
+3. Notes the join on the device (`joining`), then calls `POST /invites/:id/accept` with `leave: { space_id, records }`. In one batch the server:
+   - joins the new space;
+   - leaves the old space and deletes it, with everything in it;
+   - drops the account's passkey unlock copies (ADR 0015; they hold a ring without the new keys, and space versions start again at 1).
 
-Joining with this account (`joinWithThisAccount` in `apps/web/src/account/session.ts`):
-
-1. Opens the invite exactly as a new joiner does (`GET /invites/:id`, `openPartnerInvite`), and adds the new space's keys to the existing key ring. The personal key is unchanged.
-2. Notes on the device the space being left (`leaving-space`), then accepts the invite (`POST /invites/:id/accept`). If the server refuses (a full space, too many spaces), the note and the new keys are dropped. If the answer is lost, the next start sorts it out:
-   - in both spaces: the old one is left;
-   - only in the old one: the note is dropped.
-3. Leaves the old space (`DELETE /spaces/:id/membership`). The server deletes it, since nobody is left. This is retried on the next start if it fails, and the partner's space is used meanwhile.
-4. Clears the old space's local copy (envelopes and outbox), removes its keys from the ring, and starts syncing the partner's space.
-5. Asks for a new recovery phrase straight away. The previous backup holds the old ring, without the new space's keys, so the phrase is marked stale until the new one is saved.
-6. Shows the safety code to compare, as for any joiner.
-
-On the server, accepting a partner invite also deletes the joiner's passkey unlock copies (ADR 0015). They hold a ring without the new space's keys, and their key versions would wrongly read as current, since space versions start again at 1. They're set up again on purpose.
-
-Other devices of the same account don't have the new space's keys. They show "Welcome back" and take a device link from the device that joined. Until the new phrase is saved, restoring from the old phrase gives a ring without the new space's keys, so that device asks for a device link too. Nothing is lost.
+   It does all of that, or nothing. It does nothing if someone else is in the old space, or if the old space holds more live records than `records` (review 0007, H1 and M2).
+4. A clear refusal (4xx) drops the note and the new keys. With no answer (offline, a server error), both are kept. The next start asks the server: if the account is in the new space, the join is finished there; if not, the keys are dropped.
+5. Finishing a join, whether now or at the next start (review 0007, M1):
+   - the old space's keys and local copy go;
+   - the person is added to the shared settings;
+   - the recovery phrase is marked stale and a new one is asked for, since the old backup lacks the new keys;
+   - then the safety code is shown.
+6. Any device whose local copy is of another space than the one it now uses clears it, unsent writes included, so nothing from the old space is pushed into the new one (review 0007, L2). The account's other devices land on "Welcome back" and take a device link.
 
 ## Consequences
 - The safety code comparison protects this join exactly as it does a new account's join: the keys come from the same invite.
 - The server learns nothing new: a membership moves from one space to another, as when someone leaves a space and joins another.
-- An account with something in its own space still has to start over. That's said plainly in the prompt.
+- What was in the old space is deleted, not moved: the prompt says how much, and asks twice.
+- Until the new phrase is saved, the old phrase restores a ring without the new space's keys. Such a device asks for a device link from the one that joined.
+- Accepted risks are listed in THREAT_MODEL.
+
+## After review 0007
+H1, M1, M2 and M3 are fixed as above, with tests: a lost answer finished on the next start; more records than agreed; someone else in the old space; a full space; another person signing in on a shared browser. L1: the inviter's name is shown and joining always takes two taps. L2: the local copy follows the space in use. L3 and L4 are accepted (THREAT_MODEL). L5: this ADR and THREAT_MODEL are corrected.

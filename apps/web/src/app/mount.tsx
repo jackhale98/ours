@@ -7,6 +7,7 @@ import {
   JoinInsteadError,
   joinInsteadOffer,
   keyLinkOffer,
+  openJoinOffer,
   openKeyLink,
   pendingInvite,
   restore,
@@ -48,8 +49,13 @@ export async function mountApp(root: HTMLElement): Promise<void> {
       }
     } catch (err) {
       setPendingInvite(null);
-      if (err instanceof JoinInsteadError) joinInsteadOffer.value = link;
-      else toast(err instanceof Error ? err.message : 'That link couldn’t be used.');
+      if (err instanceof JoinInsteadError) {
+        try {
+          joinInsteadOffer.value = await openJoinOffer(link);
+        } catch (e) {
+          toast(e instanceof Error ? e.message : 'That invite couldn’t be opened.');
+        }
+      } else toast(err instanceof Error ? err.message : 'That link couldn’t be used.');
     }
   }
 

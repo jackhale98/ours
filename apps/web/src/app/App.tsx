@@ -7,6 +7,7 @@ import { kvGet, kvSet } from '../account/db';
 import {
   account,
   consumeSignInLink,
+  joinedWithAccount,
   joinInsteadOffer,
   joinWithThisAccount,
   keyLinkOffer,
@@ -17,7 +18,6 @@ import {
   rotation,
   rotationLeft,
   setPendingInvite,
-  startOverToJoin,
   syncNow,
 } from '../account/session';
 import { needsNewKeys, syncStatus } from '../account/sync';
@@ -25,7 +25,7 @@ import { LogoMark } from '../Logo';
 import './appearance';
 import { waiting } from './inbox';
 import { ItemSheetHost } from './itemsheet';
-import { findEntry, mode, nameOf, names, partner, store, viewer } from './model';
+import { findEntry, mode, nameOf, names, partner, viewer } from './model';
 import { drawerOpen, type PlanMode, planHash, setPlanMode } from './planview';
 import { now } from './select';
 import { accept, afterAdd, openEvent, openQuick, SheetHost, sheet } from './sheets';
@@ -270,21 +270,21 @@ function KeyLinkPrompt() {
  * through email sign-in. Offers to start over and join instead.
  */
 function JoinInsteadPrompt() {
-  const link = joinInsteadOffer.value;
+  const offer = joinInsteadOffer.value;
   const [armed, setArmed] = useState(false);
   const [busy, setBusy] = useState(false);
-  if (!link) return null;
-  const made = store.value.entries.filter(
-    (e) => !e.rec.deleted && e.rec.kind !== 'settings',
-  ).length;
-  const run = async (fn: () => Promise<void>, done: string) => {
+  if (!offer) return null;
+  const { made } = offer;
+  const who = offer.inviter ?? 'your partner';
+  const join = async () => {
     setBusy(true);
     try {
-      await fn();
+      await joinWithThisAccount(offer);
       startRequested.value = true;
       location.hash = 'start';
-      toast(done);
+      toast(`You’ve joined ${who}. Save your new phrase.`);
     } catch (err) {
+      setArmed(false);
       toast(err instanceof Error ? err.message : 'That didn’t work. Try again.');
     } finally {
       setBusy(false);
@@ -295,56 +295,45 @@ function JoinInsteadPrompt() {
       <Icon name="lock" size={16} />
       <div>
         <h2 class="h3" id="ji-h">
-          Join your partner’s space?
+          Join {offer.inviter ? `${offer.inviter}’s` : 'your partner’s'} space?
         </h2>
-        {made === 0 ? (
-          <p>
-            This is an invite to your partner’s space. Your own space is empty, so you can join with
-            this account: your sign-in, passkeys and devices stay, and your empty space is removed.
-            Next you’ll save a new recovery phrase, and your other devices will need a device link.
-          </p>
-        ) : (
-          <p>
-            This is an invite to your partner’s space, but your own space has {made}{' '}
-            {made === 1 ? 'thing' : 'things'} in it. Joining with this account needs an empty space
-            for now: delete {made === 1 ? 'it' : 'them'} first, or start over (this deletes your
-            account and everything in it, then you sign in again to join).
+        <p>
+          This is an invite from {who}. You can join with this account: your sign-in, passkeys and
+          devices stay, and your own space is removed. Next you’ll save a new recovery phrase and
+          compare a safety code with {who}; your other devices will need a device link.
+        </p>
+        {made > 0 && (
+          <p class="small">
+            Your space has {made} {made === 1 ? 'thing' : 'things'} in it, which will be deleted.
           </p>
         )}
         <div class="btnrow">
-          {made === 0 ? (
-            <button
-              type="button"
-              class="btn sm primary"
-              disabled={busy}
-              onClick={() =>
-                void run(() => joinWithThisAccount(link), 'You’ve joined. Save your new phrase.')
+          <button
+            type="button"
+            class="btn sm primary"
+            disabled={busy}
+            onClick={() => {
+              if (!armed) {
+                setArmed(true);
+                return;
               }
-            >
-              Join with this account
-            </button>
-          ) : (
-            <button
-              type="button"
-              class="btn sm"
-              disabled={busy}
-              onClick={() => {
-                if (!armed) {
-                  setArmed(true);
-                  return;
-                }
-                void run(() => startOverToJoin(link), 'Done. Sign in again to join your partner.');
-              }}
-            >
-              {armed ? 'Tap again: delete and start over' : 'Start over and join'}
-            </button>
-          )}
+              void join();
+            }}
+          >
+            {!armed
+              ? made === 0
+                ? 'Join with this account'
+                : 'Delete them and join'
+              : made === 0
+                ? `Tap again to join ${who}`
+                : `Tap again: delete ${made} and join`}
+          </button>
           <button
             type="button"
             class="btn sm ghost"
             onClick={() => {
               joinInsteadOffer.value = null;
-              toast('Not used. Keep the link if you change your mind.');
+              toast('Not used. Open the link again if you change your mind.');
             }}
           >
             Keep my space
@@ -478,7 +467,11 @@ export function App() {
   const n = names.value;
   const acct = account.value.status;
   // Signed in but not set up yet (no space, or no keys on this device): onboarding only.
-  const onboarding = startRequested.value || acct === 'needs-profile' || acct === 'needs-keys';
+  const onboarding =
+    startRequested.value ||
+    joinedWithAccount.value ||
+    acct === 'needs-profile' ||
+    acct === 'needs-keys';
   const View = {
     plan: PlanView,
     lists: ListsView,
@@ -493,6 +486,7 @@ export function App() {
     <StartView
       onFinished={() => {
         startRequested.value = false;
+        joinedWithAccount.value = false;
         go('plan');
       }}
     />
