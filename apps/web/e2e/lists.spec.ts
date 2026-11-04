@@ -322,7 +322,10 @@ test('select several items and change them together, with undo', async ({ page }
 
 test('the check-in shows free evenings even without a list of date ideas', async ({ page }) => {
   await page.goto('/#lists');
-  await page.getByRole('button', { name: /^Date ideas/ }).first().click();
+  await page
+    .getByRole('button', { name: /^Date ideas/ })
+    .first()
+    .click();
   const settings = await settingsOf(page, 'Date ideas');
   await settings.getByRole('button', { name: /^Delete list/ }).click();
   await settings.getByRole('button', { name: 'Tap again to delete' }).click();
