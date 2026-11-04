@@ -70,8 +70,8 @@
         {
           "binding": "DB",
           "database_name": "ours",
-          // From `wrangler d1 create ours`.
-          "database_id": "00000000-0000-0000-0000-000000000000",
+          // "ours" in Eastern North America (location hint ENAM).
+          "database_id": "aa4adb50-0f58-4b3d-b775-a0c35214552d",
           "migrations_dir": "migrations"
         }
       ],
