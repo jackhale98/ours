@@ -288,3 +288,28 @@ test('the demo makes no network requests beyond the site itself', async ({ page 
   for (const tab of ['plan', 'lists', 'checkin', 'privacy']) await openDemo(page, tab);
   expect([...origins]).toEqual(['http://localhost:4173']);
 });
+
+test('check-in: each count opens the plans behind it', async ({ page }) => {
+  await openDemo(page, 'checkin');
+  const counts = page.getByRole('group', { name: 'Show plans' });
+  const together = counts.getByRole('button', { name: /Together/ });
+  await together.click();
+  await expect(together).toHaveAttribute('aria-pressed', 'true');
+  // Plans the two of you share this week, each opening its details.
+  const list = page.locator('.weeklist');
+  await expect(list).toContainText('Trash & recycling out');
+  await list.locator('.ev').first().click();
+  await expect(page.getByRole('dialog')).toBeVisible();
+  await page.getByRole('dialog').getByRole('button', { name: 'Close' }).click();
+  // Alex's include their private plan, shown only as Busy.
+  await counts.getByRole('button', { name: /Alex/ }).click();
+  await expect(list).toContainText('Busy');
+  await expect(list).not.toContainText('Therapy');
+  await expect(list.getByRole('link', { name: 'See the whole week' })).toHaveAttribute(
+    'href',
+    '#plan/week',
+  );
+  // Tapping the open count again closes the list.
+  await counts.getByRole('button', { name: /Alex/ }).click();
+  await expect(list).toHaveCount(0);
+});

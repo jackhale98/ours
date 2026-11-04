@@ -2,6 +2,7 @@
 /**
  * "Waiting on you": everything that needs this person's answer or action,
  * in one place, in the order it's worth doing:
+ *   0. inviting the partner, while nobody has joined the space,
  *   1. plans the partner asked about (answer yes or no),
  *   2. plans I asked about that the partner can't make (ask again or remove),
  *   3. my tasks that are overdue or due by tomorrow, and shared ones nobody
@@ -10,11 +11,13 @@
  */
 import { addDays } from '@ours/core/time';
 import { computed } from '@preact/signals';
+import { partnerMissing } from './invite';
 import { allLists, type ItemEntry, itemsOf, type ListEntry } from './lists';
 import { byKind, type Entry, partner, viewer } from './model';
 import { awaitingMe, today } from './select';
 
 export type Waiting =
+  | { kind: 'invite'; id: string }
   | { kind: 'ask'; id: string; entry: Entry }
   | { kind: 'declined'; id: string; entry: Entry }
   | { kind: 'task'; id: string; item: ItemEntry; list: ListEntry };
@@ -65,5 +68,7 @@ export const waiting = computed<Waiting[]>(() => {
   const tasks = tasksFor(1).map(
     ({ item, list }): Waiting => ({ kind: 'task', id: item.id, item, list }),
   );
-  return [...asks, ...declined, ...tasks];
+  // Nobody to plan with yet: inviting them comes first.
+  const invite: Waiting[] = partnerMissing() ? [{ kind: 'invite', id: 'invite' }] : [];
+  return [...invite, ...asks, ...declined, ...tasks];
 });

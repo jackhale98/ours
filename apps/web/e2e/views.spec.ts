@@ -175,3 +175,18 @@ for (const scheme of ['light', 'dark'] as const) {
     });
   }
 }
+
+test('changing week or month slides the new one in from its side', async ({ page }) => {
+  for (const view of ['week', 'month'] as const) {
+    await page.goto(`/#plan/${view}`);
+    const slide = page.locator('.slide').first();
+    await page.getByRole('button', { name: `Next ${view}` }).click();
+    await expect(slide).toHaveClass(/slide-next/);
+    await page.getByRole('button', { name: `Previous ${view}` }).click();
+    await expect(slide).toHaveClass(/slide-prev/);
+    // Nothing sticks out sideways while it moves.
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
+      true,
+    );
+  }
+});

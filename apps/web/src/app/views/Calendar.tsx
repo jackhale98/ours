@@ -212,6 +212,27 @@ function DayPanel({ day }: { day: Day }) {
   );
 }
 
+/**
+ * Slides the next or previous week or month in from the side it lies on,
+ * instead of swapping it in place. Only a change of period slides; picking a
+ * day within it doesn't. Reduced-motion settings turn the animation off
+ * (base.css), leaving the plain swap.
+ */
+function useSlide(period: string) {
+  const ref = useRef<HTMLDivElement>(null);
+  const prev = useRef(period);
+  useLayoutEffect(() => {
+    const before = prev.current;
+    prev.current = period;
+    const el = ref.current;
+    if (!el || before === period) return;
+    el.classList.remove('slide-next', 'slide-prev');
+    void el.offsetWidth; // restart the animation if one is running
+    el.classList.add(period > before ? 'slide-next' : 'slide-prev');
+  }, [period]);
+  return ref;
+}
+
 /** Arrow-key movement shared by the month grid and the week strip. */
 function moveBy(e: KeyboardEvent, current: string, unit: 'week' | 'month'): string | null {
   const ws = weekStartsOn.value;
@@ -421,6 +442,7 @@ export function MonthView() {
   const grid = useRef<HTMLTableElement>(null);
   const stage = useRef<HTMLDivElement>(null);
   const remember = useFollowFocus(grid, sel);
+  const monthSlide = useSlide(monthOf(sel));
   const ws = weekStartsOn.value;
   const selDay = days.find((d) => d.date === sel) ?? agendaFrom(sel, 1)[0];
   const phone = compact.value;
@@ -504,72 +526,74 @@ export function MonthView() {
           }}
         >
           {/* A calendar table: one tab stop (the chosen day); arrow keys, Page Up/Down and Home/End move. */}
-          <table
-            class={`month${wide.value ? ' wide' : ''}`}
-            aria-label={monthTitle(sel)}
-            ref={grid}
-            onKeyDown={onKey}
-          >
-            <thead>
-              <tr>
-                {Array.from({ length: 7 }, (_, i) => {
-                  const d = (ws + i) % 7;
-                  return (
-                    <th scope="col" key={d} class="mdow">
-                      <abbr title={DOW_LONG[d]}>{DOW_SHORT[d]}</abbr>
-                    </th>
-                  );
-                })}
-              </tr>
-            </thead>
-            <tbody>
-              {Array.from({ length: GRID_DAYS / 7 }, (_, w) => (
-                <tr key={w}>
-                  {days.slice(w * 7, w * 7 + 7).map((day) => {
-                    const out = monthOf(day.date) !== monthOf(sel);
-                    const isSel = day.date === sel;
-                    const plans = day.rows.filter((r) => !r.free);
-                    const away = plans.some((r) => r.away);
+          <div class="slide" ref={monthSlide}>
+            <table
+              class={`month${wide.value ? ' wide' : ''}`}
+              aria-label={monthTitle(sel)}
+              ref={grid}
+              onKeyDown={onKey}
+            >
+              <thead>
+                <tr>
+                  {Array.from({ length: 7 }, (_, i) => {
+                    const d = (ws + i) % 7;
                     return (
-                      <td key={day.date}>
-                        <button
-                          type="button"
-                          class={`mcell${out ? ' out' : ''}${day.date === t ? ' today' : ''}${isSel ? ' sel' : ''}`}
-                          data-date={day.date}
-                          aria-pressed={isSel}
-                          tabIndex={isSel ? 0 : -1}
-                          aria-label={dayLabel(day, day.date === t)}
-                          aria-current={day.date === t ? 'date' : undefined}
-                          onClick={() => {
-                            // On phones a second tap on the chosen day opens its plans.
-                            if (isSel && phone) drawerOpen.value = true;
-                            focusDate.value = day.date;
-                          }}
-                        >
-                          <span class="mnum" aria-hidden="true">
-                            {dayNum(day.date)}
-                            {plans.some((r) => r.countdown) && <Icon name="flag" size={11} />}
-                          </span>
-                          {wide.value && (
-                            <span class="mtitles" aria-hidden="true">
-                              {plans.slice(0, titles).map((r) => (
-                                <span key={r.key}>{r.title}</span>
-                              ))}
-                            </span>
-                          )}
-                          <Markers rows={wide.value ? plans.slice(titles) : plans} />
-                          {day.bothFree && !out && day.date >= t && (
-                            <span class="mfree" aria-hidden="true" />
-                          )}
-                          {away && <span class="maway" aria-hidden="true" />}
-                        </button>
-                      </td>
+                      <th scope="col" key={d} class="mdow">
+                        <abbr title={DOW_LONG[d]}>{DOW_SHORT[d]}</abbr>
+                      </th>
                     );
                   })}
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {Array.from({ length: GRID_DAYS / 7 }, (_, w) => (
+                  <tr key={w}>
+                    {days.slice(w * 7, w * 7 + 7).map((day) => {
+                      const out = monthOf(day.date) !== monthOf(sel);
+                      const isSel = day.date === sel;
+                      const plans = day.rows.filter((r) => !r.free);
+                      const away = plans.some((r) => r.away);
+                      return (
+                        <td key={day.date}>
+                          <button
+                            type="button"
+                            class={`mcell${out ? ' out' : ''}${day.date === t ? ' today' : ''}${isSel ? ' sel' : ''}`}
+                            data-date={day.date}
+                            aria-pressed={isSel}
+                            tabIndex={isSel ? 0 : -1}
+                            aria-label={dayLabel(day, day.date === t)}
+                            aria-current={day.date === t ? 'date' : undefined}
+                            onClick={() => {
+                              // On phones a second tap on the chosen day opens its plans.
+                              if (isSel && phone) drawerOpen.value = true;
+                              focusDate.value = day.date;
+                            }}
+                          >
+                            <span class="mnum" aria-hidden="true">
+                              {dayNum(day.date)}
+                              {plans.some((r) => r.countdown) && <Icon name="flag" size={11} />}
+                            </span>
+                            {wide.value && (
+                              <span class="mtitles" aria-hidden="true">
+                                {plans.slice(0, titles).map((r) => (
+                                  <span key={r.key}>{r.title}</span>
+                                ))}
+                              </span>
+                            )}
+                            <Markers rows={wide.value ? plans.slice(titles) : plans} />
+                            {day.bothFree && !out && day.date >= t && (
+                              <span class="mfree" aria-hidden="true" />
+                            )}
+                            {away && <span class="maway" aria-hidden="true" />}
+                          </button>
+                        </td>
+                      );
+                    })}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
         {selDay && !phone && <DayPanel day={selDay} />}
       </div>
@@ -811,6 +835,7 @@ export function WeekView() {
   const start = startOfWeek(sel);
   const days = agendaFrom(start, 7);
   const selDay = days.find((d) => d.date === sel) ?? days[0];
+  const weekSlide = useSlide(start);
   // Swipe on the day strip changes week (a shortcut; the buttons do the same).
   const touch = useRef<number | null>(null);
   return (
@@ -829,7 +854,11 @@ export function WeekView() {
       <NeedsAnswer />
       {wide.value ? (
         <>
-          <WeekGrid days={days} />
+          <div class="slide-host">
+            <div class="slide" ref={weekSlide}>
+              <WeekGrid days={days} />
+            </div>
+          </div>
           {selDay && <DayPanel day={selDay} />}
         </>
       ) : (
@@ -845,8 +874,12 @@ export function WeekView() {
             focusDate.value = addDays(sel, x1 < x0 ? 7 : -7);
           }}
         >
-          <WeekStrip days={days} sel={sel} />
-          {selDay && <DayPanel day={selDay} />}
+          <div class="slide-host">
+            <div class="slide" ref={weekSlide}>
+              <WeekStrip days={days} sel={sel} />
+              {selDay && <DayPanel day={selDay} />}
+            </div>
+          </div>
         </div>
       )}
     </>

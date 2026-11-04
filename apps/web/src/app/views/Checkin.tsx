@@ -3,13 +3,15 @@ import { CHECKIN_STEPS } from '@ours/core/schema';
 import { addDays } from '@ours/core/time';
 import { signal } from '@preact/signals';
 import type { ComponentChildren } from 'preact';
+import { useState } from 'preact/hooks';
 import { checkinLists, ideasList, itemsOf } from '../lists';
-import { byKind, createEvent, nameOf, partner, put, settings, viewer } from '../model';
+import { byKind, createEvent, nameOf, partner, put, type Slot, settings, viewer } from '../model';
 import { noticeProposal } from '../notices';
 import { withDefaultReminders } from '../reminders';
-import { agenda, dow, fmtLong, freeEvenings, relDay, today, zone } from '../select';
+import { agenda, type Day, dow, fmtLong, freeEvenings, relDay, today, zone } from '../select';
 import { Icon, Marker, toast } from '../ui';
 import { ItemRow } from './Lists';
+import { EventRow } from './Plan';
 
 interface Draft {
   done: boolean[];
@@ -69,7 +71,36 @@ function Step({ i, title, children }: { i: number; title: string; children: Comp
   );
 }
 
+/** The week's plans for one owner, by day: what a count above stands for. */
+function WeekList({ days, owner, empty }: { days: Day[]; owner: Slot | 'both'; empty: string }) {
+  const shown = days
+    .map((day) => ({ day, rows: day.rows.filter((r) => r.owner === owner) }))
+    .filter((d) => d.rows.length);
+  return (
+    <div class="weeklist">
+      {shown.length ? (
+        shown.map(({ day, rows }) => (
+          <section key={day.date} aria-label={fmtLong(day.date)}>
+            <h3 class="sublbl">{relDay(day.date)}</h3>
+            <div class="dlist">
+              {rows.map((row) => (
+                <EventRow key={row.key} row={row} date={day.date} />
+              ))}
+            </div>
+          </section>
+        ))
+      ) : (
+        <p class="nothing">{empty}</p>
+      )}
+      <a class="linkbtn" href="#plan/week">
+        See the whole week
+      </a>
+    </div>
+  );
+}
+
 export function CheckinView() {
+  const [show, setShow] = useState<'me' | 'partner' | 'both' | null>(null);
   const me = viewer.value;
   const p = partner.value;
   const d = draft.value;
@@ -141,29 +172,43 @@ export function CheckinView() {
       </div>
       <ol class="steps">
         <Step i={0} title="Look at the week ahead">
-          <div class="stats">
-            <div class="stat">
-              <b>{count(me)}</b>
-              <span>
-                <Marker owner={me} />
-                Your plans
-              </span>
-            </div>
-            <div class="stat">
-              <b>{count(p)}</b>
-              <span>
-                <Marker owner={p} />
-                {nameOf(p)}’s
-              </span>
-            </div>
-            <div class="stat">
-              <b>{count('both')}</b>
-              <span>
-                <Marker owner="both" />
-                Together
-              </span>
-            </div>
+          {/* biome-ignore lint/a11y/useSemanticElements: toggle-button group (aria-pressed), labelled; fieldset/legend breaks the grid layout */}
+          <div class="stats" role="group" aria-label="Show plans">
+            {(
+              [
+                ['me', me, 'Your plans'],
+                ['partner', p, `${nameOf(p)}’s`],
+                ['both', 'both', 'Together'],
+              ] as const
+            ).map(([key, owner, label]) => (
+              <button
+                type="button"
+                class="stat"
+                key={key}
+                aria-pressed={show === key}
+                onClick={() => setShow(show === key ? null : key)}
+              >
+                <b>{count(owner)}</b>
+                <span>
+                  <Marker owner={owner} />
+                  {label}
+                </span>
+              </button>
+            ))}
           </div>
+          {show && (
+            <WeekList
+              days={week}
+              owner={show === 'me' ? me : show === 'partner' ? p : 'both'}
+              empty={
+                show === 'me'
+                  ? 'Nothing of yours this week.'
+                  : show === 'partner'
+                    ? `Nothing of ${nameOf(p)}’s this week.`
+                    : 'Nothing planned together yet. Step 3 can fix that.'
+              }
+            />
+          )}
           <p class="lede small">
             {busiest && busiest.rows.length > 0 && (
               <>
@@ -171,7 +216,7 @@ export function CheckinView() {
               </>
             )}
             {toAnswer ? (
-              <a class="linkbtn" href="#plan">
+              <a class="linkbtn" href="#inbox">
                 {toAnswer} plan{toAnswer > 1 ? 's need' : ' needs'} your answer
               </a>
             ) : (

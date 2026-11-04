@@ -7,6 +7,7 @@
 import { addDays } from '@ours/core/time';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { type Waiting, waiting } from '../inbox';
+import { PartnerInvite } from '../invite';
 import { itemSheet } from '../itemsheet';
 import { completeItem, dueText } from '../lists';
 import { commentsFor, deleteEvent, nameOf, partner, update, viewer } from '../model';
@@ -25,6 +26,7 @@ function eventWhen(d: { start: string; end: string; all_day: boolean; location: 
 /** One line for the overview list. */
 function summary(w: Waiting): { title: string; why: string } {
   const p = nameOf(partner.value);
+  if (w.kind === 'invite') return { title: 'Invite your partner', why: 'They haven’t joined yet' };
   if (w.kind === 'task') {
     const d = w.item.rec.data;
     return {
@@ -43,6 +45,17 @@ function summary(w: Waiting): { title: string; why: string } {
 function Current({ w, headRef }: { w: Waiting; headRef: { current: HTMLHeadingElement | null } }) {
   const me = viewer.value;
   const p = partner.value;
+  if (w.kind === 'invite') {
+    return (
+      <>
+        <p class="eyebrow">Nobody to plan with yet</p>
+        <h2 class="h3" id="wo-title" tabIndex={-1} ref={headRef}>
+          Invite your partner
+        </h2>
+        <PartnerInvite />
+      </>
+    );
+  }
   if (w.kind === 'task') {
     const d = w.item.rec.data;
     const due = dueText(d.due ?? today.value);
@@ -272,7 +285,15 @@ export function InboxView() {
                       onClick={() => setPickedId(w.id)}
                     >
                       <Icon
-                        name={w.kind === 'task' ? 'list' : w.kind === 'ask' ? 'chat' : 'x'}
+                        name={
+                          w.kind === 'task'
+                            ? 'list'
+                            : w.kind === 'ask'
+                              ? 'chat'
+                              : w.kind === 'invite'
+                                ? 'send'
+                                : 'x'
+                        }
                         size={16}
                       />
                       <span>

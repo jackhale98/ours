@@ -396,3 +396,36 @@ test('sign up, pair, compare safety codes, and sync plans both ways', async ({ b
   expect(samCode).not.toBe(oldCode);
   expect(await alex.locator('.code').first().textContent()).toBe(samCode);
 });
+
+test('a partner invite can be made again later, from Privacy or Waiting on you', async ({
+  browser,
+}) => {
+  const jo = await newPage(browser);
+  await jo.goto('/#start');
+  await signUp(jo, `jo-${Date.now()}@example.com`);
+  await jo.getByRole('textbox', { name: 'Your first name' }).fill('Jo');
+  await jo.getByRole('button', { name: 'Create our space' }).click();
+  await recoveryPhrase(jo);
+  await expect(jo.getByRole('heading', { name: 'Invite your partner' })).toBeVisible();
+  const first = (await jo.locator('.url code').textContent()) ?? '';
+  await jo.getByRole('button', { name: 'Do this later' }).click();
+  await jo.getByRole('button', { name: 'Not now' }).click();
+  await expect(jo.getByRole('heading', { name: 'This week', exact: true })).toBeVisible();
+
+  // Nobody has joined: Privacy offers a fresh link, which replaces the first.
+  await jo.goto('/#privacy');
+  const card = jo.locator('section.card', { hasText: 'Invite your partner' });
+  await card.getByRole('button', { name: 'Make an invite link' }).click();
+  const second = (await card.locator('.url code').textContent()) ?? '';
+  expect(second).toMatch(/\/join\/#[A-Za-z0-9_-]+\.[A-Za-z0-9_-]{43}$/);
+  expect(second).not.toBe(first);
+  await card.getByRole('button', { name: 'Make a new link' }).click();
+  await expect(card.locator('.url code')).not.toHaveText(second);
+
+  // And it's first in Waiting on you.
+  await jo.goto('/#inbox');
+  await expect(jo.locator('.wo-card')).toContainText('Invite your partner');
+  await expect(
+    jo.locator('.wo-card').getByRole('button', { name: 'Make an invite link' }),
+  ).toBeVisible();
+});
