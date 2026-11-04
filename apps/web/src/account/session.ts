@@ -188,12 +188,14 @@ function claimKeptInvite(email: string): void {
   } catch {
     // ignore
   }
-  if (kept && kept.email === email.trim().toLowerCase()) {
-    try {
+  try {
+    if (kept && kept.email === email.trim().toLowerCase())
       sessionStorage.setItem(PENDING_INVITE, kept.fragment);
-    } catch {
-      // ignore
-    }
+    // Kept for someone else: not this person's, in this tab either (review 0007, C1).
+    else if (kept && sessionStorage.getItem(PENDING_INVITE) === kept.fragment)
+      sessionStorage.removeItem(PENDING_INVITE);
+  } catch {
+    // ignore
   }
 }
 /**
@@ -294,15 +296,11 @@ async function refresh(session: Session): Promise<void> {
   void acknowledgeKeys(info, space.space_id, floor, active.space);
   if (joinedNow) await afterJoin(joinedNow);
   if (!engine) {
-    // This device's local copy is of another space (this account joined a
-    // partner, here or on another device): it goes, unsent writes included,
-    // so nothing from the old space is pushed into the new one (review 0007, L2).
-    const local = await kvGet<string>('local-space');
-    if (local && local !== space.space_id) {
-      const d = await db();
-      await Promise.all([d.clear('envelopes'), d.clear('outbox')]);
-    }
-    if (local !== space.space_id) await kvSet('local-space', space.space_id);
+    // Anything kept here for another space (this account joined a partner,
+    // here or on another device) goes, unsent writes included: the server
+    // refuses a push that mixes spaces, so they'd block syncing for good
+    // (review 0007, L2 and C5).
+    await dropOtherSpaces(space.space_id);
     engine = new SyncEngine({
       ring: active.ring,
       userId: session.user.id,
@@ -339,9 +337,11 @@ async function refresh(session: Session): Promise<void> {
     // Into the shared settings, then a new phrase and the safety code.
     await syncNow()?.catch(() => {});
     joinSettings(joinedNow.name, session.user.id);
+    // Kept until the safety code is compared, so a reload doesn't skip it (C3).
+    await kvSet('joined-flow', true);
     await kvSet('joining', null);
-    joinedWithAccount.value = true;
   }
+  if (await kvGet<boolean>('joined-flow')) joinedWithAccount.value = true;
   setPartnerPresent(space.members.length > 1);
   void keepStorage();
   // A rotation that was made but didn't finish re-encrypting carries on.
@@ -1171,8 +1171,17 @@ function ownSpaceCounts(): { live: number; made: number } {
   return { live: live.length, made: live.filter((e) => e.rec.kind !== 'settings').length };
 }
 
-/** Set after joining with this account: the start flow asks for a new recovery phrase. */
+/**
+ * Set after joining with this account: the start flow asks for a new
+ * recovery phrase (unless it's saved), then the safety code.
+ */
 export const joinedWithAccount = signal(false);
+
+/** The joined flow is done (safety code seen). */
+export async function finishJoinedFlow(): Promise<void> {
+  joinedWithAccount.value = false;
+  await kvSet('joined-flow', false);
+}
 
 /** A join with this account in progress, kept on the device until it's settled. */
 interface Joining {
@@ -1269,6 +1278,11 @@ export async function joinWithThisAccount(offer: JoinOffer): Promise<void> {
       r.removeSpace(payload.space_id);
       await saveRing(r);
       await kvSet('joining', null);
+    } else {
+      // Settle it as soon as the server can be asked (review 0007, C2).
+      const retry = () => void refresh(state.session).catch(() => {});
+      window.addEventListener('online', retry, { once: true });
+      setTimeout(retry, 15_000);
     }
     throw err;
   }
@@ -1280,6 +1294,17 @@ export async function joinWithThisAccount(offer: JoinOffer): Promise<void> {
   stopNotifications();
   stopFeeds();
   await refresh(state.session);
+}
+
+/** Drops synced and unsent records of any space but this one from this device. */
+async function dropOtherSpaces(spaceId: string): Promise<void> {
+  const d = await db();
+  const tx = d.transaction(['envelopes', 'outbox'], 'readwrite');
+  for await (const c of tx.objectStore('envelopes'))
+    if (c.value.space_id !== spaceId) await c.delete();
+  for await (const c of tx.objectStore('outbox'))
+    if (c.value.envelope.space_id !== spaceId) await c.delete();
+  await tx.done;
 }
 
 /** This device after a join with this account: the old space's keys and stale bits go. */

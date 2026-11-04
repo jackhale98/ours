@@ -256,3 +256,74 @@ The person is told "1 thing" and loses more. Conditions under this change:
 - **Export:** offer an export (or say how to make one) in the prompt when N > 0. Deleted records can't come back: nothing is kept on the server, and other devices lose their copy when they next sync.
 - **L1:** with deletion now on this path, show whose invite it is in the prompt, and ask for `confirmItsYou()` when `needsConfirm()`. A stray or attacker's invite can now delete the person's plans in two taps.
 - The rest of the findings and conditions are unchanged.
+
+## Check of the fixes (commit 0c1387f)
+
+- Date: 2026-11-04. Scope: `git diff 989eeeb 0c1387f`, read with the current files. The ADR's "After review 0007" was treated as claims to check.
+- Suites: `pnpm test:api` passes at 0c1387f (113 tests, including the new `join.test.ts`). `e2e:sync` was not run. Its new tests were read: a lost answer (`route.fetch()` and then `abort`), deleting things and joining, and a kept invite on a shared browser. No probes were written.
+- **Correction to L2 above.** The server would not have accepted the old outbox in the partner's space. `PushRequest` requires every envelope's `space_id` to equal the request's (`protocol.ts:38`), so the whole push is refused with 400. The real effect was worse: the old entries come first in the outbox, so pushes from that device fail every time and its new writes never sync. The fix is the same.
+
+### Items
+
+| Item | Verdict | Notes |
+|---|---|---|
+| H1 | **Fixed** | Keys and the `joining` note are dropped only on a 4xx. Every 4xx from accept comes before the batch, or from a batch that rolled back (`isQuotaAbort`), so it does mean "nothing changed". A retry after a lost answer fails at `GET` (404, used) before the `try`, so it doesn't touch the keys. `refresh` settles from a fresh `/me` only. The e2e test covers it. The device stays on the old space until the next start: see C2. |
+| M1 | **Fixed, one gap** | `afterJoin` and the tail of `refresh` finish the join on both paths: the old keys go, `phrase-stale` and the unlock state are reset, the local copy is cleared (`local-space`), the person is added to the settings, the note is cleared last, and `joinedWithAccount` is set. `onboarding` now holds Start open until the flow ends. Still open: `joinedWithAccount` lives in memory, so a reload after the join but before the safety code step loses that step. The phrase banner stays, because `phrase-stale` is kept on disk (C3). |
+| M2 | **Fixed** | The server now refuses unless the caller is the old space's only member and the old space has no more live records than the client counted, all in the same batch as the join. Guard order is right: the old-space guard first, the join-or-abort guard after the insert, then `leaveStatements`. Either guard aborts the whole batch, invite and unlock deletes included. `results[1]` is the insert when `leave` is set: statements are `[guard, INSERT, UPDATE invite, DELETE key_unlocks, guard, …leave]`. Records this device can't open are counted by the server, so the join is refused. That is safe, but see I10. The friendly pre-check answers `not_alone` before anything about another space's records, so it leaks nothing. API tests cover more records than agreed, a second member, a full space, and pointing `leave` at the partner's space. |
+| M3 | **Fixed, one gap** | The kept invite is written only at `startEmail`, tagged with the address, and lasts 24 h. `verifyEmail` removes it, and puts it back in that tab only for the same address. `signOut` clears both storages. `join.tsx` keeps it in the tab only. The e2e test covers someone else signing in from another tab. Gap: the *same* tab still holds the invite in `sessionStorage`. So someone who uses "Use a different address" in that tab, or signs in there with another address, still gets "Join the space" (C1). That was also true before 3eebb2e, so it's not a regression. |
+| L1 | **Partly fixed** | The inviter's name now comes from inside the invite, and joining always takes two taps. There is still no `confirmItsYou()` when `needsConfirm()`, though changing keys and adding a passkey ask for it (C4). New: see I8. |
+| L2 | **Fixed, one gap** | The atomic batch removes the "leave still pending" window. `local-space` clears the envelopes and outbox when the space in use changes. Gap: `local-space` is set only when an engine starts. A device that hasn't started this build in a ready state before the join has it unset, so nothing is cleared. That includes the account's other devices, which then land in "needs keys" and return before the engine block. After a device link, their old outbox blocks every push (see the correction above; C5). |
+| L3 | **Fixed / recorded** | `joinWithThisAccount` refuses while `rotation.value` is set. THREAT_MODEL records the personal-key floor starting again. |
+| L4 | **Recorded** | In THREAT_MODEL. The atomic leave also removes the case where a late retry revoked a feed link made in the new space. |
+| L5 | **Fixed** | ADR 0016 now describes the atomic step, the 4xx rule, what is finished, the iPhone limit and the accepted risks. THREAT_MODEL "Leaked invite link" describes the kept invite, and there is a new "Joining with an existing account" entry. Two sentences need softening once C1 and C5 are decided: "only in that tab" doesn't stop a second person in the *same* tab, and "Any device whose local copy is of another space clears it" misses devices with `local-space` unset. |
+| I1–I3 | **Addressed** | The keys are dropped only for a join that didn't happen (`refresh`). The old keys go in `afterJoin`. `engine.stop()` is now always followed by a new engine in `refresh`. |
+| I5, I6 | **Moot / fixed** | Start over is gone. The race between two solo accounts is stopped by the server guard (only member). |
+
+### New findings
+
+**C1 (Low): a second person in the same tab still gets the kept invite.**
+- `claimKeptInvite` removes the `localStorage` copy but leaves the tab's `sessionStorage` copy as it is, whatever address signs in. `keepInviteFor` also tags the invite with whatever address is typed next in that tab.
+- Fix: in `claimKeptInvite`, when the address doesn't match the kept one, also clear the tab's copy. Or tag it on the first `startEmail` only.
+- Test: the existing shared-browser test, but with the second person using "Use a different address" in the first tab.
+
+**C2 (Low): after a lost answer, the device carries on in a space that may be gone.**
+- After a non-4xx failure, nothing settles the join until the next start. If it landed, the old space was deleted with it. Meanwhile the device shows "You seem to be offline", its sync fails, and the prompt stays up. Tapping again says the invite "has expired, was used…".
+- Fix: on that path, run `refresh` once `/me` answers. Use the `online` event, or retry a few times. Clear the prompt in the meantime.
+
+**C3 (Low, M1 residual): the safety code step doesn't survive a reload.**
+- Fix: keep "safety code to compare" on disk, for example a `compare-pending:{space}` key cleared by `markCompared` or by "Done". Show it until then, as `toCompare` does for rotations.
+
+**C4 (Low, L1 residual): no passkey check before a join that deletes things.**
+- Fix: `if (needsConfirm()) await confirmItsYou()` before the accept, at least when `made > 0`. Or record it in THREAT_MODEL as accepted: whoever holds the unlocked device can already delete records one by one.
+
+**C5 (Low, L2 residual): `local-space` unset means nothing is cleared.**
+- Fix: when `local-space` is unset or differs, drop outbox entries and envelopes whose `envelope.space_id` isn't the current space, instead of relying on the marker alone.
+- Test: an outbox entry for another space is dropped on start.
+
+### Info
+
+- **I8:** `openJoinOffer` runs at start-up, so just opening the link claims the invite (`GET`) to show the name, before the person agrees. Review 0005 I1 made `/kind` so that a set-up device doesn't use up an invite by opening it. Here the claim burns the invite for anyone else, for example when the link was meant for another person using this browser. That is acceptable now that kept invites stay with their address (and C1 is fixed), but worth knowing. The alternative is to claim on the first tap and show the name before the second.
+- **I9:** the server's check is a count, not a set. In the seconds between the device's sync and the accept, another device could delete one record and add another, and the new one would be deleted without being shown. The window is small, and sending the ids, as suggested above, would close it.
+- **I10:** a space that holds a record this device can't open (one from a newer build, or one under keys it lacks) can never be joined from. The message says "Open Ours on your other devices so they sync", which won't help. Say "This device can't read everything in your space…" when `needsNewKeys` is set, or `unreadable:` or `repull:` is set.
+- **I11:** `pendingInviteId()` still sends another address's kept invite *id* (not its secret) at sign-in. Production has `ALLOW_SIGNUPS` open, so it is ignored there. On an invite-gated self-host, the second person's sign-up claims the first person's invite. Use the kept id only when the typed address matches.
+- **I12:** `refresh` drops the `joining` keys whenever a fresh `/me` lacks the new space. Another tab of the app starting during the accept's round trip could do that just before the accept commits, which is H1's result in a narrow edge. Settle only notes written before this page load, for example with a timestamp older than a minute.
+
+### Verdict
+
+**Sign-off with conditions.** The redesign fixes the serious problems properly. The join and the leave are one all-or-nothing step on the server, guarded against a second member and against more records than the person was shown. A lost answer no longer loses keys, and it is finished, with the phrase and the safety code, at the next start. The kept invite no longer reaches another address's sign-in from another tab. Nothing new exposes keys or plaintext.
+
+Conditions, with tests:
+1. C5: drop old-space entries by `envelope.space_id`, not only by the `local-space` marker. Otherwise an upgraded second device can be left unable to push.
+2. C1: clear the tab's copy of the invite when someone signs in with another address.
+3. C3: keep the pending safety code comparison on disk.
+4. C4: add the passkey check, or record the risk as accepted in THREAT_MODEL. Then soften the two L5 sentences as noted.
+
+C2 and I8–I12 are recommended, not conditions. Once conditions 1–4 are met, the feature can ship. A further check is optional.
+
+## Conditions met (author's note)
+
+- C1: `claimKeptInvite` drops the tab's copy when the kept invite was for another address.
+- C2: after a lost answer, the device re-checks on `online` and after 15 s.
+- C3: `joined-flow` is kept on the device until the safety code step is done; after a reload with the phrase saved, the flow goes straight to the code. The two-browser test reloads there.
+- C4: recorded as accepted in THREAT_MODEL.
+- C5: `dropOtherSpaces` deletes envelopes and outbox entries whose `space_id` isn't the space in use, before the engine starts; the `local-space` marker is gone.

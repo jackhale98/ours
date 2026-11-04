@@ -23,6 +23,7 @@ import {
   joinedWithAccount,
   me,
   pendingInvite,
+  phraseStale,
   restoreFromPhrase,
   saveBackup,
   setPendingInvite,
@@ -544,7 +545,8 @@ export function StartView({ onFinished }: { onFinished: () => void }) {
     // Cleared when the flow finishes (App), so the flow stays up until then.
     if (!rejoined) return;
     setJoined(true);
-    setStep('recovery');
+    // After a reload with the new phrase already saved: straight to the code.
+    setStep(phraseStale.value ? 'recovery' : 'joined');
   }, [rejoined]);
 
   let body: preact.ComponentChildren;

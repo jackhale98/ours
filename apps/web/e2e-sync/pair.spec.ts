@@ -689,6 +689,9 @@ test('someone whose own space is empty can join with the same account', async ({
   const words = await recoveryPhrase(lee);
   expect(words).not.toEqual(oldWords);
   await expect(lee.getByRole('heading', { name: 'Compare your safety code' })).toBeVisible();
+  // A reload doesn't skip comparing the code (review 0007, C3).
+  await lee.reload();
+  await expect(lee.getByRole('heading', { name: 'Compare your safety code' })).toBeVisible();
   await expect(pat.getByRole('heading', { name: 'Compare your safety code' })).toBeVisible({
     timeout: 20_000,
   });

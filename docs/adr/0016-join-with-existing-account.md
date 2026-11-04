@@ -1,6 +1,6 @@
 # 0016. Joining a partner with an existing account
 
-- Status: Accepted after security review 0007 (see "After review 0007"), pending its check of the fixes
+- Status: Accepted. Signed off in security review 0007 (with conditions C1–C5, met; see "After review 0007")
 - Date: 2026-11-04
 
 ## Context
@@ -29,7 +29,7 @@ Joining (`joinWithThisAccount` in `apps/web/src/account/session.ts`):
    - the person is added to the shared settings;
    - the recovery phrase is marked stale and a new one is asked for, since the old backup lacks the new keys;
    - then the safety code is shown.
-6. Any device whose local copy is of another space than the one it now uses clears it, unsent writes included, so nothing from the old space is pushed into the new one (review 0007, L2). The account's other devices land on "Welcome back" and take a device link.
+6. Every device drops synced and unsent records of any space but the one it uses, unsent writes included, before it starts syncing: the server refuses a push that mixes spaces, so they'd block syncing (review 0007, L2 and C5). The account's other devices land on "Welcome back" and take a device link.
 
 ## Consequences
 - The safety code comparison protects this join exactly as it does a new account's join: the keys come from the same invite.
@@ -40,3 +40,5 @@ Joining (`joinWithThisAccount` in `apps/web/src/account/session.ts`):
 
 ## After review 0007
 H1, M1, M2 and M3 are fixed as above, with tests: a lost answer finished on the next start; more records than agreed; someone else in the old space; a full space; another person signing in on a shared browser. L1: the inviter's name is shown and joining always takes two taps. L2: the local copy follows the space in use. L3 and L4 are accepted (THREAT_MODEL). L5: this ADR and THREAT_MODEL are corrected.
+
+After the check of the fixes: C1, a kept invite for another address is dropped from the tab too; C2, after a lost answer the device asks again when it's back online; C3, the safety code step survives a reload; C4, joining without a passkey check is recorded as accepted in THREAT_MODEL; C5, other spaces' records are dropped by their space, not by a marker.

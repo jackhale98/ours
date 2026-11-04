@@ -7,6 +7,7 @@ import { kvGet, kvSet } from '../account/db';
 import {
   account,
   consumeSignInLink,
+  finishJoinedFlow,
   joinedWithAccount,
   joinInsteadOffer,
   joinWithThisAccount,
@@ -486,7 +487,7 @@ export function App() {
     <StartView
       onFinished={() => {
         startRequested.value = false;
-        joinedWithAccount.value = false;
+        void finishJoinedFlow();
         go('plan');
       }}
     />
