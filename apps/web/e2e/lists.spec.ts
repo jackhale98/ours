@@ -264,3 +264,15 @@ test('the check-in remembers something you did a month ago', async ({ page }) =>
   await recall.getByRole('button', { name: 'Do it again' }).click();
   await expect(page.getByRole('dialog', { name: 'New plan' })).toBeVisible();
 });
+
+test('the rows of views and lists scroll sideways only', async ({ page }, info) => {
+  test.skip(!info.project.name.includes('mobile'), 'the rows scroll on phones');
+  await page.goto('/#lists');
+  for (const sel of ['.xviews', '.ltabs']) {
+    const box = await page.locator(sel).evaluate((el) => {
+      const s = getComputedStyle(el);
+      return { y: s.overflowY, fits: el.scrollHeight <= el.clientHeight };
+    });
+    expect(box, sel).toEqual({ y: 'hidden', fits: true });
+  }
+});

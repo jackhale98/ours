@@ -717,6 +717,10 @@ kbd {
   display: flex;
   gap: 8px;
   overflow-x: auto;
+  /* Sideways only: never pans up and down, and a swipe stops at the ends
+     instead of moving the page. */
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
   scrollbar-width: none;
   padding-block: 3px;
 }
@@ -3316,8 +3320,14 @@ fieldset.reminders > legend {
   .xviews {
     flex-wrap: nowrap;
     overflow-x: auto;
+    overflow-y: hidden;
+    overscroll-behavior-x: contain;
     scrollbar-width: none;
-    padding-block: 2px;
+    /* Room for the chips' 44px tap areas, so the row has nothing to pan. */
+    padding-block: 4px;
+  }
+  .xviews::-webkit-scrollbar {
+    display: none;
   }
   .xviews .chip {
     flex: none;
