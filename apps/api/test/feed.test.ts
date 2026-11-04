@@ -208,6 +208,13 @@ describe('calendar link relay', () => {
         });
       }
       if (url.endsWith('/page')) return new Response('<html>hi</html>');
+      if (url.endsWith('/empty')) return new Response('');
+      if (url.endsWith('/blocked')) {
+        return new Response('<!DOCTYPE html><title>Just a moment...</title>', {
+          status: 200,
+          headers: { 'cf-mitigated': 'challenge' },
+        });
+      }
       if (url.endsWith('/badloc')) {
         return new Response(null, { status: 302, headers: { Location: 'http://[::1' } });
       }
@@ -234,6 +241,17 @@ describe('calendar link relay', () => {
       body: { url: 'https://cal.example.org/page' },
     });
     expect(page.json.error).toBe('not_a_calendar');
+    expect(page.json.message).toMatch(/opens a web page/);
+    const empty = await call('/calendars/fetch', {
+      token: u.token,
+      body: { url: 'https://cal.example.org/empty' },
+    });
+    expect(empty.json.message).toMatch(/returned nothing/);
+    const blocked = await call('/calendars/fetch', {
+      token: u.token,
+      body: { url: 'https://cal.example.org/blocked' },
+    });
+    expect(blocked.json.message).toMatch(/blocks automated requests/);
     const gone = await call('/calendars/fetch', {
       token: u.token,
       body: { url: 'https://cal.example.org/gone' },

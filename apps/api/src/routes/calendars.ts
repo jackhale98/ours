@@ -42,6 +42,22 @@ export function isFetchableCalendarUrl(raw: string, ownHost: string): boolean {
   return true;
 }
 
+/**
+ * Why a response isn't a calendar, in words that point at the fix. Looks at
+ * the first bytes and Cloudflare's challenge header only; nothing is logged.
+ */
+export function notCalendarMessage(text: string, headers: Headers): string {
+  if (headers.get('cf-mitigated') === 'challenge') {
+    return 'That calendar’s site blocks automated requests, so Ours can’t fetch it. Download its .ics file and import that instead.';
+  }
+  const head = text.trimStart().slice(0, 64).toLowerCase();
+  if (!head) return 'That link returned nothing. Check it’s the calendar’s iCal (.ics) address.';
+  if (head.startsWith('<')) {
+    return 'That link opens a web page, not a calendar file. Use the calendar’s iCal or .ics address: it usually ends in .ics or starts with webcal://.';
+  }
+  return 'That link isn’t a calendar (.ics) file.';
+}
+
 export const calendars = new Hono<AppEnv>();
 calendars.use('*', requireAuth);
 
@@ -124,8 +140,9 @@ calendars.post('/fetch', async (c) => {
     at += ch.byteLength;
   }
   const text = new TextDecoder().decode(all);
-  if (!/^﻿?\s*BEGIN:VCALENDAR/i.test(text))
-    throw new HttpError(422, 'not_a_calendar', 'That link isn’t a calendar (.ics) file.');
+  if (!/^\uFEFF?\s*BEGIN:VCALENDAR/i.test(text)) {
+    throw new HttpError(422, 'not_a_calendar', notCalendarMessage(text, res.headers));
+  }
   return new Response(text, {
     headers: { 'Content-Type': 'text/calendar; charset=utf-8', 'Cache-Control': 'no-store' },
   });

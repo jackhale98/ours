@@ -142,6 +142,7 @@ async function issueLink(
       `${app}#signin=${token}`,
       '',
       `This link works once and expires in ${EMAIL_TOKEN_MINUTES} minutes.`,
+      'Using Ours from your iPhone or iPad Home Screen? Press and hold the link, choose Copy, and paste it into Ours.',
       'If you didn’t ask for it, ignore this email.',
     ].join('\n'),
   });

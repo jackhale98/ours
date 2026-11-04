@@ -23,11 +23,14 @@ import {
   pendingInvite,
   restoreFromPhrase,
   saveBackup,
+  setPendingInvite,
   signInWithPasskey,
   startEmail,
+  verifyEmail,
 } from '../../account/session';
 import { mountTurnstile, turnstileEnabled } from '../../account/turnstile';
 import { HAS_API } from '../../config';
+import { type PastedLink, PasteLink } from '../pastelink';
 import { PhraseWords } from '../phrase';
 import { Icon, toast } from '../ui';
 
@@ -44,7 +47,25 @@ function Busy({ busy, children }: { busy: boolean; children: preact.ComponentChi
 
 /* ---------- sign in / up ---------- */
 
+/** Why a link might need pasting: said once, the same everywhere. */
+const PASTE_HINT =
+  'On an iPhone or iPad with Ours on the Home Screen, links open in Safari instead. Press and hold the link, choose Copy, then paste it here.';
+
 function SignIn() {
+  const [, setInviteAdded] = useState(0);
+  const useLink = async (link: PastedLink) => {
+    if (link.kind === 'signin') {
+      try {
+        await verifyEmail(link.token);
+      } catch {
+        toast('That sign-in link has expired or was already used. Ask for a new one.');
+      }
+      return;
+    }
+    setPendingInvite(link.fragment);
+    setInviteAdded((n) => n + 1);
+    toast('Invite added. Now sign in with your email.');
+  };
   const [email, setEmail] = useState('');
   const [terms, setTerms] = useState(false);
   const [sent, setSent] = useState(false);
@@ -76,6 +97,12 @@ function SignIn() {
           We sent a sign-in link to <b class="ink">{email}</b>. Open it on this device. It works
           once and expires in 15 minutes.
         </p>
+        <PasteLink
+          label="Paste the sign-in link"
+          hint={PASTE_HINT}
+          accept={['signin']}
+          onLink={useLink}
+        />
         <button type="button" class="linkbtn" onClick={() => setSent(false)}>
           Use a different address
         </button>
@@ -153,6 +180,12 @@ function SignIn() {
           Sign in with a passkey
         </button>
       )}
+      <PasteLink
+        label={joining ? 'Paste a different link' : 'Have a link from Ours? Paste it'}
+        hint={PASTE_HINT}
+        accept={['signin', 'join']}
+        onLink={useLink}
+      />
     </>
   );
 }
@@ -332,6 +365,7 @@ function Invite({ onDone }: { onDone: () => void }) {
 /* ---------- name + create / join ---------- */
 
 function Profile({ onCreated }: { onCreated: (joined: boolean) => void }) {
+  const [, setInviteAdded] = useState(0);
   const [name, setName] = useState('');
   const [busy, setBusy] = useState(false);
   const joining = !!pendingInvite();
@@ -374,6 +408,18 @@ function Profile({ onCreated }: { onCreated: (joined: boolean) => void }) {
           <Busy busy={busy}>{joining ? 'Join' : 'Create our space'}</Busy>
         </button>
       </form>
+      {!joining && (
+        <PasteLink
+          label="Joining your partner? Paste their invite link"
+          hint={PASTE_HINT}
+          accept={['join']}
+          onLink={(link) => {
+            if (link.kind !== 'join') return;
+            setPendingInvite(link.fragment);
+            setInviteAdded((n) => n + 1);
+          }}
+        />
+      )}
     </section>
   );
 }
@@ -386,8 +432,8 @@ function RestoreKeys() {
     <section class="card">
       <h2 class="h3">Welcome back</h2>
       <p class="d">
-        This device doesn’t have your keys yet. Open a link from another of your devices (Privacy →
-        Link a device), or enter your recovery phrase.
+        This device doesn’t have your keys yet. Open or paste a link from another of your devices
+        (Privacy → Link a new device), or enter your recovery phrase.
       </p>
       {link && (
         <button
@@ -404,6 +450,19 @@ function RestoreKeys() {
           Use the device link
         </button>
       )}
+      <PasteLink
+        label="Paste a device link"
+        hint={`Make one on a device that's already set up: Privacy → Link a new device. ${PASTE_HINT}`}
+        accept={['join']}
+        onLink={async (link) => {
+          if (link.kind !== 'join') return;
+          try {
+            await acceptDeviceLink(link.fragment);
+          } catch (err) {
+            toast(errorText(err));
+          }
+        }}
+      />
       <form
         class="stack gap"
         onSubmit={async (e) => {

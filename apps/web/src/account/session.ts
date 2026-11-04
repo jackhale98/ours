@@ -184,6 +184,24 @@ async function refresh(session: Session): Promise<void> {
     slot: space.role,
     partnerJoined: space.members.length > 1,
   };
+  void keepStorage();
+}
+
+/**
+ * Asks the browser to keep this site's storage, which holds the keys, when
+ * the device runs low on space. Without it, a browser may clear it like a
+ * cache, and the next visit asks for a device link or the recovery phrase.
+ * Browsers decide for themselves (some grant it at once, some after use, an
+ * installed app usually always); asking is harmless either way.
+ */
+async function keepStorage(): Promise<void> {
+  try {
+    if (navigator.storage?.persist && !(await navigator.storage.persisted())) {
+      await navigator.storage.persist();
+    }
+  } catch {
+    // Not supported here: nothing to do.
+  }
 }
 
 export const syncNow = () => engine?.sync();

@@ -23,7 +23,7 @@ async function magicLink(page: Page, email: string): Promise<string> {
   throw new Error(`no magic link for ${email}`);
 }
 
-async function signUp(page: Page, email: string) {
+async function signUp(page: Page, email: string, how: 'open' | 'paste' = 'open') {
   await expect(
     page.getByRole('heading', { name: /Sign in or create an account|Join your partner/ }),
   ).toBeVisible();
@@ -31,7 +31,15 @@ async function signUp(page: Page, email: string) {
   await page.getByRole('checkbox', { name: /16 or older/ }).check();
   await page.getByRole('button', { name: 'Email me a link' }).click();
   await expect(page.getByRole('heading', { name: 'Check your email' })).toBeVisible();
-  await page.goto(await magicLink(page, email));
+  const link = await magicLink(page, email);
+  if (how === 'open') {
+    await page.goto(link);
+    return;
+  }
+  // An iPhone Home Screen app can't open the link: it's copied and pasted instead.
+  await page.getByRole('button', { name: 'Paste the sign-in link' }).click();
+  await page.getByRole('textbox', { name: 'Paste the sign-in link' }).fill(link);
+  await page.getByRole('button', { name: 'Use this link' }).click();
 }
 
 async function recoveryPhrase(page: Page) {
@@ -171,7 +179,7 @@ test('sign up, pair, compare safety codes, and sync plans both ways', async ({ b
   // Alex joins with the link.
   await alex.goto(invite);
   await expect(alex).toHaveURL(/#start$/);
-  await signUp(alex, `alex-${stamp}@example.com`);
+  await signUp(alex, `alex-${stamp}@example.com`, 'paste');
   await alex.getByRole('textbox', { name: 'Your first name' }).fill('Alex');
   await alex.getByRole('button', { name: 'Join' }).click();
   await recoveryPhrase(alex);
