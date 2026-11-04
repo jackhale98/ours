@@ -19,6 +19,7 @@ if ('serviceWorker' in navigator && import.meta.env.PROD) {
   window.addEventListener('load', () => {
     navigator.serviceWorker
       .register(`${import.meta.env.BASE_URL}sw.js`, { scope: import.meta.env.BASE_URL })
+      .then((reg) => import('./update').then((m) => m.watchForUpdates(reg)))
       .catch(() => {
         // Offline support is an enhancement; the app works without it.
       });

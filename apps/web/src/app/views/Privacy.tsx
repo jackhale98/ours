@@ -17,6 +17,7 @@ import {
 const ROTATION_ENABLED = import.meta.env.VITE_ROTATION === 'on';
 
 import { PartnerInviteCard } from '../invite';
+import { VersionCard } from '../version';
 import { CalendarsCard } from './Calendars';
 import { DataCard } from './DataCard';
 import { RemindersCard } from './RemindersCard';
@@ -206,6 +207,7 @@ export function PrivacyView() {
         <RemindersCard />
         <DataCard />
         {!demo && <AccountCard />}
+        <VersionCard />
         <p class="legal-links">
           <a href={`${import.meta.env.BASE_URL}legal/privacy/`}>Privacy policy</a>
           <a href={`${import.meta.env.BASE_URL}legal/terms/`}>Terms</a>

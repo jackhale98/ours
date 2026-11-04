@@ -14,6 +14,7 @@ import { drawerOpen, type PlanMode, planHash, setPlanMode } from './planview';
 import { now } from './select';
 import { accept, afterAdd, openEvent, openQuick, SheetHost, sheet } from './sheets';
 import { Avatar, Icon, type IconName, ToastHost, toast } from './ui';
+import { UpdateBanner } from './version';
 import { PlanView } from './views/Plan';
 
 const ListsView = lazy(() => import('./views/Lists').then((m) => ({ default: m.ListsView })));
@@ -329,6 +330,7 @@ export function App() {
               <Avatar slot={p} />
             </span>
           </div>
+          <UpdateBanner />
           <NewKeysBanner />
           <Suspense fallback={<p class="nothing">Loading…</p>}>{content}</Suspense>
         </main>

@@ -3008,3 +3008,11 @@ fieldset.reminders > legend {
 .url .btn {
   flex: none;
 }
+
+/* "A new version is ready": the button sits at the end of the line. */
+.keybanner.update {
+  align-items: center;
+}
+.keybanner.update span {
+  flex: 1;
+}

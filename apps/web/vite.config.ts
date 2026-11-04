@@ -143,6 +143,12 @@ export default defineConfig(({ mode }) => {
       }),
     ],
     define: {
+      // Which build this is: the commit it was built from (GitHub Actions sets
+      // GITHUB_SHA) and the day, shown in Privacy so people can tell versions apart.
+      __BUILD__: JSON.stringify({
+        commit: (process.env.GITHUB_SHA ?? '').slice(0, 7) || 'dev',
+        date: new Date().toISOString().slice(0, 10),
+      }),
       __API_URL__: JSON.stringify(api),
       __TURNSTILE_SITE_KEY__: JSON.stringify(turnstileKey),
     },
