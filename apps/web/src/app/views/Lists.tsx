@@ -95,7 +95,7 @@ function AssignButton({ item }: { item: ItemEntry }) {
       onClick={() => update<'item'>(item.id, { assignee: next })}
     >
       <span
-        class={who === 'b' ? 'sq' : undefined}
+        class={who && who !== 'both' ? who : undefined}
         style={who && who !== 'both' ? { '--c': colorVar(who) } : undefined}
       >
         {who && who !== 'both' ? nameOf(who).charAt(0) : '+'}

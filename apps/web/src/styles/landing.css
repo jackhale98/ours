@@ -730,11 +730,6 @@
   background: var(--person-b);
 }
 
-/* In lists, the second person's circle is a rounded square, as in the app. */
-.ld-list .ld-av.b {
-  border-radius: 7px;
-}
-
 .ld-chev {
   color: var(--muted);
   display: inline-flex;

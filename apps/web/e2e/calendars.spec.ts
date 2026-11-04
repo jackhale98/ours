@@ -95,6 +95,15 @@ test('privacy with calendars has no axe violations', async ({ page }) => {
 });
 
 test('each person picks a colour and a shape, and everything follows', async ({ page }) => {
+  // Who's on a list item: a circle for both, until a shape is picked.
+  await page.goto('/#lists');
+  await page.getByRole('button', { name: /^Home/ }).first().click();
+  const badge = page
+    .getByRole('button', { name: /^Alex is on it/ })
+    .first()
+    .locator('span');
+  await expect(badge).toHaveCSS('border-radius', '50%');
+
   await page.goto('/#plan');
   await page.getByText('What the marks mean').click();
   // Both circles by default, so the key doesn't mention shapes.
@@ -131,6 +140,9 @@ test('each person picks a colour and a shape, and everything follows', async ({ 
       .map((n) => Number(n).toString(16).padStart(2, '0'))
       .join('')}`;
   expect(hex(await b.evaluate((el) => getComputedStyle(el).backgroundColor))).toBe(teal);
+  // Lists follow too.
+  await page.goto('/#lists');
+  await expect(badge).toHaveCSS('border-radius', '7px');
 });
 
 test('colours that colour blindness could confuse suggest different shapes', async ({ page }) => {

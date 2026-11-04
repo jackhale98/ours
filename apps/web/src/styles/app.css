@@ -937,8 +937,17 @@ textarea.txt {
   margin-top: 2px;
 }
 
-.who span.sq {
+/* Each person's shape (Privacy → Appearance), as on their plan marks. */
+:root[data-shape-a="square"] .who span.a,
+:root[data-shape-b="square"] .who span.b {
   border-radius: 7px;
+}
+:root[data-shape-a="diamond"] .who span.a,
+:root[data-shape-b="diamond"] .who span.b {
+  width: 34px;
+  height: 34px;
+  border-radius: 0;
+  clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%);
 }
 
 .listbar {
