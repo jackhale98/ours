@@ -41,7 +41,7 @@ import {
   signOut,
 } from '../../account/session';
 import { needsNewKeys } from '../../account/sync';
-import { nameOf, partner } from '../model';
+import { nameOf, partner, settings, updateSettings, viewer } from '../model';
 import { PhraseWords } from '../phrase';
 import { Icon, Switch, toast } from '../ui';
 
@@ -285,6 +285,16 @@ export function NotificationsCard() {
       )}
       {state === 'on' && (
         <>
+          <Switch
+            checked={settings.value.notify_notes?.[viewer.value] !== false}
+            onChange={(on) =>
+              updateSettings({
+                notify_notes: { ...settings.value.notify_notes, [viewer.value]: on },
+              })
+            }
+            label={`When ${nameOf(partner.value)} adds a note to a plan`}
+            hint="Plans they ask you about, and their answers, always come through."
+          />
           <div class="field">
             <label for="quiet">Quiet hours</label>
             <select

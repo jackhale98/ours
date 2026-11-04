@@ -91,3 +91,16 @@ describe('add to my calendar', () => {
     expect(platform('Mozilla/5.0 (Linux; Android 15; Pixel 9)', 5)).toBe('android');
   });
 });
+
+describe('places open in maps', () => {
+  it('goes to the maps app for each platform, with only the place in the address', async () => {
+    const { mapsHref } = await import('./place');
+    expect(mapsHref('Rosa’s, Hackney', 'ios')).toBe(
+      `https://maps.apple.com/?q=${encodeURIComponent('Rosa’s, Hackney')}`,
+    );
+    expect(mapsHref('Rosa’s, Hackney', 'android')).toMatch(/^geo:0,0\?q=Rosa/);
+    expect(mapsHref('a&b=c', 'other')).toBe(
+      'https://www.google.com/maps/search/?api=1&query=a%26b%3Dc',
+    );
+  });
+});

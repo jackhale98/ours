@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 /**
  * What the partner is told, and when. Only things that need an answer or
- * answer a question: proposals, yes/no, and notes on a shared plan. Private
- * plans never notify. Text is sealed on this device (account/notify).
+ * answer a question: proposals, yes/no, and notes on a shared plan (unless
+ * the partner turned those off). Private plans never notify. Text is sealed on this device (account/notify).
  */
 import { notifyPartner } from '../account/notify';
-import { findEntry, nameOf, viewer } from './model';
+import { findEntry, nameOf, partner, settings, viewer } from './model';
 import { whenText } from './select';
 
 function eventOf(id: string) {
@@ -44,6 +44,8 @@ export function noticeAnswer(id: string, yes: boolean): void {
 export function noticeNote(id: string, text: string): void {
   const d = eventOf(id);
   if (!d) return;
+  // The partner chose not to hear about notes (Privacy → Notifications).
+  if (settings.value.notify_notes?.[partner.value] === false) return;
   notifyPartner({
     title: `${nameOf(viewer.value)} added a note: ${d.title}`,
     body: text,

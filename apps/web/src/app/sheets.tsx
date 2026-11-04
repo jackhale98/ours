@@ -22,6 +22,7 @@ import {
   viewer,
 } from './model';
 import { noticeAnswer, noticeNote, noticeProposal } from './notices';
+import { PlaceLink } from './place';
 import { type Draft, PlanForm, REPEAT_CHOICES } from './planform';
 import { ReminderPicker } from './reminderpicker';
 import { remindersOf, withDefaultReminders, withReminders } from './reminders';
@@ -431,12 +432,7 @@ function EventSheet({ id, occ }: { id: string; occ: string | null }) {
       </div>
       <h2 id="sh-title">{e.title}</h2>
       <p class="when">{day ? planWhen({ ...dayTimes(e, day), all_day: e.all_day }) : when}</p>
-      {e.location && (
-        <p class="loc">
-          <Icon name="pin" size={15} />
-          {e.location}
-        </p>
-      )}
+      {e.location && <PlaceLink place={e.location} />}
       {e.rrule && (
         <p class="loc">
           <Icon name="repeat" size={15} />
@@ -607,12 +603,7 @@ function ImportSheet({ row, date }: { row: Row; date: string }) {
       </div>
       <h2 id="sh-title">{row.title}</h2>
       <p class="when">{whenText(date, row.allDay, row.start, row.end)}</p>
-      {row.location && (
-        <p class="loc">
-          <Icon name="pin" size={15} />
-          {row.location}
-        </p>
-      )}
+      {row.location && <PlaceLink place={row.location} />}
       <p class="note">
         <Icon name="cal" size={15} />
         <span>

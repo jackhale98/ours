@@ -280,6 +280,14 @@ export const SettingsData = v.strictObject({
   ),
   /** Which shared check list the weekly check-in uses for chores. */
   chores_list: v.optional(v.nullable(RefId)),
+  /**
+   * `notify_notes[x]` false: x doesn't want a notification when the partner
+   * adds a note to a plan. Checked by the sender's device (phones must show
+   * every push they get, so the receiver can't quietly drop one).
+   */
+  notify_notes: v.optional(
+    v.strictObject({ a: v.optional(v.boolean()), b: v.optional(v.boolean()) }),
+  ),
 });
 
 /**

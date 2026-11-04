@@ -251,3 +251,18 @@ test('the service worker hands out a calendar file once, without the network', a
   });
   expect(got).toEqual([200, 'text/calendar', 'BEGIN:VCALENDAR', 404]);
 });
+
+test('a plan’s place opens in maps', async ({ page }) => {
+  await page
+    .getByRole('button', { name: /Dentist/ })
+    .first()
+    .click();
+  const link = page
+    .getByRole('dialog', { name: 'Dentist' })
+    .getByRole('link', { name: /open in maps/ });
+  await expect(link).toHaveAttribute(
+    'href',
+    /^(https:\/\/maps\.apple\.com\/\?q=|geo:0,0\?q=|https:\/\/www\.google\.com\/maps\/search\/\?api=1&query=)Dr/,
+  );
+  await expect(link).toHaveAttribute('rel', 'noopener noreferrer');
+});
