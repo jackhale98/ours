@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 import { env } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
-import { call, couple, outbox, randomB64 } from './helpers';
+import { call, couple, outbox, randomB64, signIn, uniqueEmail } from './helpers';
 
 const wrapped = () => ({ nonce: randomB64(24), ciphertext: randomB64(200) });
 const copy = (space = 1, personal = 1) => ({
@@ -135,6 +135,36 @@ describe('passkey unlock (ADR 0015)', () => {
       listed.json.passkeys.map((p: { id: string; prf: boolean | null }) => [p.id, p.prf]),
     );
     expect(prf).toEqual({ [yes]: true, [no]: false, [unknown]: null });
+  });
+
+  it('drops the copies when the account joins another space (they lack its keys)', async () => {
+    const kim = await signIn(uniqueEmail('kim'));
+    const own = (await call('/spaces', { token: kim.token, body: {} })).json.id as string;
+    const pk = `pk-join-${Date.now()}-aaaaaaaaaa`;
+    await addPasskey(kim.userId, pk);
+    await confirmWith(kim.userId, pk);
+    expect((await put(kim.token, pk, copy())).status).toBe(200);
+    // Jo invites Kim, who joins with the same account, then leaves the old space.
+    const jo = await signIn(uniqueEmail('jo'));
+    const theirs = (await call('/spaces', { token: jo.token, body: {} })).json.id as string;
+    const inv = await call('/invites', {
+      token: jo.token,
+      body: {
+        kind: 'partner',
+        space_id: theirs,
+        wrapped: { nonce: randomB64(24), ciphertext: randomB64(120) },
+      },
+    });
+    expect((await call(`/invites/${inv.json.id}`, { token: kim.token })).status).toBe(200);
+    expect(
+      (await call(`/invites/${inv.json.id}/accept`, { token: kim.token, body: {} })).status,
+    ).toBe(200);
+    expect((await call('/keys/unlocks', { token: kim.token })).json.unlocks).toEqual([]);
+    expect(
+      (await call(`/spaces/${own}/membership`, { token: kim.token, method: 'DELETE' })).status,
+    ).toBe(200);
+    const me = await call('/me', { token: kim.token });
+    expect(me.json.spaces.map((x: { space_id: string }) => x.space_id)).toEqual([theirs]);
   });
 
   it('needs a confirmation from the last ten minutes (L2)', async () => {

@@ -240,6 +240,13 @@ invites.post('/:id/accept', async (c) => {
             AND (SELECT COUNT(*) FROM memberships WHERE user_id = ?2) < ?4`,
       ).bind(row.space_id, uid, now, num(c.env.MAX_SPACES_PER_USER, 3)),
     );
+    // Someone joining with an existing account: their passkey unlock copies
+    // (ADR 0015) hold keys without this space's, so they're set up again.
+    statements.push(
+      c.env.DB.prepare(
+        'DELETE FROM key_unlocks WHERE user_id = ?1 AND EXISTS (SELECT 1 FROM memberships WHERE space_id = ?2 AND user_id = ?1)',
+      ).bind(uid, row.space_id),
+    );
   }
   const results = await c.env.DB.batch(statements);
   if (row.kind === 'partner' && !results[0]?.meta.changes) {

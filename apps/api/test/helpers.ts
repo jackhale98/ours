@@ -70,9 +70,17 @@ export async function signIn(email: string, opts: { invite?: string; acceptTerms
     },
   });
   if (start.status !== 200) throw new Error(`start ${start.status}`);
-  const mail = await nextMail(before);
-  if (!mail) throw new Error('no email sent');
-  const token = /#signin=([A-Za-z0-9_-]{43})/.exec(mail.text)?.[1];
+  // The sign-in email to this address: other tests' notices may arrive meanwhile.
+  let token: string | undefined;
+  const deadline = Date.now() + 500;
+  for (let i = before; !token && Date.now() < deadline; ) {
+    const mail = await nextMail(i, deadline - Date.now());
+    if (!mail) break;
+    if (mail.to === email.trim().toLowerCase())
+      token = /#signin=([A-Za-z0-9_-]{43})/.exec(mail.text)?.[1];
+    i++;
+  }
+  if (!token) throw new Error('no email sent');
   const verify = await call('/auth/email/verify', {
     body: { token, device_label: 'Test', ...(opts.invite ? { invite: opts.invite } : {}) },
   });

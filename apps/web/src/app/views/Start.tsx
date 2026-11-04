@@ -20,6 +20,7 @@ import {
   createSpace,
   currentSafetyCode,
   invitePartner,
+  joinedWithAccount,
   me,
   pendingInvite,
   restoreFromPhrase,
@@ -536,6 +537,15 @@ export function StartView({ onFinished }: { onFinished: () => void }) {
   const [step, setStep] = useState<Step>('auto');
   const [joined, setJoined] = useState(false);
   const state = account.value;
+  // Joined a partner with an existing account: a new recovery phrase (the
+  // old one doesn't hold the new space's keys), then compare safety codes.
+  const rejoined = joinedWithAccount.value;
+  useEffect(() => {
+    if (!rejoined) return;
+    joinedWithAccount.value = false;
+    setJoined(true);
+    setStep('recovery');
+  }, [rejoined]);
 
   let body: preact.ComponentChildren;
   if (!HAS_API) {

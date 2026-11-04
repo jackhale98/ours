@@ -32,6 +32,8 @@ export interface Env {
   RL_AUTH?: RateLimitBinding;
   /** Quotas (strings because they come from vars). */
   MAX_SPACES_PER_USER?: string;
+  /** Sign-in emails per client network an hour (default 10; raised only for local tests). */
+  EMAIL_START_PER_IP?: string;
   MAX_DEVICES_PER_USER?: string;
   MAX_SPACE_BYTES?: string;
   MAX_PUSHES_PER_MINUTE?: string;

@@ -15,7 +15,7 @@ import {
 import { Hono } from 'hono';
 import * as v from 'valibot';
 import { type AppEnv, createSession, endSession, requireAuth } from '../auth/session';
-import type { Env } from '../env';
+import { type Env, num } from '../env';
 import { bytesOf, hashToken, newId, newToken } from '../lib/crypto';
 import { sendEmail } from '../lib/email';
 import { body, HttpError } from '../lib/http';
@@ -161,7 +161,7 @@ auth.post('/email/start', async (c) => {
   );
   // Bot check before anything is counted, so unsolved requests can't burn limits.
   await verifyTurnstile(c.env, input.turnstile, c.req.header('CF-Connecting-IP'));
-  await rateLimit(c.env, `email-start:ip:${clientNet(c)}`, 10, 3600);
+  await rateLimit(c.env, `email-start:ip:${clientNet(c)}`, num(c.env.EMAIL_START_PER_IP, 10), 3600);
   // Same answer, same timing, either way: the lookup and email happen after the response.
   c.executionCtx.waitUntil(
     issueLink(c.env, input).catch(() => {

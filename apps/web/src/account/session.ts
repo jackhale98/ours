@@ -36,7 +36,7 @@ import type { Slot } from '../app/model';
 import { put, settings, store, updateSettings } from '../app/model';
 import { HAS_API } from '../config';
 import { ApiError, api, setToken } from './api';
-import { kvGet, kvSet, wipe } from './db';
+import { db, kvGet, kvSet, wipe } from './db';
 import { feedOn, newFeedLink, setPartnerPresent, startFeeds, stopFeeds } from './feeds';
 import { dropStaged, loadRing, saveRing } from './keystore';
 import {
@@ -197,9 +197,25 @@ async function refresh(session: Session): Promise<void> {
     if (!cached) throw err;
     info = cached;
   }
+  // Joined a partner with this account, and the old space's leave didn't
+  // get through: finish it, and use the partner's space meanwhile.
+  const leaving = await kvGet<string>('leaving-space');
+  if (leaving && fresh) {
+    if (info.spaces.some((x) => x.space_id === leaving) && info.spaces.length > 1) {
+      try {
+        await api(`/spaces/${encodeURIComponent(leaving)}/membership`, { method: 'DELETE' });
+        info = await api<MeResponse>('/me');
+      } catch {
+        // Tried again next time.
+      }
+    }
+    // Left, or the join never happened (it's the only space): nothing to do.
+    if (!info.spaces.some((x) => x.space_id === leaving) || info.spaces.length === 1)
+      await kvSet('leaving-space', null);
+  }
   me.value = info;
   await kvSet('me', info);
-  const space = info.spaces[0];
+  const space = info.spaces.find((x) => x.space_id !== leaving) ?? info.spaces[0];
   if (!space) {
     account.value = { status: 'needs-profile', session };
     return;
@@ -548,7 +564,12 @@ export async function acceptInvite(name: string): Promise<string | null> {
   setPendingInvite(null);
   await refresh(state.session);
   await syncNow();
-  // Add myself to the shared settings (merged field-wise with the partner's).
+  joinSettings(name, state.session.user.id);
+  return payload.inviter_name ?? null;
+}
+
+/** Adds the joiner to the shared settings (merged field-wise with the partner's). */
+function joinSettings(name: string, userId: string): void {
   const members = settings.value.members ?? {};
   const settingsEntry = store.value.entries.find(
     (e) => e.rec.kind === 'settings' && e.scope === 'space',
@@ -557,13 +578,12 @@ export async function acceptInvite(name: string): Promise<string | null> {
     'settings',
     {
       ...settings.value,
-      members: { ...members, b: { name, color: COLORS.b, user_id: state.session.user.id } },
+      members: { ...members, b: { name, color: COLORS.b, user_id: userId } },
       // Joining doesn't agree to anything a former partner had agreed to (N5).
       feed_share_busy: { ...settings.value.feed_share_busy, b: false },
     },
     settingsEntry ? { id: settingsEntry.id } : {},
   );
-  return payload.inviter_name ?? null;
 }
 
 /** New device: restore keys from the recovery phrase. */
@@ -1079,6 +1099,83 @@ export class JoinInsteadError extends Error {
 }
 /** The invite such a person could start over to join (shown as a prompt). */
 export const joinInsteadOffer = signal<string | null>(null);
+
+/** Whether this account's space holds nothing but its settings (so leaving it loses nothing). */
+export function ownSpaceEmpty(): boolean {
+  return store.value.entries.every((e) => e.rec.deleted || e.rec.kind === 'settings');
+}
+
+/** Set after joining with this account: the start flow asks for a new recovery phrase. */
+export const joinedWithAccount = signal(false);
+
+/**
+ * Joins a partner's space with this account, leaving its own empty space.
+ * The account, its devices, passkeys and personal key stay. The new space's
+ * keys come from the invite, as for any joiner; the old space's are dropped.
+ * The recovery phrase's backup doesn't hold the new keys, so a new phrase is
+ * asked for next; passkey unlock copies are dropped by the server and set up
+ * again; other devices get the new keys with a device link.
+ */
+export async function joinWithThisAccount(fragment: string): Promise<void> {
+  const state = account.value;
+  if (state.status !== 'ready' || !ring || state.partnerJoined) throw new Error('Not available');
+  if (!ownSpaceEmpty())
+    throw new Error('Your space has plans or lists in it. Joining needs an empty space for now.');
+  const r = ring;
+  const old = state.spaceId;
+  const name = settings.value.members?.[state.slot]?.name ?? '';
+  const { inviteId, secret } = parseInviteFragment(fragment);
+  const inv = await api<{
+    kind: string;
+    space_id: string;
+    wrapped: { nonce: string; ciphertext: string };
+  }>(`/invites/${inviteId}`);
+  if (inv.kind !== 'partner') throw new Error('That isn’t an invite to join a space.');
+  const payload = openPartnerInvite(secret, inv.space_id, {
+    nonce: fromBase64Url(inv.wrapped.nonce),
+    ciphertext: fromBase64Url(inv.wrapped.ciphertext),
+  });
+  for (const k of payload.keys) r.addSpaceKey(payload.space_id, k);
+  await saveRing(r);
+  // Noted first, so the old space is left even if an answer below is lost.
+  await kvSet('leaving-space', old);
+  try {
+    await api(`/invites/${inviteId}/accept`, { body: {} });
+  } catch (err) {
+    // Refused (a full space, too many spaces): nothing changed, so stay.
+    // Without an answer it may have gone through: refresh sorts it out.
+    if (err instanceof ApiError) {
+      await kvSet('leaving-space', null);
+      r.removeSpace(payload.space_id);
+      await saveRing(r);
+    }
+    throw err;
+  }
+  setPendingInvite(null);
+  await api(`/spaces/${encodeURIComponent(old)}/membership`, { method: 'DELETE' }).catch(() => {
+    // Finished on the next start (see refresh).
+  });
+  // This device moves to the new space: the old one's local copy goes.
+  stopNotifications();
+  stopFeeds();
+  engine?.stop();
+  engine = null;
+  const d = await db();
+  await Promise.all([d.clear('envelopes'), d.clear('outbox')]);
+  r.removeSpace(old);
+  await saveRing(r);
+  // The backup holds the old keys: a new phrase is asked for next.
+  phraseStale.value = true;
+  await kvSet('phrase-stale', true);
+  await kvSet('unlocks-made', {});
+  unlocksMadeHere.value = {};
+  passkeyUnlocks.value = [];
+  await refresh(state.session);
+  await syncNow();
+  joinSettings(name, state.session.user.id);
+  joinedWithAccount.value = true;
+  joinInsteadOffer.value = null;
+}
 
 /**
  * Starts over to join a partner's space: deletes this account (alone in its

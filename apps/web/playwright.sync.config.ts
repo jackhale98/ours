@@ -29,7 +29,7 @@ export default defineConfig({
       command: [
         `rm -rf ${STATE}`,
         `npx wrangler d1 migrations apply ours --local --persist-to ${STATE}`,
-        `npx wrangler dev --port 8788 --local --persist-to ${STATE} --var EMAIL_PROVIDER:dev-outbox --var ALLOWED_ORIGINS:${WEB} --var APP_URL:${WEB}/ --var RP_ID:localhost --var VAPID_PUBLIC_KEY:${VAPID_PUBLIC} --var VAPID_PRIVATE_KEY:${VAPID_PRIVATE}`,
+        `npx wrangler dev --port 8788 --local --persist-to ${STATE} --var EMAIL_PROVIDER:dev-outbox --var EMAIL_START_PER_IP:50 --var ALLOWED_ORIGINS:${WEB} --var APP_URL:${WEB}/ --var RP_ID:localhost --var VAPID_PUBLIC_KEY:${VAPID_PUBLIC} --var VAPID_PRIVATE_KEY:${VAPID_PRIVATE}`,
       ].join(' && '),
       url: `${API}/health`,
       env: { WRANGLER_SEND_METRICS: 'false', CI: '1' },

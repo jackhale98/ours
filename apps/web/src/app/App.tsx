@@ -8,6 +8,7 @@ import {
   account,
   consumeSignInLink,
   joinInsteadOffer,
+  joinWithThisAccount,
   keyLinkOffer,
   newKeysFrom,
   phraseKept,
@@ -276,6 +277,19 @@ function JoinInsteadPrompt() {
   const made = store.value.entries.filter(
     (e) => !e.rec.deleted && e.rec.kind !== 'settings',
   ).length;
+  const run = async (fn: () => Promise<void>, done: string) => {
+    setBusy(true);
+    try {
+      await fn();
+      startRequested.value = true;
+      location.hash = 'start';
+      toast(done);
+    } catch (err) {
+      toast(err instanceof Error ? err.message : 'That didn’t work. Try again.');
+    } finally {
+      setBusy(false);
+    }
+  };
   return (
     <section class="keybanner keylink" aria-labelledby="ji-h">
       <Icon name="lock" size={16} />
@@ -283,41 +297,48 @@ function JoinInsteadPrompt() {
         <h2 class="h3" id="ji-h">
           Join your partner’s space?
         </h2>
-        <p>
-          This is an invite to join your partner’s space, but you’ve already made a space of your
-          own. To join theirs, start over: this deletes your account and your space, then you sign
-          in again with the same email and the invite is used.
-        </p>
-        <p class="small">
-          {made
-            ? `Your space has ${made} ${made === 1 ? 'thing' : 'things'} in it. They’ll be deleted.`
-            : 'Your space is empty, so nothing is lost.'}
-        </p>
+        {made === 0 ? (
+          <p>
+            This is an invite to your partner’s space. Your own space is empty, so you can join with
+            this account: your sign-in, passkeys and devices stay, and your empty space is removed.
+            Next you’ll save a new recovery phrase, and your other devices will need a device link.
+          </p>
+        ) : (
+          <p>
+            This is an invite to your partner’s space, but your own space has {made}{' '}
+            {made === 1 ? 'thing' : 'things'} in it. Joining with this account needs an empty space
+            for now: delete {made === 1 ? 'it' : 'them'} first, or start over (this deletes your
+            account and everything in it, then you sign in again to join).
+          </p>
+        )}
         <div class="btnrow">
-          <button
-            type="button"
-            class="btn sm primary"
-            disabled={busy}
-            onClick={async () => {
-              if (!armed) {
-                setArmed(true);
-                return;
+          {made === 0 ? (
+            <button
+              type="button"
+              class="btn sm primary"
+              disabled={busy}
+              onClick={() =>
+                void run(() => joinWithThisAccount(link), 'You’ve joined. Save your new phrase.')
               }
-              setBusy(true);
-              try {
-                await startOverToJoin(link);
-                startRequested.value = true;
-                location.hash = 'start';
-                toast('Done. Sign in again to join your partner.');
-              } catch (err) {
-                toast(err instanceof Error ? err.message : 'That didn’t work. Try again.');
-              } finally {
-                setBusy(false);
-              }
-            }}
-          >
-            {armed ? 'Tap again: delete and start over' : 'Start over and join'}
-          </button>
+            >
+              Join with this account
+            </button>
+          ) : (
+            <button
+              type="button"
+              class="btn sm"
+              disabled={busy}
+              onClick={() => {
+                if (!armed) {
+                  setArmed(true);
+                  return;
+                }
+                void run(() => startOverToJoin(link), 'Done. Sign in again to join your partner.');
+              }}
+            >
+              {armed ? 'Tap again: delete and start over' : 'Start over and join'}
+            </button>
+          )}
           <button
             type="button"
             class="btn sm ghost"
