@@ -2,11 +2,12 @@
 /** App shell: rail (desktop), tab bar + FAB (mobile), hash routing, sheets, toasts. */
 import { signal } from '@preact/signals';
 import { lazy, Suspense } from 'preact/compat';
-import { useEffect } from 'preact/hooks';
+import { useEffect, useState } from 'preact/hooks';
 import { kvGet, kvSet } from '../account/db';
 import {
   account,
   consumeSignInLink,
+  joinInsteadOffer,
   keyLinkOffer,
   newKeysFrom,
   phraseKept,
@@ -15,6 +16,7 @@ import {
   rotation,
   rotationLeft,
   setPendingInvite,
+  startOverToJoin,
   syncNow,
 } from '../account/session';
 import { needsNewKeys, syncStatus } from '../account/sync';
@@ -22,7 +24,7 @@ import { LogoMark } from '../Logo';
 import './appearance';
 import { waiting } from './inbox';
 import { ItemSheetHost } from './itemsheet';
-import { findEntry, mode, nameOf, names, partner, viewer } from './model';
+import { findEntry, mode, nameOf, names, partner, store, viewer } from './model';
 import { drawerOpen, type PlanMode, planHash, setPlanMode } from './planview';
 import { now } from './select';
 import { accept, afterAdd, openEvent, openQuick, SheetHost, sheet } from './sheets';
@@ -261,6 +263,77 @@ function KeyLinkPrompt() {
   );
 }
 
+/**
+ * A partner's invite, opened by someone who already made a space of their own
+ * with nobody else in it: usually because the invite got lost on the way
+ * through email sign-in. Offers to start over and join instead.
+ */
+function JoinInsteadPrompt() {
+  const link = joinInsteadOffer.value;
+  const [armed, setArmed] = useState(false);
+  const [busy, setBusy] = useState(false);
+  if (!link) return null;
+  const made = store.value.entries.filter(
+    (e) => !e.rec.deleted && e.rec.kind !== 'settings',
+  ).length;
+  return (
+    <section class="keybanner keylink" aria-labelledby="ji-h">
+      <Icon name="lock" size={16} />
+      <div>
+        <h2 class="h3" id="ji-h">
+          Join your partner’s space?
+        </h2>
+        <p>
+          This is an invite to join your partner’s space, but you’ve already made a space of your
+          own. To join theirs, start over: this deletes your account and your space, then you sign
+          in again with the same email and the invite is used.
+        </p>
+        <p class="small">
+          {made
+            ? `Your space has ${made} ${made === 1 ? 'thing' : 'things'} in it. They’ll be deleted.`
+            : 'Your space is empty, so nothing is lost.'}
+        </p>
+        <div class="btnrow">
+          <button
+            type="button"
+            class="btn sm primary"
+            disabled={busy}
+            onClick={async () => {
+              if (!armed) {
+                setArmed(true);
+                return;
+              }
+              setBusy(true);
+              try {
+                await startOverToJoin(link);
+                startRequested.value = true;
+                location.hash = 'start';
+                toast('Done. Sign in again to join your partner.');
+              } catch (err) {
+                toast(err instanceof Error ? err.message : 'That didn’t work. Try again.');
+              } finally {
+                setBusy(false);
+              }
+            }}
+          >
+            {armed ? 'Tap again: delete and start over' : 'Start over and join'}
+          </button>
+          <button
+            type="button"
+            class="btn sm ghost"
+            onClick={() => {
+              joinInsteadOffer.value = null;
+              toast('Not used. Keep the link if you change your mind.');
+            }}
+          >
+            Keep my space
+          </button>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 /** A rotation that's waiting on the server, or still re-encrypting (review 0005, H2 and M2). */
 function RotationBanner() {
   const r = rotation.value;
@@ -473,6 +546,7 @@ export function App() {
           </div>
           <UpdateBanner />
           <KeyLinkPrompt />
+          <JoinInsteadPrompt />
           <NewKeysBanner />
           <RotationBanner />
           <PhraseBanner />

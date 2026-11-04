@@ -4,6 +4,8 @@ import '../styles/app.css';
 import {
   account,
   consumeSignInLink,
+  JoinInsteadError,
+  joinInsteadOffer,
   keyLinkOffer,
   openKeyLink,
   pendingInvite,
@@ -46,7 +48,8 @@ export async function mountApp(root: HTMLElement): Promise<void> {
       }
     } catch (err) {
       setPendingInvite(null);
-      toast(err instanceof Error ? err.message : 'That link couldn’t be used.');
+      if (err instanceof JoinInsteadError) joinInsteadOffer.value = link;
+      else toast(err instanceof Error ? err.message : 'That link couldn’t be used.');
     }
   }
 

@@ -622,3 +622,72 @@ test('a passkey can sign in and unlock the keys, without a link or the phrase', 
   for (const b of sent) expect(b).not.toMatch(/"prf"|"results"/);
   await page.context().close();
 });
+
+test('an invite survives the sign-in link opening in a new tab', async ({ browser }) => {
+  const stamp = Date.now();
+  const jo = await newPage(browser);
+  await jo.goto('/#start');
+  await signUp(jo, `jo2-${stamp}@example.com`);
+  await jo.getByRole('textbox', { name: 'Your first name' }).fill('Jo');
+  await jo.getByRole('button', { name: 'Create our space' }).click();
+  await recoveryPhrase(jo);
+  const invite = (await jo.locator('.url code').textContent()) ?? '';
+
+  // Kim opens the invite, asks for a sign-in link, and the email app opens
+  // it in a new tab (or the browser instead of the installed app).
+  const kim = await newPage(browser);
+  await kim.goto(invite);
+  const kimEmail = `kim-${stamp}@example.com`;
+  await expect(kim.getByRole('heading', { name: 'Join your partner' })).toBeVisible();
+  await kim.getByRole('textbox', { name: 'Email' }).fill(kimEmail);
+  await kim.getByRole('checkbox', { name: /16 or older/ }).check();
+  await kim.getByRole('button', { name: 'Email me a link' }).click();
+  await expect(kim.getByRole('heading', { name: 'Check your email' })).toBeVisible();
+  const link = await magicLink(kim, kimEmail);
+  const tab = await kim.context().newPage();
+  await tab.goto(link);
+  await expect(tab.getByRole('heading', { name: 'Join the space' })).toBeVisible();
+  await tab.getByRole('textbox', { name: 'Your first name' }).fill('Kim');
+  await tab.getByRole('button', { name: 'Join' }).click();
+  await recoveryPhrase(tab);
+  await expect(tab.getByRole('heading', { name: 'Compare your safety code' })).toBeVisible();
+});
+
+test('someone who made their own space by mistake can start over and join', async ({ browser }) => {
+  const stamp = Date.now();
+  const pat = await newPage(browser);
+  await pat.goto('/#start');
+  await signUp(pat, `pat-${stamp}@example.com`);
+  await pat.getByRole('textbox', { name: 'Your first name' }).fill('Pat');
+  await pat.getByRole('button', { name: 'Create our space' }).click();
+  await recoveryPhrase(pat);
+  const invite = (await pat.locator('.url code').textContent()) ?? '';
+
+  // Lee signs up without the invite and makes a space of their own.
+  const lee = await newPage(browser);
+  const leeEmail = `lee-${stamp}@example.com`;
+  await lee.goto('/#start');
+  await signUp(lee, leeEmail);
+  await lee.getByRole('textbox', { name: 'Your first name' }).fill('Lee');
+  await lee.getByRole('button', { name: 'Create our space' }).click();
+  await recoveryPhrase(lee);
+  await lee.getByRole('button', { name: 'Do this later' }).click();
+  await lee.getByRole('button', { name: 'Not now' }).click();
+  await expect(lee.getByRole('heading', { name: 'This week', exact: true })).toBeVisible();
+
+  // Then opens Pat's invite: offered to start over and join, not a dead end.
+  await lee.goto(invite);
+  const prompt = lee.locator('section[aria-labelledby="ji-h"]');
+  await expect(prompt).toContainText('Join your partner’s space?');
+  await prompt.getByRole('button', { name: 'Start over and join' }).click();
+  await prompt.getByRole('button', { name: 'Tap again: delete and start over' }).click();
+  await signUp(lee, leeEmail);
+  await lee.getByRole('textbox', { name: 'Your first name' }).fill('Lee');
+  await lee.getByRole('button', { name: 'Join' }).click();
+  await recoveryPhrase(lee);
+  await expect(lee.getByRole('heading', { name: 'Compare your safety code' })).toBeVisible();
+  await expect(pat.getByRole('heading', { name: 'Compare your safety code' })).toBeVisible({
+    timeout: 20_000,
+  });
+  expect(await pat.locator('.code').textContent()).toBe(await lee.locator('.code').textContent());
+});

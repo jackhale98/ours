@@ -112,9 +112,29 @@ let ring: KeyRing | null = null;
 const PENDING_INVITE = 'ours-pending-invite';
 const COLORS: Record<Slot, string> = { a: '#2b6e8c', b: '#b3486a' };
 
+/**
+ * An opened invite or device link, kept until it's used. It's kept in
+ * localStorage, not just this tab, because the email sign-in link often opens
+ * in a new tab or the browser instead of the installed app: kept per tab, the
+ * invite was lost and the partner made a space of their own. Links expire on
+ * the server within a day; a kept one is dropped after two.
+ */
+const PENDING_TTL_MS = 2 * 24 * 60 * 60 * 1000;
 export function pendingInvite(): string | null {
   try {
-    return sessionStorage.getItem(PENDING_INVITE);
+    const tab = sessionStorage.getItem(PENDING_INVITE);
+    if (tab) return tab;
+    const raw = localStorage.getItem(PENDING_INVITE);
+    if (!raw) return null;
+    const kept = JSON.parse(raw) as { fragment?: unknown; at?: unknown };
+    if (
+      typeof kept.fragment === 'string' &&
+      typeof kept.at === 'number' &&
+      Date.now() - kept.at < PENDING_TTL_MS
+    )
+      return kept.fragment;
+    localStorage.removeItem(PENDING_INVITE);
+    return null;
   } catch {
     return null;
   }
@@ -125,6 +145,13 @@ export function setPendingInvite(fragment: string | null): void {
     else sessionStorage.removeItem(PENDING_INVITE);
   } catch {
     // ignore
+  }
+  try {
+    if (fragment)
+      localStorage.setItem(PENDING_INVITE, JSON.stringify({ fragment, at: Date.now() }));
+    else localStorage.removeItem(PENDING_INVITE);
+  } catch {
+    // Private mode: kept in this tab only.
   }
 }
 const pendingInviteId = () => {
@@ -1044,6 +1071,29 @@ export async function markCompared(): Promise<void> {
   await kvSet(comparedKey(state.spaceId), v);
 }
 
+/** A partner invite opened by someone set up in a space of their own, with no partner yet. */
+export class JoinInsteadError extends Error {
+  constructor() {
+    super('That’s an invite to join a space, and you have a space of your own.');
+  }
+}
+/** The invite such a person could start over to join (shown as a prompt). */
+export const joinInsteadOffer = signal<string | null>(null);
+
+/**
+ * Starts over to join a partner's space: deletes this account (alone in its
+ * space, so nothing is shared yet) and keeps the invite, so signing in again
+ * joins the partner. The same as Delete account, then opening the invite.
+ */
+export async function startOverToJoin(fragment: string): Promise<void> {
+  const state = account.value;
+  if (state.status !== 'ready' || state.partnerJoined) throw new Error('Not available');
+  await api('/me', { method: 'DELETE' });
+  await signOut(false);
+  setPendingInvite(fragment);
+  joinInsteadOffer.value = null;
+}
+
 export interface KeyLinkOffer {
   kind: 'rekey' | 'device';
   /** The safety code the new space key gives, to compare before using it (M4). */
@@ -1065,10 +1115,14 @@ export async function openKeyLink(fragment: string): Promise<KeyLinkOffer> {
   const meta = await api<{ kind: 'partner' | 'device' | 'rekey'; space_id: string | null }>(
     `/invites/${inviteId}/kind`,
   );
-  if (meta.kind === 'partner')
+  if (meta.kind === 'partner') {
+    // Someone who made their own space by mistake (often because the invite
+    // was lost on the way through email sign-in) can start over and join.
+    if (!state.partnerJoined) throw new JoinInsteadError();
     throw new KeyLinkError(
-      'That’s an invite for someone joining a space, and this device is already set up. Nothing was used.',
+      'That’s an invite for someone joining a space, and you’re already in one with your partner. Nothing was used.',
     );
+  }
   if (meta.kind === 'rekey' && meta.space_id !== state.spaceId)
     throw new KeyLinkError('That link isn’t a key update for this space.');
   const info = await api<MeResponse>('/me');
