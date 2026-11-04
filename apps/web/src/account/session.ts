@@ -30,7 +30,7 @@ import {
 } from '@ours/core/crypto';
 import { signal } from '@preact/signals';
 import type { Slot } from '../app/model';
-import { put, settings, store } from '../app/model';
+import { put, settings, store, updateSettings } from '../app/model';
 import { HAS_API } from '../config';
 import { ApiError, api, setToken } from './api';
 import { kvGet, kvSet, wipe } from './db';
@@ -421,6 +421,11 @@ export async function invitePartner(): Promise<string> {
   const state = account.value;
   if (state.status !== 'ready' || !ring) throw new Error('Not ready');
   const name = settings.value.members?.[state.slot]?.name;
+  // Whoever joins next starts unasked: a former partner's feed consent
+  // doesn't pass to them (review 0004 re-check, N5).
+  const other = state.slot === 'a' ? 'b' : 'a';
+  const shares = settings.value.feed_share_busy;
+  if (shares?.[other]) updateSettings({ feed_share_busy: { ...shares, [other]: false } });
   const created = createPartnerInvite({
     space_id: state.spaceId,
     keys: ring.spaceKeys(state.spaceId),
@@ -471,6 +476,8 @@ export async function acceptInvite(name: string): Promise<string | null> {
     {
       ...settings.value,
       members: { ...members, b: { name, color: COLORS.b, user_id: state.session.user.id } },
+      // Joining doesn't agree to anything a former partner had agreed to (N5).
+      feed_share_busy: { ...settings.value.feed_share_busy, b: false },
     },
     settingsEntry ? { id: settingsEntry.id } : {},
   );

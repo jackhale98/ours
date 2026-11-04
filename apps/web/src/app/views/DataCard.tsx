@@ -50,6 +50,7 @@ export function DataCard() {
     summary: ImportSummary;
     apply: () => Promise<number>;
   } | null>(null);
+  const [importing, setImporting] = useState(false);
   const file = useRef<HTMLInputElement>(null);
   const stamp = today.value;
 
@@ -191,7 +192,10 @@ export function DataCard() {
             <button
               type="button"
               class="btn sm primary"
+              disabled={importing}
               onClick={async () => {
+                if (importing) return;
+                setImporting(true);
                 try {
                   const n = await pending.apply();
                   setPending(null);
@@ -200,6 +204,8 @@ export function DataCard() {
                   toast(
                     err instanceof ImportError ? err.message : 'That file couldn’t be imported.',
                   );
+                } finally {
+                  setImporting(false);
                 }
               }}
             >

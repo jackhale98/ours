@@ -72,9 +72,10 @@ export const feedOn = signal(false);
 const partnerPresent = signal(true);
 
 /**
- * Called with the server's member list. A partner who has left takes their
- * consent with them (review 0004, R5): their busy times leave this person's
- * feed at once, and the flag is cleared so a later partner starts unasked.
+ * Called with the server's member list whenever the app refreshes it. A
+ * partner who has left takes their consent with them (review 0004, R5):
+ * their busy times leave this person's feed, and the flag is cleared. A new
+ * invite and joining also clear it, so a later partner starts unasked (N5).
  */
 export function setPartnerPresent(present: boolean): void {
   partnerPresent.value = present;

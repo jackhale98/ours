@@ -185,3 +185,80 @@ A calendar with 100 such events freezes the tab for about 4 minutes on each refr
 | R3 | "Shared" now comes from the destination: plans by `privacy !== 'busy'`, lists by `!private`, items and notes by their parent (in the file or already here), calendars and their copies never. The file's `scope` label is no longer read for that. | `export.test.ts` "decides shared or not from the records, so a relabelled file can't cross spaces" |
 | R4 | At write time a child goes in only after its parent: written by this import, or already on the device and not also in the file. There is no default to `'space'`; a child with no written parent is skipped. Notes that answer notes are written in passes, so file order doesn't matter. | `export.test.ts` "never writes a child whose parent wasn't written", "restores replies to notes in any order" |
 | R5 | The partner's busy times go into the feed only while the server lists them as a member. When the app sees they've left, it clears their `feed_share_busy` flag. THREAT_MODEL now describes the consent as cooperative and covers departed partners. | Reading `feeds.ts` `setPartnerPresent`, called from `session.ts` |
+
+### Check of the fixes (commit 8ff1899)
+
+- Date: 2026-11-04
+- Reviewer: independent agent that did not write the code.
+- Scope: commit 8ff1899. HEAD (199fb4f) adds the review 0005 fixes on top; where they change what is checked here, it says so.
+- Method: read the diff and rrule 2.8.1 (`dist/esm/iter/index.js`, `datetime.js`, `iterinfo`). Ran `TZ=UTC pnpm test` (657 passed). Wrote throwaway probe tests in `packages/core/src/time`, `packages/core/src/ics` and `apps/web/src/app`, then deleted them. Timings are from this container (Node); a phone is slower.
+
+| Item | Verdict | Evidence |
+|---|---|---|
+| A | **Fixed.** `caught` becomes true only when a pull reaches `more: false` (`sync.ts:431` at 8ff1899). Any failed sync clears it (`sync.ts:299`). A new engine starts false. `planImport` refuses until then (`export.ts:168-172`, `:210`). `apply()` asks again and reloads the known ids before writing (`export.ts:293-294`, `:354`). The writes run in one synchronous `bulk()`, so nothing changes between that check and the writes. At 8ff1899 a record under keys the device lacks is still stored before it is held (`sync.ts:381`), so its id is known. See N6 for a gap that HEAD adds. | `export.test.ts` "waits for a full sync, and checks again when applying"; reading |
+| B | **Partly fixed. Not met for COUNT rules (N1).** Rules without COUNT are bounded. The five phase-locked rules, a daily rule from the year 1000, `INTERVAL=1000` and a YEARLY rule with 100 BYSETPOS values all take under 3 ms for a one-month window. `limitWork` matches rrule 2.8.1: `interval` is read once at the start, then twice per period (`options.interval === 0`, and `counterDate.add` in `datetime.js:165`). Nothing else reads it. Moving DTSTART forward gives the same dates as plain rrule. I checked 20 more rules (WKST with INTERVAL > 1, BYSETPOS, the 31st, BYDAY ordinals, UNTIL, COUNT) × 6 starts × 2 windows, timed and all-day. All match for starts from 1972 on. Starts before 1970 do not match (N2). The COUNT cache can't return wrong dates: its key is the rule plus the start, and the result depends on nothing else. But it cuts long series short (N3), and resolving a COUNT can take seconds (N1). | `time.test.ts`, `ics.test.ts` (pass); probes |
+| R3 | **Partly fixed.** Plans, lists, calendars and notes now take "shared" from the records, not from the file's label (`export.ts:222-246`). Children can still cross spaces through a decoy entry (N4). | `export.test.ts` "decides shared or not from the records…"; probe |
+| R4 | **Fixed.** At write time, a child takes the scope of its parent as actually written (`parentScope`, `export.ts:298-303`). A child whose parent is in the plan but wasn't written is skipped. A refused write (`done = true` in the catch) is never recorded in `ids`, so its children are skipped too. There is no default to `'space'`. The passes for replies stop when a pass writes nothing, so cycles end. | `export.test.ts` "never writes a child whose parent wasn't written", "restores replies to notes in any order"; reading |
+| R5 | **Fixed in part.** `partnerAllows` needs `partnerPresent` (`feeds.ts:92-94`). `setPartnerPresent(false)` clears the partner's flag (`feeds.ts:79-85`). It is called from `refresh` (`session.ts:187` at 8ff1899). But `refresh` runs only at start and on account actions, and the consent is stored per slot, not per person (N5). THREAT_MODEL is updated, but "at once" overstates it (Info). | Reading `feeds.ts`, `session.ts`, `invites.ts`, `spaces.ts` |
+
+#### New findings
+
+**N1 (Medium; condition B not met): resolving a COUNT still costs seconds.**
+`countEnd` walks from the original DTSTART for up to 20,000 periods (`recurrence.ts:194`, `:294-311`). Each period can hold up to 366 dates, so the budget limits periods but not work. Measured for a one-month window, first call (the second call hits the cache):
+
+| Rule (valid, under 500 characters) | DTSTART | Time |
+|---|---|---|
+| `FREQ=YEARLY;BYDAY=MO,TU,WE,TH,FR,SA,SU;COUNT=9999999` | 1000-01-01 | 2.7 s |
+| `FREQ=YEARLY;BYDAY=MO,…,SU;BYSETPOS=1,2,…,100;COUNT=999999` (passes the ICS parser) | 1000-01-01 | 2.5 s |
+| `FREQ=MONTHLY;BYDAY=MO,…,SU;COUNT=9999999` | 1000-01-01 | 0.76 s |
+| `FREQ=YEARLY;BYDAY=MO;BYMONTH=2;BYMONTHDAY=29;COUNT=1000` | 1000-01-01 | 0.36 s |
+| `FREQ=DAILY;COUNT=9999999` | 1000-01-01 | 0.11 s |
+
+The cache lives only in memory and holds 500 entries, first in, first out. So every app start pays again. With more than 500 such events, every render pays. A partner can write many such events (`rrule` is only `Text(500)` plus `isValidRRule`). The agenda, search and reminders expand them with no overall budget. Twenty such events freeze the tab for about a minute at each start. The feed's deadline is checked only between events, so one event can run past it: 714 ms with `budgetMs: 200`.
+Fix: cap COUNT (for example at 1,000) in `isValidRRule` and in the ICS sanitizer. Cap the number of BYSETPOS and BYMONTHDAY values. Bound the COUNT walk by the time it covers (for example 100 years) and by the dates it sees, not just by periods. If that bound is hit, treat the series as having no end (see N3). Add tests that hold the rules above under 50 ms.
+
+**N2 (Low, wrong dates; condition for sign-off because B promised unchanged dates): moving the start shifts MONTHLY and YEARLY series that start before 1970.**
+`movedStart` uses `start.getTime() % DAY` for the time of day (`recurrence.ts:261`). Before 1970 that value is negative, so `atTime` lands on the day before (`:262`, `:280`, `:284`). The series then counts its periods from the wrong month or year. With INTERVAL > 1 the dates are wrong. `FREQ=MONTHLY;INTERVAL=2` from 1960-01-15 09:00 gives February, April… instead of January, March…. `FREQ=YEARLY;INTERVAL=2` from 1961-06-10 09:00 gives 2026-06-10, a date not in the series. BYSETPOS and UNTIL variants are wrong too. All-day events and DAILY/WEEKLY rules are not affected. The equivalence test only uses starts from 2014 on.
+Fix: `((start.getTime() % DAY) + DAY) % DAY`. Add a pre-1970 timed start to the equivalence test.
+
+**N3 (Low, missing busy times): a COUNT series longer than the budget is cut short.**
+When `countEnd` runs out of budget it keeps the last date found as the series end (`recurrence.ts:301-310`). `FREQ=DAILY;COUNT=30000` from 1960-01-01 gives 0 dates in November 2026 (should be 30). `FREQ=DAILY;BYDAY=MO;COUNT=5000` from 1960 gives 0 (should be 5). Few real rules are this long, but the error is silent.
+Fix: when the budget runs out, treat the series as having no end rather than ending it at the budget.
+
+**N4 (Low; what remains of R3): a decoy entry lets children from another space into shared records.**
+`destShared` for a child reads its parent's data from the file first (`export.ts:223`). `parentScope` skips the file and reads this device whenever the parent id is not in `importing` (`export.ts:301-302`). An id that is in the file but already known here is not in `importing`. Probe: a file from another space holds an entry with the id of a shared list here, marked `private: true`, and an item pointing at it. The item was written in **space** scope into that list. The same works for a note on a shared plan here, using a decoy plan with `privacy: 'busy'`. As with R3, this takes deliberate editing.
+Fix: check the real destination at write time. Skip any write whose scope comes out as `'space'` when the file is from another space. In `parentScope`, treat every id in the file (not only `importing`) as "in the file".
+
+**N5 (Low; what remains of R5): a new partner can inherit the old partner's consent.**
+`feed_share_busy` is keyed by slot. Every partner who joins gets slot `b` (`invites.ts:236-237`). The flag is cleared only if one of the remaining member's devices runs `refresh` while the space has one member. `invitePartner` doesn't call `refresh`, and nothing polls the member list while the app is open. If the old partner leaves and a new one joins while the remaining member's app stays open (or is not opened in between), the old `feed_share_busy.b = true` stays. The new partner's busy times then go into the remaining member's feed without their consent.
+Fix: store the consenting user's id with the flag and honour it only for that user. Or clear the slot's flags when the partner's `user_id` changes, and in `invitePartner`.
+
+**N6 (Low; at HEAD only, from 8693ec3): records held for missing keys are not known, but the device counts as caught up.**
+Since the review 0005 fixes, `resolve` returns before storing an envelope it can't open for want of keys (`sync.ts:432-440` at HEAD). The pull still sets `caught = true` (`sync.ts:491`). Those ids are not in `knownIds()`. If such a record is a deletion, import can restore what was deleted. This needs a device that lacks the current keys and whose local data was reset.
+Fix: report `caughtUp()` false while `needsNewKeys` is set, or add held ids to `knownIds()`.
+
+**Info**
+- "Caught up" means caught up once in this session. It does not expire. A tab left open offline, with no sync attempt, still counts as caught up. Consider running a sync in `apply()` and waiting for it.
+- The Import button stays active while `apply()` runs (`DataCard.tsx`). A double click imports twice, with new ids each time. Disable it while applying.
+- R5: a departed partner's busy times leave the feed at the next `refresh`, not "at once". The blocks already published stay in the remaining member's `feed_busy` until their device publishes again. The server could clear `feed_busy` for the whole space when someone leaves. THREAT_MODEL should say "the next time the app starts".
+- `limitWork` depends on how rrule reads `interval` inside its loop. rrule is pinned at 2.8.1, and the phase-locked timing tests would catch a change. Keep it pinned, or add a test that fails if the hook stops firing.
+
+#### Verdict
+
+**Sign-off with conditions.** A and R4 are fixed. B holds for rules without COUNT. Before public launch:
+1. N1: bound the work of resolving a COUNT, with tests holding the rules above under 50 ms.
+2. N2: fix the date shift for starts before 1970, with a test.
+
+N3–N6 are Low. Fix them or accept them in THREAT_MODEL. The Info items are at the owner's discretion.
+
+### Fixes after the check
+
+| Item | Fix | Test |
+|---|---|---|
+| N1 | `isValidRRule` caps list lengths (BYSETPOS 7, BYDAY 14, BYMONTHDAY 31, BYMONTH 12). A COUNT counts as at most 5000. Finding where a COUNT series ends has a budget per frequency (20,000 days, 5,200 weeks, 2,400 months, 400 years), so longer periods, which hold more dates, get fewer. The reviewer's slow rules each take well under 150 ms on first expansion now. | `time.test.ts` "keeps COUNT series cheap, however long they claim to be" |
+| N2 | `movedStart` brings the time of day into [0, DAY) before 1970. | The equivalence test now includes a 1960 start (fails without the fix) |
+| N3 | A COUNT over 5000 counts as 5000, so a long daily series from 2020 still shows today. A series too sparse to finish within its budget is still cut short there; documented in THREAT_MODEL. | Same test |
+| N4 | Anything already on this device is judged by its real scope, whatever the file says about the same id; and at write time a child is written only if its parent's actual scope is the one checked in the summary. | `export.test.ts` "can't slip items into a shared list here with a decoy of it" |
+| N5 | Making a partner invite clears the other slot's consent, and joining writes the joiner's consent as false. THREAT_MODEL says the departed partner's times go at the next refresh. | Reading |
+| N6 | `caughtUp()` is false while this device needs new keys. | Reading |
+| Info | Import's button is disabled while it runs. rrule stays pinned at 2.8.1 (exact version in `packages/core/package.json`). "Caught up" lasting the session is accepted: a later deletion that a device hasn't pulled yet comes from the partner after this device's full pull, which import can't restore anyway, because the record's id is already known. | — |

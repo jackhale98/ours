@@ -220,11 +220,12 @@ export async function planImport(
   });
   const byId = new Map(entries.map((e) => [e.item.id, e]));
   const destShared = (id: string, depth = 0): boolean | null => {
+    // Something already here is what it is here, whatever the file says
+    // about the same id (re-check N4).
+    const here = findEntry(id);
+    if (here) return here.scope === 'space';
     const e = byId.get(id);
-    if (!e) {
-      const here = findEntry(id);
-      return here ? here.scope === 'space' : null;
-    }
+    if (!e) return null;
     const { item, data } = e;
     if (!data || depth > 32) return null;
     switch (item.kind) {
@@ -321,6 +322,9 @@ export async function planImport(
         const raw = String(parentOf(e));
         const scope = parentScope(raw);
         if (scope === null) return false;
+        // Only where the summary said it would go: never shared when it was
+        // checked as personal, or the other way round (re-check N4).
+        if (kind !== 'cal_snapshot' && scope !== e.scope) return true;
         const parent = mapped(raw);
         id =
           kind === 'item'

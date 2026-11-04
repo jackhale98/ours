@@ -128,6 +128,11 @@ export function isValidRRule(rule: string): boolean {
   const parts = rule.split(';').map((p) => p.split('='));
   if (!parts.every((p) => p.length === 2 && ALLOWED_RULE_PARTS.has(p[0] ?? ''))) return false;
   if (!parts.some((p) => p[0] === 'FREQ')) return false;
+  // Lists longer than any real rule needs only add work per period (N1).
+  for (const [k, v] of parts) {
+    const n = (v ?? '').split(',').length;
+    if (n > (MAX_LIST[k ?? ''] ?? Number.POSITIVE_INFINITY)) return false;
+  }
   try {
     const opts = RRule.parseString(rule);
     return (
@@ -164,6 +169,15 @@ export const MAX_OCCURRENCES = 1000;
 /** Largest INTERVAL accepted ("every 1000 weeks" is already far beyond use). */
 const MAX_INTERVAL = 1000;
 
+/** Most values a BY part may list (review 0004 re-check, N1). */
+const MAX_LIST: Record<string, number> = { BYSETPOS: 7, BYDAY: 14, BYMONTHDAY: 31, BYMONTH: 12 };
+
+/**
+ * A COUNT above this is treated as this many: longer series are cut short
+ * (review 0004 re-check, N1 and N3). Five thousand days is over 13 years.
+ */
+export const MAX_COUNT = 5000;
+
 /* ---------- bounded work (security review 0004, condition B) ----------
  *
  * rrule.js walks a series period by period from DTSTART, and stops only when
@@ -190,8 +204,17 @@ const MIN_PERIOD: Record<number, number> = {
   [RRule.WEEKLY]: 7 * DAY,
   [RRule.DAILY]: DAY,
 };
-/** Periods walked, at most, to find where a COUNT series ends. */
-const COUNT_BUDGET = 20_000;
+/**
+ * Periods walked, at most, to find where a COUNT series ends: about 55
+ * years of days, 100 of weeks, 200 of months, 400 of years. Longer periods
+ * hold more candidate dates each, so they get fewer (N1).
+ */
+const COUNT_BUDGET: Record<number, number> = {
+  [RRule.YEARLY]: 400,
+  [RRule.MONTHLY]: 2400,
+  [RRule.WEEKLY]: 5200,
+  [RRule.DAILY]: 20_000,
+};
 
 const OVER_BUDGET = new Error('recurrence work budget spent');
 
@@ -258,7 +281,8 @@ function explicitParts(opts: Partial<Options>, start: Date): Partial<Options> {
  */
 function movedStart(opts: Partial<Options>, start: Date, before: number): Date {
   const n = opts.interval ?? 1;
-  const time = start.getTime() % DAY;
+  // Time of day; before 1970 `%` is negative, so bring it into [0, DAY) (N2).
+  const time = ((start.getTime() % DAY) + DAY) % DAY;
   const atTime = (y: number, m: number, d: number) => new Date(Date.UTC(y, m, d) + time);
   switch (opts.freq) {
     case RRule.DAILY:
@@ -296,7 +320,7 @@ function countEnd(opts: Partial<Options>, start: Date, key: string): Date | null
   if (known !== undefined) return known;
   const rule = new RRule({ ...opts, dtstart: start }, true);
   let last: Date | null = null;
-  limitWork(rule, COUNT_BUDGET);
+  limitWork(rule, COUNT_BUDGET[opts.freq ?? RRule.DAILY] ?? 400);
   try {
     rule.all((d) => {
       last = d;
@@ -315,6 +339,7 @@ function windowDates(rrule: string, startWall: string, after: number, before: nu
   const start = floating(startWall);
   let opts: Partial<Options> = RRule.parseString(rrule);
   if (opts.count) {
+    opts = { ...opts, count: Math.min(opts.count, MAX_COUNT) };
     const end = countEnd(opts, start, `${rrule}\u0000${startWall}`);
     if (!end) return [];
     const { count: _drop, ...rest } = opts;

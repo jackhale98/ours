@@ -308,6 +308,29 @@ describe('hostile recurrence rules (review 0004)', () => {
     ).toBeLessThan(200);
   });
 
+  it('keeps COUNT series cheap, however long they claim to be (re-check N1, N3)', () => {
+    const slow = [
+      timed('FREQ=YEARLY;BYDAY=MO,TU,WE,TH,FR,SA,SU;COUNT=9999999', '1000-01-06T09:00'),
+      timed('FREQ=DAILY;INTERVAL=7;BYDAY=TU;COUNT=4000', '1000-01-06T09:00'),
+      timed('FREQ=YEARLY;BYMONTH=2;BYMONTHDAY=29;BYDAY=MO;COUNT=5000', '1001-01-06T09:00'),
+      timed('FREQ=MONTHLY;BYDAY=5MO;COUNT=5000', '1002-01-06T09:00'),
+    ];
+    for (const e of slow) {
+      expect(
+        ms(() => expand(e, utc('2026-11-01T00:00'), utc('2026-12-01T00:00'), 'UTC')),
+        e.rrule,
+      ).toBeLessThan(150);
+    }
+    // Long lists only add work: refused.
+    const setpos = Array.from({ length: 100 }, (_, i) => i + 1).join(',');
+    expect(isValidRRule(`FREQ=YEARLY;BYDAY=MO,TU,WE,TH,FR,SA,SU;BYSETPOS=${setpos}`)).toBe(false);
+    expect(isValidRRule('FREQ=MONTHLY;BYDAY=MO;BYSETPOS=1,2,3,-1')).toBe(true);
+    // A COUNT over the limit counts as the limit: a daily series from 2020
+    // still shows today.
+    const long = timed('FREQ=DAILY;COUNT=30000', '2020-01-01T09:00');
+    expect(expand(long, utc('2026-11-02T00:00'), utc('2026-11-09T00:00'), 'UTC')).toHaveLength(7);
+  });
+
   it('moving the start forward changes none of the dates (condition B)', () => {
     const rules = [
       'FREQ=DAILY',
@@ -333,7 +356,7 @@ describe('hostile recurrence rules (review 0004)', () => {
       'FREQ=WEEKLY;COUNT=600;BYDAY=WE',
       'FREQ=DAILY;COUNT=3000',
     ];
-    const starts = ['2014-01-31T18:30', '2019-07-03T07:15', '2020-02-29T23:45'];
+    const starts = ['1960-01-15T09:00', '2014-01-31T18:30', '2019-07-03T07:15', '2020-02-29T23:45'];
     for (const rrule of rules) {
       for (const start of starts) {
         const e = { start, end: start, all_day: false, tz: 'UTC', rrule };

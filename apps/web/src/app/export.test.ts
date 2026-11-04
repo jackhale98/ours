@@ -206,6 +206,43 @@ describe('export and import', () => {
     expect(visible.value.every((e) => e.scope === 'user' || e.rec.kind === 'busy_stub')).toBe(true);
   });
 
+  it('can’t slip items into a shared list here with a decoy of it (re-check N4)', async () => {
+    const shared = put('list', { name: 'Groceries', kind: 'shopping', private: false });
+    const file = {
+      format: 'ours-export',
+      v: 1,
+      space_id: 'another-space',
+      entries: [
+        // A "private" copy of the shared list's id, then an item for it.
+        {
+          id: shared,
+          kind: 'list',
+          scope: 'user',
+          owner: 'a',
+          updated_at: 1,
+          data: { name: 'Groceries', kind: 'shopping', private: true },
+        },
+        {
+          id: 'item-1',
+          kind: 'item',
+          scope: 'user',
+          owner: 'a',
+          updated_at: 1,
+          data: {
+            list_id: shared,
+            text: 'From the old space',
+            done: false,
+            assignee: null,
+            due: null,
+            sort_key: 'm',
+          },
+        },
+      ],
+    };
+    await applied(planImport(JSON.stringify(file)));
+    expect(content().some((c) => c.includes('From the old space'))).toBe(false);
+  });
+
   it('never writes a child whose parent wasn’t written (R4)', async () => {
     const therapy = createEvent(event('Therapy', { owner: 'a', privacy: 'busy' }));
     addComment(therapy, 'Bring the forms');

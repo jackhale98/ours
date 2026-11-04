@@ -77,7 +77,9 @@ export class SyncEngine implements Backend {
    * know every deletion, so import waits (security review 0004, condition A).
    */
   caughtUp(): boolean {
-    return this.caught;
+    // Records held back for want of keys aren't stored yet, so this device
+    // doesn't know all its ids until they arrive (review 0004 re-check, N6).
+    return this.caught && !needsNewKeys.value;
   }
 
   deviceId(): string {
