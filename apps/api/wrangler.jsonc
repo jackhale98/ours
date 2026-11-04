@@ -26,7 +26,9 @@
     "MAX_DEVICES_PER_USER": "10",
     "MAX_SPACE_BYTES": "20971520",
     "MAX_PUSHES_PER_MINUTE": "120",
-    "MAX_PUSHES_PER_HOUR": "60"
+    "MAX_PUSHES_PER_HOUR": "60",
+    // Key rotation (ADR 0013): "on" to allow changing keys. Off unless set.
+    "ROTATION": "on"
     // Web Push is off locally: VAPID_PUBLIC_KEY and VAPID_PRIVATE_KEY are
     // secrets (docs/SELF_HOSTING.md); tests pass their own.
   },
@@ -62,7 +64,9 @@
         "MAX_DEVICES_PER_USER": "10",
         "MAX_SPACE_BYTES": "20971520",
         "MAX_PUSHES_PER_MINUTE": "120",
-        "MAX_PUSHES_PER_HOUR": "60"
+        "MAX_PUSHES_PER_HOUR": "60",
+        // Key rotation stays off until security review 0005 signs off.
+        "ROTATION": "off"
         // VAPID_PUBLIC_KEY and VAPID_PRIVATE_KEY are secrets here, made by the
         // "Create Worker secrets" workflow; a var of the same name would clash.
       },

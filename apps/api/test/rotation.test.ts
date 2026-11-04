@@ -343,3 +343,29 @@ describe('key rotation review 0005', () => {
     expect(left?.n).toBe(0);
   });
 });
+
+describe('rotation switch', () => {
+  it('refuses rotating and key update links when switched off', async () => {
+    const { sam, spaceId } = await couple();
+    const e = env as unknown as { ROTATION?: string };
+    const before = e.ROTATION;
+    e.ROTATION = 'off';
+    try {
+      const res = await call(`/spaces/${spaceId}/rotate`, { token: sam.token, body: rot(1, 1) });
+      expect(res.status).toBe(403);
+      expect(res.json.error).toBe('rotation_off');
+      const link = await call('/invites', {
+        token: sam.token,
+        body: {
+          kind: 'rekey',
+          space_id: spaceId,
+          key_version: 2,
+          wrapped: { nonce: randomB64(24), ciphertext: randomB64(120) },
+        },
+      });
+      expect(link.status).toBe(403);
+    } finally {
+      e.ROTATION = before;
+    }
+  });
+});

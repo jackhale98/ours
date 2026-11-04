@@ -20,7 +20,7 @@ import { bytesOf, fromB64Url, hashToken, newId, toB64Url } from '../lib/crypto';
 import { body, HttpError } from '../lib/http';
 import { requireMember } from '../lib/members';
 import { rateLimit } from '../lib/ratelimit';
-import { REKEY_WINDOW_MS } from './spaces';
+import { REKEY_WINDOW_MS, rotationOff } from './spaces';
 
 const INVITE_HOURS = 24;
 const NONCE_BYTES = 24;
@@ -87,6 +87,7 @@ invites.post('/', async (c) => {
   let keyVersion: number | null = null;
   if (input.kind === 'rekey') {
     await requireMember(c.env, input.space_id, uid);
+    if (c.env.ROTATION !== 'on') throw rotationOff();
     // Only the person who made the latest rotation, for its version, and
     // only for a while after it (review 0005, M4): a member who signs in
     // again on a removed device can't hand the partner keys of its choosing.

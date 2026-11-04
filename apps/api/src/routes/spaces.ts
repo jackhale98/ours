@@ -47,6 +47,10 @@ const Version = v.pipe(v.number(), v.integer(), v.minValue(1), v.maxValue(1_000_
 /** Key fingerprint: 16 bytes, base64url (core `keyId`). */
 const Kid = v.pipe(v.string(), v.regex(/^[A-Za-z0-9_-]{22}$/));
 
+/** Changing keys can be switched off server-side (until its review signs off). */
+export const rotationOff = () =>
+  new HttpError(403, 'rotation_off', 'Changing keys isn’t available yet.');
+
 const conflict = () =>
   new HttpError(409, 'rotation_conflict', 'Keys changed on another device. Try again.');
 
@@ -129,6 +133,7 @@ spaces.post('/:id/rotate', async (c) => {
     }),
   );
   await requireMember(c.env, id, uid);
+  if (c.env.ROTATION !== 'on') throw rotationOff();
   const info = await c.env.DB.prepare(
     `SELECT (SELECT key_version FROM spaces WHERE id = ?1) AS space,
             (SELECT personal_key_version FROM users WHERE id = ?2) AS personal,
