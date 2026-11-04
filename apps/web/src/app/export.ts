@@ -140,7 +140,7 @@ export interface ImportSummary {
 
 export type ImportPlan =
   | { status: 'needs-phrase' }
-  | { status: 'ready'; summary: ImportSummary; apply: () => number };
+  | { status: 'ready'; summary: ImportSummary; apply: () => Promise<number> };
 
 export class ImportError extends Error {}
 
@@ -161,6 +161,26 @@ const Exported = v.object({
 });
 
 type Parsed = { id: string; kind: Kind; scope: 'space' | 'user'; data: Record<string, unknown> };
+
+const NOT_SYNCED = 'Finish syncing first: import works once this device is up to date.';
+
+/** importContext, but only once this device has caught up with the server (condition A). */
+async function syncedContext() {
+  const ctx = await importContext();
+  if (!ctx.caughtUp) throw new ImportError(NOT_SYNCED);
+  return ctx;
+}
+
+/** The record a child belongs to: an item's list, a note's plan, item or note, a calendar copy's calendar. */
+function parentOf(e: { kind: Kind; data: Record<string, unknown> }): string | null {
+  return e.kind === 'item'
+    ? String(e.data.list_id)
+    : e.kind === 'comment'
+      ? String(e.data.parent_id)
+      : e.kind === 'cal_snapshot'
+        ? String(e.data.calendar_id)
+        : null;
+}
 
 /**
  * Reads an export file and works out what importing it would add. Nothing is
@@ -187,46 +207,68 @@ export async function planImport(
   }
   const parsed = v.safeParse(Exported, json);
   if (!parsed.success) throw new ImportError('That file isn’t an Ours export.');
-  const { spaceId, known } = await importContext();
+  const { spaceId, known } = await syncedContext();
   const sameSpace = parsed.output.space_id === spaceId;
   const me = viewer.value;
 
+  // Shared or not is decided by where a record will be written, never by
+  // the file's own label (review 0004, R3): plans by their privacy, lists by
+  // `private`, items and notes by their parent, calendars always personal.
+  const entries = parsed.output.entries.map((item) => {
+    const data = v.safeParse(KIND_SCHEMAS[item.kind], item.data);
+    return { item, data: data.success ? (data.output as Record<string, unknown>) : null };
+  });
+  const byId = new Map(entries.map((e) => [e.item.id, e]));
+  const destShared = (id: string, depth = 0): boolean | null => {
+    const e = byId.get(id);
+    if (!e) {
+      const here = findEntry(id);
+      return here ? here.scope === 'space' : null;
+    }
+    const { item, data } = e;
+    if (!data || depth > 32) return null;
+    switch (item.kind) {
+      case 'event':
+        return data.privacy !== 'busy';
+      case 'list':
+        return !data.private;
+      case 'calendar':
+      case 'cal_snapshot':
+        return false;
+      case 'item':
+      case 'comment': {
+        const parent = parentOf({ kind: item.kind, data });
+        return parent === null ? null : destShared(parent, depth + 1);
+      }
+      default:
+        return item.scope === 'space';
+    }
+  };
+
   const ok: Parsed[] = [];
   let skipped = 0;
-  for (const item of parsed.output.entries) {
-    const data = v.safeParse(KIND_SCHEMAS[item.kind], item.data);
-    const shared = item.scope === 'space';
+  for (const { item, data } of entries) {
+    const shared = data ? destShared(item.id) : null;
     if (
-      !data.success ||
+      !data ||
       known.has(item.id) ||
+      // Children of something neither here nor in the file go nowhere.
+      shared === null ||
       (shared && !sameSpace) ||
       // Rebuilt from their plans; settings stay as they are here.
       item.kind === 'busy_stub' ||
       item.kind === 'settings' ||
       // The shared copy of a calendar is re-derived from the private one.
-      (item.kind === 'cal_snapshot' && shared)
+      (item.kind === 'cal_snapshot' && item.scope === 'space')
     ) {
       skipped++;
       continue;
     }
-    ok.push({
-      id: item.id,
-      kind: item.kind,
-      scope: item.scope,
-      data: data.output as Record<string, unknown>,
-    });
+    ok.push({ id: item.id, kind: item.kind, scope: shared ? 'space' : 'user', data });
   }
 
   // Children need their parent: in the file (being imported) or already here.
   const importing = new Set(ok.map((e) => e.id));
-  const parentOf = (e: Parsed): string | null =>
-    e.kind === 'item'
-      ? String(e.data.list_id)
-      : e.kind === 'comment'
-        ? String(e.data.parent_id)
-        : e.kind === 'cal_snapshot'
-          ? String(e.data.calendar_id)
-          : null;
   const plan = ok.filter((e) => {
     const p = parentOf(e);
     if (p === null || importing.has(p) || findEntry(p)) return true;
@@ -245,10 +287,20 @@ export async function planImport(
     skipped,
   };
 
-  const apply = (): number => {
+  const apply = async (): Promise<number> => {
+    // Checked again now, not when the summary was made: sync may have
+    // stopped, or brought in deletions, in between (condition A).
+    const now = await syncedContext();
+    if (now.spaceId !== spaceId) throw new ImportError(NOT_SYNCED);
     const ids = new Map<string, string>();
     const mapped = (id: string) => ids.get(id) ?? id;
-    const scopeOf = (id: string): 'space' | 'user' => findEntry(mapped(id))?.scope ?? 'space';
+    /** Where a child goes: after its parent, written now or already here; else nowhere (R4). */
+    const parentScope = (id: string): 'space' | 'user' | null => {
+      const written = ids.get(id);
+      if (written) return findEntry(written)?.scope ?? null;
+      if (importing.has(id)) return null; // in the file but not written
+      return findEntry(id)?.scope ?? null;
+    };
     let written = 0;
     const order: Kind[] = [
       'list',
@@ -259,57 +311,68 @@ export async function planImport(
       'comment',
       'cal_snapshot',
     ];
+    const write = (e: Parsed): boolean => {
+      const kind = e.kind;
+      let id: string;
+      if (kind === 'event') {
+        // createEvent writes private plans under the personal key with a fresh busy marker.
+        id = createEvent({ ...(e.data as Data<'event'>), stub_id: null });
+      } else if (kind === 'item' || kind === 'comment' || kind === 'cal_snapshot') {
+        const raw = String(parentOf(e));
+        const scope = parentScope(raw);
+        if (scope === null) return false;
+        const parent = mapped(raw);
+        id =
+          kind === 'item'
+            ? put('item', { ...(e.data as Data<'item'>), list_id: parent }, { scope })
+            : kind === 'comment'
+              ? put('comment', { ...(e.data as Data<'comment'>), parent_id: parent }, { scope })
+              : put(
+                  'cal_snapshot',
+                  { ...(e.data as Data<'cal_snapshot'>), calendar_id: parent, importer: me },
+                  { scope: 'user' },
+                );
+      } else if (kind === 'list') {
+        const d = e.data as Data<'list'>;
+        id = put('list', d, { scope: d.private ? 'user' : 'space' });
+      } else if (kind === 'calendar') {
+        id = put(
+          'calendar',
+          { ...(e.data as Data<'calendar'>), fetched_at: null },
+          { scope: 'user' },
+        );
+      } else {
+        id = put(kind, e.data as never, { scope: e.scope });
+      }
+      ids.set(e.id, id);
+      written++;
+      return true;
+    };
     bulk(() => {
       for (const kind of order) {
-        for (const e of plan.filter((x) => x.kind === kind)) {
-          try {
-            let id: string;
-            if (kind === 'event') {
-              // createEvent writes private plans under the personal key with a fresh busy marker.
-              id = createEvent({ ...(e.data as Data<'event'>), stub_id: null });
-            } else if (kind === 'item') {
-              const list = mapped(String(e.data.list_id));
-              id = put(
-                'item',
-                { ...(e.data as Data<'item'>), list_id: list },
-                { scope: scopeOf(list) },
-              );
-            } else if (kind === 'comment') {
-              const parent = mapped(String(e.data.parent_id));
-              id = put(
-                'comment',
-                { ...(e.data as Data<'comment'>), parent_id: parent },
-                { scope: scopeOf(parent) },
-              );
-            } else if (kind === 'cal_snapshot') {
-              const cal = mapped(String(e.data.calendar_id));
-              id = put(
-                'cal_snapshot',
-                { ...(e.data as Data<'cal_snapshot'>), calendar_id: cal, importer: me },
-                { scope: 'user' },
-              );
-            } else if (kind === 'list') {
-              const d = e.data as Data<'list'>;
-              id = put('list', d, { scope: d.private ? 'user' : 'space' });
-            } else if (kind === 'calendar') {
-              id = put(
-                'calendar',
-                { ...(e.data as Data<'calendar'>), fetched_at: null },
-                { scope: 'user' },
-              );
-            } else {
-              id = put(kind, e.data as never, { scope: e.scope });
+        // Notes can answer notes, so go round until a pass writes nothing new.
+        let todo = plan.filter((x) => x.kind === kind && !now.known.has(x.id));
+        for (let progress = true; todo.length && progress; ) {
+          progress = false;
+          const left: Parsed[] = [];
+          for (const e of todo) {
+            let done = false;
+            try {
+              done = write(e);
+            } catch {
+              // Refused by the scope policy or the schema: skipped.
+              done = true;
             }
-            ids.set(e.id, id);
-            written++;
-          } catch {
-            // Refused by the scope policy or the schema: skipped.
+            if (done) progress = true;
+            else left.push(e);
           }
+          todo = left;
         }
       }
     });
     // Rebuild the shared copy of each restored calendar from its private one.
-    for (const e of plan) if (e.kind === 'calendar') rederiveCalendar(mapped(e.id));
+    for (const e of plan)
+      if (e.kind === 'calendar' && ids.has(e.id)) rederiveCalendar(mapped(e.id));
     return written;
   };
   return { status: 'ready', summary, apply };

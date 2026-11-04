@@ -34,7 +34,7 @@ import { put, settings, store } from '../app/model';
 import { HAS_API } from '../config';
 import { ApiError, api, setToken } from './api';
 import { kvGet, kvSet, wipe } from './db';
-import { startFeeds, stopFeeds } from './feeds';
+import { setPartnerPresent, startFeeds, stopFeeds } from './feeds';
 import { loadRing, saveRing } from './keystore';
 import { disablePush, startNotifications, stopNotifications, unsubscribeLocally } from './notify';
 import { needsNewKeys, SyncEngine } from './sync';
@@ -184,6 +184,7 @@ async function refresh(session: Session): Promise<void> {
     slot: space.role,
     partnerJoined: space.members.length > 1,
   };
+  setPartnerPresent(space.members.length > 1);
   void keepStorage();
 }
 

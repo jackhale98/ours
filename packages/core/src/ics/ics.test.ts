@@ -892,4 +892,19 @@ describe('icsOccurrences', () => {
     const occ = icsOccurrences(c, Date.UTC(2025, 2, 1) - 864e5, Date.UTC(2025, 2, 10), 'UTC');
     expect(occ.map((o) => o.localStart)).toEqual(['2025-03-01', '2025-03-03', '2025-03-04']);
   });
+
+  it('stops a feed full of costly rules at its time budget (review 0004, condition B)', () => {
+    // Each is a COUNT series whose steps never meet its filter, so finding
+    // where it ends spends that event's whole budget.
+    const many = Array.from(
+      { length: 60 },
+      (_, i) =>
+        `UID:x${i}\nDTSTART:${1100 + i}0106T090000Z\nDTEND:${1100 + i}0106T100000Z\nRRULE:FREQ=DAILY;INTERVAL=7;BYDAY=TU;COUNT=5`,
+    );
+    const c = parseIcs(wrap(many.map((b) => `BEGIN:VEVENT\n${b}\nEND:VEVENT`).join('\n')));
+    expect(c.events).toHaveLength(60);
+    const t = performance.now();
+    icsOccurrences(c, Date.UTC(2026, 10, 1), Date.UTC(2026, 11, 1), 'UTC', { budgetMs: 200 });
+    expect(performance.now() - t).toBeLessThan(1000);
+  });
 });

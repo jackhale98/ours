@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
+import { RRule } from 'rrule';
 import { describe, expect, it } from 'vitest';
 import { commonFree, dailyWindows, freeWithin, mergeIntervals } from './free';
 import { daysTouched, expand, isValidRRule, nextDueDate, type Schedulable } from './recurrence';
@@ -259,6 +260,98 @@ describe('hostile recurrence rules (review 0004)', () => {
       rrule: 'FREQ=DAILY;COUNT=10',
     };
     expect(expand(ten, utc('2026-01-05T00:00'), utc('2026-02-01T00:00'), 'UTC')).toHaveLength(6);
+  });
+
+  const timed = (rrule: string, start = '2026-11-02T09:00') => ({
+    start,
+    end: start.replace(/T\d\d/, (t) => `T${String(Number(t.slice(1)) + 1).padStart(2, '0')}`),
+    all_day: false,
+    tz: 'America/New_York',
+    rrule,
+  });
+  const ms = (f: () => unknown) => {
+    const t = performance.now();
+    f();
+    return performance.now() - t;
+  };
+
+  it('gives up quickly on a rule whose steps never meet its filters (condition B)', () => {
+    // Every 7th day from a Monday is always a Monday: never a Tuesday.
+    const cases = [
+      timed('FREQ=DAILY;INTERVAL=7;BYDAY=TU'),
+      timed('FREQ=MONTHLY;INTERVAL=12;BYMONTH=6'),
+      timed('FREQ=MONTHLY;INTERVAL=12;BYMONTHDAY=31', '2026-04-01T09:00'),
+      timed('FREQ=YEARLY;INTERVAL=4;BYMONTH=2;BYMONTHDAY=29', '2025-03-01T09:00'),
+      timed('FREQ=WEEKLY;INTERVAL=4;BYDAY=MO;BYMONTH=2;BYMONTHDAY=30'),
+    ];
+    for (const e of cases) {
+      let out: unknown[] = [];
+      const took = ms(() => {
+        out = expand(e, utc('2026-11-01T00:00'), utc('2026-12-01T00:00'), 'UTC');
+      });
+      expect(out, e.rrule).toEqual([]);
+      expect(took, e.rrule).toBeLessThan(50);
+    }
+  });
+
+  it('reaches today quickly from a very old start (condition B)', () => {
+    const old = timed('FREQ=DAILY', '1000-01-01T09:00');
+    let n = 0;
+    const took = ms(() => {
+      n = expand(old, utc('2026-11-02T00:00'), utc('2026-11-09T00:00'), 'UTC').length;
+    });
+    expect(n).toBe(7);
+    expect(took).toBeLessThan(50);
+    const counted = timed('FREQ=DAILY;INTERVAL=7;BYDAY=TU;COUNT=5', '1000-01-06T09:00');
+    expect(
+      ms(() => expand(counted, utc('2026-11-01T00:00'), utc('2026-12-01T00:00'), 'UTC')),
+    ).toBeLessThan(200);
+  });
+
+  it('moving the start forward changes none of the dates (condition B)', () => {
+    const rules = [
+      'FREQ=DAILY',
+      'FREQ=DAILY;INTERVAL=3',
+      'FREQ=DAILY;BYDAY=MO,WE,FR',
+      'FREQ=DAILY;INTERVAL=5;BYMONTHDAY=1,15,-1',
+      'FREQ=WEEKLY',
+      'FREQ=WEEKLY;INTERVAL=2;BYDAY=MO,TH',
+      'FREQ=WEEKLY;INTERVAL=3;BYDAY=SU,SA;WKST=SU',
+      'FREQ=WEEKLY;INTERVAL=2;BYDAY=TU;BYSETPOS=1',
+      'FREQ=MONTHLY',
+      'FREQ=MONTHLY;INTERVAL=5',
+      'FREQ=MONTHLY;BYMONTHDAY=31',
+      'FREQ=MONTHLY;INTERVAL=2;BYDAY=-1FR',
+      'FREQ=MONTHLY;BYDAY=MO,TU,WE,TH,FR;BYSETPOS=-1',
+      'FREQ=MONTHLY;BYDAY=FR;BYMONTHDAY=13',
+      'FREQ=MONTHLY;INTERVAL=3;BYMONTH=1,4,7,10;BYDAY=2TU',
+      'FREQ=YEARLY',
+      'FREQ=YEARLY;BYMONTH=2;BYMONTHDAY=29',
+      'FREQ=YEARLY;INTERVAL=2;BYDAY=20MO',
+      'FREQ=YEARLY;BYMONTH=11;BYDAY=4TH',
+      'FREQ=DAILY;UNTIL=20261120T000000Z',
+      'FREQ=WEEKLY;COUNT=600;BYDAY=WE',
+      'FREQ=DAILY;COUNT=3000',
+    ];
+    const starts = ['2014-01-31T18:30', '2019-07-03T07:15', '2020-02-29T23:45'];
+    for (const rrule of rules) {
+      for (const start of starts) {
+        const e = { start, end: start, all_day: false, tz: 'UTC', rrule };
+        for (const [from, to] of [
+          ['2026-01-01T00:00', '2026-03-01T00:00'],
+          ['2026-10-15T00:00', '2027-12-01T00:00'],
+        ] as const) {
+          const got = expand(e, utc(from), utc(to), 'UTC').map((o) => o.localStart);
+          const [y, mo, d] = start.slice(0, 10).split('-').map(Number);
+          const [h, mi] = start.slice(11).split(':').map(Number);
+          const dtstart = new Date(Date.UTC(y ?? 0, (mo ?? 1) - 1, d, h, mi));
+          const want = new RRule({ ...RRule.parseString(rrule), dtstart })
+            .between(new Date(utc(from)), new Date(utc(to) - 1), true)
+            .map((x) => x.toISOString().slice(0, 16));
+          expect(got, `${rrule} from ${start}, ${from}`).toEqual(want);
+        }
+      }
+    }
   });
 });
 

@@ -85,7 +85,7 @@ const content = () =>
 async function applied(plan: Promise<ImportPlan>) {
   const p = await plan;
   if (p.status !== 'ready') throw new Error('needs phrase');
-  return { summary: p.summary, written: p.apply() };
+  return { summary: p.summary, written: await p.apply() };
 }
 
 describe('export and import', () => {
@@ -156,6 +156,83 @@ describe('export and import', () => {
     expect(
       store.value.entries.filter((e) => e.rec.kind === 'comment' && e.scope === 'space'),
     ).toHaveLength(0);
+  });
+
+  it('waits for a full sync, and checks again when applying (review 0004, condition A)', async () => {
+    const { dinner } = sample();
+    const file = await readableExport();
+    loadEntries('a', []);
+    // A new device: the first pull hasn't finished, so the deletion of the
+    // shared dinner (made private since) isn't known here yet.
+    let caught = false;
+    const known = new Set<string>();
+    setBackend({
+      mode: 'demo',
+      deviceId: (s) => `test-${s}`,
+      write: () => {},
+      knownIds: async () => new Set(known),
+      caughtUp: () => caught,
+    });
+    await expect(planImport(file)).rejects.toThrow(/Finish syncing first/);
+    caught = true;
+    const plan = await planImport(file);
+    if (plan.status !== 'ready') throw new Error('needs phrase');
+    expect(plan.summary.plans).toBe(2);
+    // The pull then brings the tombstone before the import is confirmed...
+    known.add(dinner);
+    const written = await plan.apply();
+    expect(content().some((c) => c.includes('Dinner'))).toBe(false);
+    expect(written).toBeGreaterThan(0);
+    // ...and a sync that fails afterwards stops the import again.
+    loadEntries('a', []);
+    const again = await planImport(file);
+    caught = false;
+    if (again.status !== 'ready') throw new Error('needs phrase');
+    await expect(again.apply()).rejects.toThrow(/Finish syncing first/);
+    expect(visible.value).toHaveLength(0);
+  });
+
+  it('decides shared or not from the records, so a relabelled file can’t cross spaces (R3)', async () => {
+    sample();
+    const file = JSON.parse(await readableExport());
+    file.space_id = 'another-space';
+    for (const e of file.entries) e.scope = 'user'; // tampered: everything "personal"
+    loadEntries('a', []);
+    await applied(planImport(JSON.stringify(file)));
+    expect(content().some((c) => c.includes('Dinner'))).toBe(false);
+    expect(content().some((c) => c.includes('Groceries') || c.includes('Oat milk'))).toBe(false);
+    expect(content()).toContain('event|user|Therapy');
+    expect(content()).toContain('item|user|Scarf');
+    expect(visible.value.every((e) => e.scope === 'user' || e.rec.kind === 'busy_stub')).toBe(true);
+  });
+
+  it('never writes a child whose parent wasn’t written (R4)', async () => {
+    const therapy = createEvent(event('Therapy', { owner: 'a', privacy: 'busy' }));
+    addComment(therapy, 'Bring the forms');
+    const file = JSON.parse(await readableExport());
+    // A reply to the note, and the note itself made invalid so it's dropped.
+    const note = file.entries.find((e: { kind: string }) => e.kind === 'comment');
+    const first = note.id;
+    file.entries.push({ ...note, id: 'reply-1', data: { ...note.data, parent_id: first } });
+    note.data = { body: 42 };
+    loadEntries('a', []);
+    await applied(planImport(JSON.stringify(file)));
+    expect(store.value.entries.filter((e) => e.rec.kind === 'comment')).toHaveLength(0);
+  });
+
+  it('restores replies to notes in any order', async () => {
+    const dinner = createEvent(event('Dinner'));
+    addComment(dinner, 'Booked for 7');
+    const file = JSON.parse(await readableExport());
+    const note = file.entries.find((e: { kind: string }) => e.kind === 'comment');
+    const first = note.id;
+    // The reply comes first in the file.
+    file.entries.unshift({ ...note, id: 'reply-1', data: { ...note.data, parent_id: first } });
+    loadEntries('a', []);
+    await applied(planImport(JSON.stringify(file)));
+    const notes = store.value.entries.filter((e) => e.rec.kind === 'comment');
+    expect(notes).toHaveLength(2);
+    expect(notes.every((n) => n.scope === 'space')).toBe(true);
   });
 
   it('refuses files that are not exports and skips invalid records', async () => {

@@ -10,7 +10,7 @@
  * All-day events are floating dates and land on the same calendar date for
  * every viewer.
  */
-import { RRule } from 'rrule';
+import { type Options, RRule } from 'rrule';
 import {
   addDays,
   addWallMinutes,
@@ -74,7 +74,7 @@ const MONTH_DAYS = [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
  * allowed above, impossibility comes from month days that no allowed month
  * has, or ordinal weekdays combined with month days.
  */
-function feasible(opts: Partial<import('rrule').Options>): boolean {
+function feasible(opts: Partial<Options>): boolean {
   const months = (
     Array.isArray(opts.bymonth) ? opts.bymonth : opts.bymonth ? [opts.bymonth] : []
   ).map(Number);
@@ -135,6 +135,7 @@ export function isValidRRule(rule: string): boolean {
       opts.freq >= RRule.YEARLY &&
       opts.freq <= RRule.DAILY &&
       (opts.interval ?? 1) >= 1 &&
+      (opts.interval ?? 1) <= MAX_INTERVAL &&
       feasible(opts)
     );
   } catch {
@@ -159,6 +160,177 @@ function fromFloating(d: Date): string {
 
 /** Most occurrences returned for one window. */
 export const MAX_OCCURRENCES = 1000;
+
+/** Largest INTERVAL accepted ("every 1000 weeks" is already far beyond use). */
+const MAX_INTERVAL = 1000;
+
+/* ---------- bounded work (security review 0004, condition B) ----------
+ *
+ * rrule.js walks a series period by period from DTSTART, and stops only when
+ * it meets a date past the end of what was asked for. Two kinds of rule make
+ * that walk long: an old start (a daily series from the year 1000 walks a
+ * million days to reach today) and a rule whose filters never line up with
+ * its steps (every 7th day, on Tuesdays, from a Monday): it never meets a
+ * date at all, so it walks to the year 9999. Both are handled here:
+ *   - the start is moved forward by whole periods to just before the window,
+ *     with any parts rrule would take from the start written out, so the
+ *     dates are the same;
+ *   - a COUNT is turned into an UNTIL once (and remembered), so that series
+ *     can be moved forward too;
+ *   - every walk has a budget of periods: enough to cover the window, after
+ *     which it is stopped. A rule that finds nothing in the window costs the
+ *     window and no more.
+ */
+
+/** Shortest length of one period, in ms (months as 28 days, years as 365). */
+const DAY = 86_400_000;
+const MIN_PERIOD: Record<number, number> = {
+  [RRule.YEARLY]: 365 * DAY,
+  [RRule.MONTHLY]: 28 * DAY,
+  [RRule.WEEKLY]: 7 * DAY,
+  [RRule.DAILY]: DAY,
+};
+/** Periods walked, at most, to find where a COUNT series ends. */
+const COUNT_BUDGET = 20_000;
+
+const OVER_BUDGET = new Error('recurrence work budget spent');
+
+/**
+ * Stop the rule's walk after `periods` periods. rrule.js reads `interval`
+ * from its options twice per period (once to check for zero, once to step),
+ * which is the one hook it offers into its loop; the tests pin this down.
+ */
+function limitWork(rule: RRule, periods: number): void {
+  const o = rule.options as { interval: number };
+  const interval = o.interval;
+  let reads = 0;
+  const limit = 2 * Math.max(1, Math.ceil(periods)) + 2;
+  Object.defineProperty(o, 'interval', {
+    configurable: true,
+    enumerable: true,
+    get() {
+      if (++reads > limit) throw OVER_BUDGET;
+      return interval;
+    },
+  });
+}
+
+/** Collect dates from a walk, keeping what was found if the budget runs out. */
+function walk(rule: RRule, periods: number, run: (keep: (d: Date) => boolean) => void): Date[] {
+  limitWork(rule, periods);
+  const out: Date[] = [];
+  try {
+    run((d) => {
+      out.push(d);
+      return out.length < MAX_OCCURRENCES;
+    });
+  } catch (e) {
+    if (e !== OVER_BUDGET) throw e;
+  }
+  return out;
+}
+
+const weekdayOf = (d: Date) => (d.getUTCDay() + 6) % 7; // rrule: Monday = 0
+
+/** Write out the parts rrule would otherwise take from DTSTART (as rrule does). */
+function explicitParts(opts: Partial<Options>, start: Date): Partial<Options> {
+  const has = (v: unknown) => v !== null && v !== undefined && !(Array.isArray(v) && !v.length);
+  if (has(opts.bymonthday) || has(opts.byweekday)) return opts;
+  switch (opts.freq) {
+    case RRule.WEEKLY:
+      return { ...opts, byweekday: [weekdayOf(start)] };
+    case RRule.MONTHLY:
+      return { ...opts, bymonthday: [start.getUTCDate()] };
+    case RRule.YEARLY:
+      return {
+        ...opts,
+        bymonth: has(opts.bymonth) ? (opts.bymonth ?? null) : [start.getUTCMonth() + 1],
+        bymonthday: [start.getUTCDate()],
+      };
+    default:
+      return opts;
+  }
+}
+
+/**
+ * The latest start, on a period boundary of the series and at its time of
+ * day, that is at least two periods before `before`; or the start itself.
+ */
+function movedStart(opts: Partial<Options>, start: Date, before: number): Date {
+  const n = opts.interval ?? 1;
+  const time = start.getTime() % DAY;
+  const atTime = (y: number, m: number, d: number) => new Date(Date.UTC(y, m, d) + time);
+  switch (opts.freq) {
+    case RRule.DAILY:
+    case RRule.WEEKLY: {
+      const weekly = opts.freq === RRule.WEEKLY;
+      const wkst = typeof opts.wkst === 'number' ? opts.wkst : (opts.wkst?.weekday ?? 0);
+      const back = weekly ? ((weekdayOf(start) - wkst + 7) % 7) * DAY : 0;
+      const first = start.getTime() - back;
+      const step = n * (weekly ? 7 : 1) * DAY;
+      const k = Math.floor((before - first) / step) - 2;
+      return k >= 1 ? new Date(first + k * step) : start;
+    }
+    case RRule.MONTHLY: {
+      const months = start.getUTCFullYear() * 12 + start.getUTCMonth();
+      const b = new Date(before);
+      const k = Math.floor((b.getUTCFullYear() * 12 + b.getUTCMonth() - months) / n) - 2;
+      if (k < 1) return start;
+      const m = months + k * n;
+      return atTime(Math.floor(m / 12), m % 12, 1);
+    }
+    case RRule.YEARLY: {
+      const k = Math.floor((new Date(before).getUTCFullYear() - start.getUTCFullYear()) / n) - 2;
+      return k >= 1 ? atTime(start.getUTCFullYear() + k * n, 0, 1) : start;
+    }
+    default:
+      return start;
+  }
+}
+
+/** Where a COUNT series ends (its last date), or null if it has none. */
+const countEnds = new Map<string, Date | null>();
+
+function countEnd(opts: Partial<Options>, start: Date, key: string): Date | null {
+  const known = countEnds.get(key);
+  if (known !== undefined) return known;
+  const rule = new RRule({ ...opts, dtstart: start }, true);
+  let last: Date | null = null;
+  limitWork(rule, COUNT_BUDGET);
+  try {
+    rule.all((d) => {
+      last = d;
+      return true;
+    });
+  } catch (e) {
+    if (e !== OVER_BUDGET) throw e;
+  }
+  if (countEnds.size >= 500) countEnds.delete(countEnds.keys().next().value as string);
+  countEnds.set(key, last);
+  return last;
+}
+
+/** A valid rule's dates (floating) in [after, before], with bounded work. */
+function windowDates(rrule: string, startWall: string, after: number, before: number): Date[] {
+  const start = floating(startWall);
+  let opts: Partial<Options> = RRule.parseString(rrule);
+  if (opts.count) {
+    const end = countEnd(opts, start, `${rrule}\u0000${startWall}`);
+    if (!end) return [];
+    const { count: _drop, ...rest } = opts;
+    const until = opts.until && opts.until < end ? opts.until : end;
+    opts = { ...rest, until };
+  }
+  if (opts.until && opts.until.getTime() < after) return [];
+  opts = explicitParts(opts, start);
+  const dtstart = movedStart(opts, start, after);
+  const rule = new RRule({ ...opts, dtstart }, true);
+  const period = (MIN_PERIOD[opts.freq ?? RRule.DAILY] ?? DAY) * (opts.interval ?? 1);
+  const periods = (before - Math.min(dtstart.getTime(), after)) / period + 4;
+  return walk(rule, periods, (keep) => {
+    rule.between(new Date(after), new Date(before), true, keep);
+  });
+}
 
 /**
  * Occurrences overlapping [from, to). `viewerTz` places all-day events.
@@ -191,18 +363,10 @@ export function expand(
   }
   if (!isValidRRule(event.rrule)) return [];
 
-  const rule = new RRule({ ...RRule.parseString(event.rrule), dtstart: floating(startWall) });
   // Search a floating window wide enough to cover any zone offset (±14 h)
   // and occurrences that start before `from` but are still running.
   const pad = 15 * 60 * 60_000 + duration * 60_000;
-  // Only the window is collected (rrule still counts COUNT from the first
-  // date), so a long-running series isn't cut off by the cap (review 0004, L5).
-  const all = rule.between(
-    new Date(from - pad),
-    new Date(to + pad),
-    true,
-    (_d, i) => i < MAX_OCCURRENCES,
-  );
+  const all = windowDates(event.rrule, startWall, from - pad, to + pad);
   const inRange = (o: Occurrence) =>
     overlaps(o) || (o.start === o.end && o.start >= from && o.start < to);
   // Days changed on their own: skipped ones drop out, moved ones drop out

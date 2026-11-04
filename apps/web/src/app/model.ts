@@ -80,6 +80,8 @@ export interface Backend {
   spaceId?(): string;
   /** Every record id this device has seen in the space, including deleted ones. */
   knownIds?(): Promise<Set<string>>;
+  /** Whether a full pull has finished this session, with no failed sync since. */
+  caughtUp?(): boolean;
 }
 
 const demoBackend: Backend = {
@@ -100,10 +102,18 @@ export function setBackend(b: Backend | null): void {
 const removedAt = new Map<string, number>();
 
 /** The current space and every id seen in it, live or deleted (used by import). */
-export async function importContext(): Promise<{ spaceId: string; known: Set<string> }> {
+export async function importContext(): Promise<{
+  spaceId: string;
+  known: Set<string>;
+  caughtUp: boolean;
+}> {
   const known = new Set<string>([...store.value.entries.map((e) => e.id), ...removedAt.keys()]);
   for (const id of (await backend.knownIds?.()) ?? []) known.add(id);
-  return { spaceId: backend.spaceId?.() ?? SPACE_ID, known };
+  return {
+    spaceId: backend.spaceId?.() ?? SPACE_ID,
+    known,
+    caughtUp: backend.caughtUp?.() ?? true,
+  };
 }
 
 let persistPaused = false;

@@ -14,6 +14,7 @@ export interface IcsOccurrence {
 }
 
 const DEFAULT_MAX = 2000;
+const DEFAULT_BUDGET_MS = 1500;
 
 const keyOf = (uid: string, localStart: string) => `${uid}\u0000${localStart}`;
 
@@ -40,7 +41,7 @@ export function icsOccurrences(
   from: number,
   to: number,
   viewerTz: string,
-  opts: { max?: number } = {},
+  opts: { max?: number; budgetMs?: number } = {},
 ): IcsOccurrence[] {
   const max = Math.max(0, Math.floor(opts.max ?? DEFAULT_MAX));
   if (max === 0 || !(from < to)) return [];
@@ -51,10 +52,13 @@ export function icsOccurrences(
   }
 
   // Bound the work done for huge feeds; far more than `max` is never needed.
+  // Each event's expansion is bounded on its own (see time/recurrence); a
+  // deadline bounds a feed with very many of them (review 0004, condition B).
   const workLimit = Math.max(max * 4, 1000);
+  const deadline = Date.now() + (opts.budgetMs ?? DEFAULT_BUDGET_MS);
   const out: IcsOccurrence[] = [];
   for (const e of cal.events) {
-    if (out.length >= workLimit) break;
+    if (out.length >= workLimit || Date.now() > deadline) break;
     if (e.cancelled) continue;
     const isOverride = e.recurrence_id !== null;
     const exdates = new Set(e.exdates.map((x) => x.slice(0, e.all_day ? 10 : 16)));

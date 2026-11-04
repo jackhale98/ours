@@ -68,13 +68,30 @@ export async function refreshCalendars(force = false): Promise<number> {
 /* ---------- busy feed ---------- */
 
 export const feedOn = signal(false);
+/** Whether the partner is in the space now (from the server's member list). */
+const partnerPresent = signal(true);
+
+/**
+ * Called with the server's member list. A partner who has left takes their
+ * consent with them (review 0004, R5): their busy times leave this person's
+ * feed at once, and the flag is cleared so a later partner starts unasked.
+ */
+export function setPartnerPresent(present: boolean): void {
+  partnerPresent.value = present;
+  const shares = settings.value.feed_share_busy;
+  if (!present && shares?.[partner.value]) {
+    updateSettings({ feed_share_busy: { ...shares, [partner.value]: false } });
+  }
+}
 export const feedUrl = signal<string | null>(null);
 /**
  * The partner's busy times go into this person's feed only if they chose to
  * include them and the partner agreed (review 0004, L4). Both choices live in
  * the shared settings, so every device of both people sees the same.
  */
-export const partnerAllows = computed(() => !!settings.value.feed_share_busy?.[partner.value]);
+export const partnerAllows = computed(
+  () => partnerPresent.value && !!settings.value.feed_share_busy?.[partner.value],
+);
 export const includePartner = computed(
   () => partnerAllows.value && !!settings.value.feed_include?.[viewer.value],
 );

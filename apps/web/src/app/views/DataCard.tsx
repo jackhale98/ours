@@ -46,9 +46,10 @@ export function DataCard() {
   const [asking, setAsking] = useState<Asking>(null);
   const [phrase, setPhrase] = useState('');
   const [resetArmed, setResetArmed] = useState(false);
-  const [pending, setPending] = useState<{ summary: ImportSummary; apply: () => number } | null>(
-    null,
-  );
+  const [pending, setPending] = useState<{
+    summary: ImportSummary;
+    apply: () => Promise<number>;
+  } | null>(null);
   const file = useRef<HTMLInputElement>(null);
   const stamp = today.value;
 
@@ -190,10 +191,16 @@ export function DataCard() {
             <button
               type="button"
               class="btn sm primary"
-              onClick={() => {
-                const n = pending.apply();
-                setPending(null);
-                toast(n ? `Imported ${n} item${n === 1 ? '' : 's'}.` : 'Nothing was imported.');
+              onClick={async () => {
+                try {
+                  const n = await pending.apply();
+                  setPending(null);
+                  toast(n ? `Imported ${n} item${n === 1 ? '' : 's'}.` : 'Nothing was imported.');
+                } catch (err) {
+                  toast(
+                    err instanceof ImportError ? err.message : 'That file couldn’t be imported.',
+                  );
+                }
               }}
             >
               Import

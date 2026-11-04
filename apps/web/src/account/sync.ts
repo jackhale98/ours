@@ -67,8 +67,18 @@ export class SyncEngine implements Backend {
   private running: Promise<void> | null = null;
   private again = false;
   private stopped = false;
+  private caught = false;
 
   constructor(private readonly ctx: SyncContext) {}
+
+  /**
+   * True once a pull has reached the end of the server's changes in this
+   * session, and no sync has failed since. Until then this device may not
+   * know every deletion, so import waits (security review 0004, condition A).
+   */
+  caughtUp(): boolean {
+    return this.caught;
+  }
 
   deviceId(): string {
     return this.ctx.deviceId;
@@ -286,6 +296,7 @@ export class SyncEngine implements Backend {
         } while (this.again && !this.stopped);
         syncStatus.value = 'synced';
       } catch (err) {
+        this.caught = false;
         syncStatus.value = err instanceof ApiError && err.status === 0 ? 'offline' : 'error';
       } finally {
         this.running = null;
@@ -416,7 +427,10 @@ export class SyncEngine implements Backend {
       applyRemote(upserts, removed);
       since = page.cursor;
       await kvSet(this.cursorKey(), since);
-      if (!page.more) return;
+      if (!page.more) {
+        this.caught = true;
+        return;
+      }
     }
   }
 }
