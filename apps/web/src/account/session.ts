@@ -70,7 +70,14 @@ export interface Session {
 }
 
 interface MeResponse {
-  user: { id: string; email: string; personal_key_version?: number; personal_kids?: Kid[] };
+  user: {
+    id: string;
+    email: string;
+    personal_key_version?: number;
+    personal_kids?: Kid[];
+    /** When this person last changed keys (rotation), if ever. */
+    keys_changed_at?: number | null;
+  };
   device_id: string;
   /** When this session signed in or last confirmed with a passkey. */
   signed_in_at?: number;

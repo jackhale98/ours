@@ -142,6 +142,7 @@ export function PasskeysCard() {
   const info = me.value;
   const [busy, setBusy] = useState(false);
   const [armed, setArmed] = useState(false);
+  const [cleared, setCleared] = useState(false);
   useEffect(() => {
     void loadPasskeys().catch(() => {});
   }, []);
@@ -155,6 +156,9 @@ export function PasskeysCard() {
   const anyEligible = list.some((p) => p.can_unlock && !copies.has(p.id));
   const anyTooOld = on && list.some((p) => !p.can_unlock);
   const partnerName = nameOf(partner.value);
+  // After a change of keys, a new passkey is only safe once the lost device
+  // is out of the account it would sync through: asked once (review 0006, N3).
+  const askCleared = !!info.user.keys_changed_at && !cleared;
   const run = async (fn: () => Promise<void>, ok: string) => {
     setBusy(true);
     try {
@@ -263,6 +267,19 @@ export function PasskeysCard() {
           out of your Apple, Google or password manager account.
         </p>
       )}
+      {info.user.keys_changed_at && (
+        <label class="chkline">
+          <input
+            type="checkbox"
+            checked={cleared}
+            onChange={(e) => setCleared(e.currentTarget.checked)}
+          />
+          <span>
+            I’ve removed the lost device from my Apple, Google or password manager account, so a new
+            passkey won’t sync to it.
+          </span>
+        </label>
+      )}
       {on &&
         anyEligible &&
         (armed ? (
@@ -279,7 +296,7 @@ export function PasskeysCard() {
               <button
                 type="button"
                 class="btn sm primary"
-                disabled={busy}
+                disabled={busy || askCleared}
                 onClick={() =>
                   void run(
                     () => enablePasskeyUnlock(),
@@ -302,7 +319,7 @@ export function PasskeysCard() {
       <button
         type="button"
         class="btn sm"
-        disabled={busy}
+        disabled={busy || askCleared}
         onClick={() =>
           void run(async () => {
             // A recent sign-in, or a fresh check with a passkey you have.

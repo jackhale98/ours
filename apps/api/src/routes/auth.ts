@@ -398,7 +398,7 @@ auth.post('/passkey/reauth/options', requireAuth, async (c) => {
   if (!mine.results.length) throw new HttpError(404, 'no_passkey');
   const options = await generateAuthenticationOptions({
     rpID,
-    userVerification: 'preferred',
+    userVerification: 'required', // the verify route requires it (review 0006, N1)
     allowCredentials: mine.results.map((p) => ({
       id: p.id,
       ...(p.transports ? { transports: JSON.parse(p.transports) } : {}),

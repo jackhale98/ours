@@ -278,3 +278,14 @@ Conditions:
 2. N2: list the new columns in THREAT_MODEL and the privacy policy, and say there that fetches are seen.
 
 When both are done, **`PASSKEY_UNLOCK` can be turned on in production.** A check of those two changes is enough. N3, N4 and I7–I9 are recommended, not required.
+
+## Fixes after the check
+
+| Item | Fix | Test |
+|---|---|---|
+| N1 | `/auth/passkey/reauth/options` asks for user verification as `required`, matching the verify route. | Reading |
+| N2 | THREAT_MODEL lists `passkeys.aaguid`, `sessions.reauth_at`/`passkey_id`, `users.keys_changed_at` and the copy versions; the privacy policy says the server records each passkey's provider, when you last changed keys, and when a device fetches an unlock copy. | — |
+| N3 | `/me` returns `keys_changed_at`. After a change of keys, the Passkeys card asks for "I've removed the lost device from my Apple, Google or password manager account…" before adding a passkey or turning unlocking on. | Reading |
+| N4 | Fetch emails are no longer capped (fetches are limited to ten an hour), so a second device asking in the same hour is told. | API "tells every fetch, and never lets older keys replace newer ones" |
+| I8 | `PUT` refuses (409 `newer_copy`) a copy holding older key versions than the one stored. | Same test |
+| I7, I9 | Accepted: unknown providers show as "Passkey N"; a confirmation for unlocking also counts as a recent sign-in for changing keys (both need that passkey and face, fingerprint or passcode). | — |

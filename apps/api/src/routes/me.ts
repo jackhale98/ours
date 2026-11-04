@@ -11,7 +11,7 @@ me.get('/me', requireAuth, async (c) => {
   const user = c.var.user;
   const [profile, devices, spaces, passkeys, kids] = await c.env.DB.batch([
     c.env.DB.prepare(
-      'SELECT id, email, created_at, personal_key_version FROM users WHERE id = ?',
+      'SELECT id, email, created_at, personal_key_version, keys_changed_at FROM users WHERE id = ?',
     ).bind(user.id),
     c.env.DB.prepare(
       'SELECT id, label, created_at, last_seen FROM devices WHERE user_id = ? ORDER BY created_at',

@@ -45,7 +45,10 @@ Every stored field (keep in sync with `apps/api/migrations` and the privacy poli
 | memberships | space_id, user_id, role, joined_at | Who shares which space |
 | invites | id, space_id, kind, wrapped (ciphertext), created_by, expires_at, used_at | Pairing and device linking |
 | key_backups | user_id, wrapped (ciphertext), version, updated_at | Recovery |
-| key_unlocks | passkey_id, user_id, wrapped (ciphertext), created_at | Passkey unlock (ADR 0015), only if turned on: which passkeys can unlock, and the key ring sealed with a key only that passkey can produce |
+| key_unlocks | passkey_id, user_id, wrapped (ciphertext), created_at, space_version, personal_version | Passkey unlock (ADR 0015), only if turned on: which passkeys can unlock, the key versions each copy holds, and the key ring sealed with a key only that passkey can produce. The server also sees when a copy is fetched |
+| passkeys (added) | aaguid | Which provider made each passkey (iCloud Keychain, Google Password Manager, a password manager…), so people can tell them apart. Recorded for every passkey added, whether or not passkey unlock is on |
+| sessions (added) | reauth_at, passkey_id | When a session last confirmed with a passkey, and which passkey it signed in or confirmed with (recent-confirmation checks) |
+| users (added) | keys_changed_at | When the person last changed keys; passkeys added before it can't unlock |
 | records | id, space_id, scope, owner_user_id, key_version, nonce, ciphertext, deleted, rev, updated_at, updated_by | Sync. Reveals record count, padded size (64-byte buckets), change times, who changed it, whether it is private, deletion |
 | reminders | id, space_id, target_user_id, kind (`reminder` or `deferred`), fire_at, key_version, payload (ciphertext), created_at | Reminders a user set for themselves (up to 64, at most 8 days ahead) and partner notifications held for quiet hours. Reveals **when** reminders fire, not which plan; deleted when sent |
 | push_subs | id, user_id, device_id, endpoint, p256dh, auth, created_at, last_ok, failures | Web Push delivery, one per device; dropped when the push service says it is gone |

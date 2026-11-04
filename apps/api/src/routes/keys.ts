@@ -173,6 +173,18 @@ keys.put('/unlock/:id', async (c) => {
       'passkey_too_old',
       'This passkey was added before you changed your keys, so it can’t unlock them. Add a new one.',
     );
+  // A device still on older keys can't replace a copy of newer ones (I8).
+  const existing = await c.env.DB.prepare(
+    'SELECT space_version, personal_version FROM key_unlocks WHERE passkey_id = ? AND user_id = ?',
+  )
+    .bind(id, uid)
+    .first<{ space_version: number; personal_version: number }>();
+  if (
+    existing &&
+    (input.space_version < existing.space_version ||
+      input.personal_version < existing.personal_version)
+  )
+    throw new HttpError(409, 'newer_copy', 'This passkey already unlocks newer keys.');
   const nonce = fromB64Url(input.wrapped.nonce);
   const ct = fromB64Url(input.wrapped.ciphertext);
   const packed = new Uint8Array(nonce.length + ct.length);
@@ -211,12 +223,14 @@ keys.get('/unlock/:id', async (c) => {
   if (!row) throw new HttpError(404, 'not_found');
   // So an unlock someone else tried doesn't go unnoticed. The server can't
   // tell whether it opened, so it says what it knows (L3).
+  // Every fetch is told (fetches are limited to 10 an hour anyway), so a
+  // second device asking in the same hour isn't hidden (review 0006, N4).
   c.executionCtx.waitUntil(
-    notice(c.env, 'get', uid, {
+    sendEmail(c.env, {
       to: c.var.user.email,
       subject: 'A device asked to unlock your Ours keys with a passkey',
       text: 'A device just fetched the copy of your Ours keys that one of your passkeys can open. If this wasn’t you, open Ours → Privacy, remove that passkey and devices you don’t recognise, and change your keys.',
-    }),
+    }).catch(() => {}),
   );
   const bytes = bytesOf(row.wrapped);
   return c.json({

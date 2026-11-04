@@ -104,6 +104,23 @@ describe('passkey unlock (ADR 0015)', () => {
     expect((await put(sam.token, c, copy(2, 2))).status).toBe(200);
   });
 
+  it('tells every fetch, and never lets older keys replace newer ones (N4, I8)', async () => {
+    const { sam } = await couple();
+    const pk = `pk-n4-${Date.now()}-aaaaaaaaaa`;
+    await addPasskey(sam.userId, pk);
+    await confirmWith(sam.userId, pk);
+    expect((await put(sam.token, pk, copy(2, 2))).status).toBe(200);
+    const n = outbox.length;
+    await call(`/keys/unlock/${pk}`, { token: sam.token });
+    await call(`/keys/unlock/${pk}`, { token: sam.token });
+    await waitForMail(n + 2);
+    expect(outbox.slice(n).filter((m) => /asked to unlock/.test(m.subject))).toHaveLength(2);
+    const older = await put(sam.token, pk, copy(1, 2));
+    expect(older.status).toBe(409);
+    expect(older.json.error).toBe('newer_copy');
+    expect((await put(sam.token, pk, copy(2, 2))).status).toBe(200);
+  });
+
   it('needs a confirmation from the last ten minutes (L2)', async () => {
     const { sam } = await couple();
     const pk = `pk-late-${Date.now()}-aaaaaaaaaa`;

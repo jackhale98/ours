@@ -44,12 +44,13 @@
         <thead><tr><th scope="col">Data</th><th scope="col">Why</th><th scope="col">How long</th></tr></thead>
         <tbody>
           <tr><td>Your email address</td><td>Sign-in links and important account notices</td><td>Until you delete your account</td></tr>
-          <tr><td>Passkey public keys</td><td>Passkey sign-in (no biometrics ever reach us)</td><td>Until you remove the passkey</td></tr>
+          <tr><td>Passkey public keys, and which provider made each (for example iCloud Keychain or a password manager)</td><td>Passkey sign-in (no biometrics ever reach us), and telling your passkeys apart</td><td>Until you remove the passkey</td></tr>
           <tr><td>Devices and sessions (a device name you choose, sign-in times; session tokens stored only as hashes)</td><td>Keeping you signed in, letting you see and remove devices</td><td>Sessions end after 90 days unused</td></tr>
           <tr><td>Which accounts share a space</td><td>Syncing between you and your partner</td><td>Until you leave the space</td></tr>
           <tr><td>Encrypted records</td><td>Sync and backup. We can see how many there are, roughly how big (rounded up to 64 bytes), when and by whom they changed, whether one is private, and whether it was deleted</td><td>Until deleted by you</td></tr>
           <tr><td>Encrypted key backup</td><td>Restoring on a new device with your recovery phrase</td><td>Until you delete your account</td></tr>
-          <tr><td>Passkey unlock copies, only if you turn this on</td><td>Unlocking your keys on a new device with a passkey; sealed with a key only that passkey can produce</td><td>Until you turn it off, remove the passkey, change your keys or delete your account</td></tr>
+          <tr><td>Passkey unlock copies, only if you turn this on, with the key versions each holds; and when a device fetches one</td><td>Unlocking your keys on a new device with a passkey; sealed with a key only that passkey can produce</td><td>Until you turn it off, remove the passkey, change your keys or delete your account</td></tr>
+          <tr><td>When you last changed your keys</td><td>Keeping passkeys from before the change from unlocking</td><td>Until you delete your account</td></tr>
           <tr><td>Invite links (encrypted key material)</td><td>Pairing and linking devices</td><td>24 hours, erased once used</td></tr>
           <tr><td>Notification settings: this device's push address, and your quiet hours and time zone if you set them</td><td>Sending notifications, and holding your partner's until quiet hours end</td><td>Until you turn notifications off or remove the device</td></tr>
           <tr><td>Reminder times (the text is encrypted)</td><td>Sending a reminder while your phone is asleep</td><td>Deleted once sent</td></tr>
