@@ -3351,3 +3351,88 @@ fieldset.reminders > legend {
   align-items: center;
   gap: 6px;
 }
+
+/* ---------- lists: selecting several items ---------- */
+.lbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+}
+.lbar > .lfilters {
+  flex: 1;
+  min-width: 0;
+}
+.lselect {
+  margin-left: auto;
+  white-space: nowrap;
+}
+.it.selecting .chk {
+  cursor: pointer;
+}
+.it.sel-on {
+  background: var(--sunk);
+}
+.it.selecting .box.sel {
+  border-radius: 50%;
+}
+.bulkbar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: calc(57px + env(safe-area-inset-bottom, 0px));
+  z-index: 22;
+  max-width: 760px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px max(16px, env(safe-area-inset-right, 0px)) 12px
+    max(16px, env(safe-area-inset-left, 0px));
+  background: var(--surface);
+  border-top: 1px solid var(--line);
+  box-shadow: 0 -6px 18px rgb(0 0 0 / 0.08);
+}
+.bulk-top {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.bulk-top > span {
+  margin-right: auto;
+}
+.bulk-acts,
+.bulk-panel {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+/* One row of actions; it scrolls sideways if a list has many. */
+.bulk-acts {
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+}
+.bulk-acts > .btn {
+  flex: none;
+}
+.bulk-panel .txt {
+  flex: 1 1 160px;
+  min-width: 0;
+}
+/* Room for the bar under the last items, and no floating button over it. */
+main:has(.bulkbar) {
+  padding-bottom: 220px;
+}
+body:has(.bulkbar) .fab {
+  display: none;
+}
+@media (min-width: 880px) {
+  .bulkbar {
+    bottom: 16px;
+    border: 1px solid var(--line);
+    border-radius: 16px;
+  }
+}

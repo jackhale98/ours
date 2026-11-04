@@ -276,3 +276,46 @@ test('the rows of views and lists scroll sideways only', async ({ page }, info) 
     expect(box, sel).toEqual({ y: 'hidden', fits: true });
   }
 });
+
+test('select several items and change them together, with undo', async ({ page }) => {
+  await page.goto('/#lists');
+  const dialog = await newList(page, 'To-dos', 'Errands');
+  await dialog.getByRole('button', { name: 'Make list' }).click();
+  const add = page.getByRole('textbox', { name: 'Add to Errands' });
+  for (const t of ['Post office', 'Bank', 'Pharmacy']) {
+    await add.fill(t);
+    await add.press('Enter');
+    await expect(page.locator('.it', { hasText: t })).toBeVisible();
+  }
+
+  await page.getByRole('button', { name: 'Select', exact: true }).click();
+  await page.getByRole('checkbox', { name: 'Select Post office' }).check();
+  await page.getByRole('checkbox', { name: 'Select Bank' }).check();
+  const bar = page.getByRole('region', { name: 'Change the selected items' });
+  await expect(bar).toContainText('2 selected');
+
+  // The same due date for both.
+  await bar.getByRole('button', { name: 'Due date' }).click();
+  await bar.getByLabel('Due date').fill('2030-01-15');
+  await bar.getByRole('button', { name: 'Set' }).click();
+  await expect(page.locator('.toast-host')).toContainText('2 items due');
+  for (const t of ['Post office', 'Bank'])
+    await expect(page.locator('.it', { hasText: t })).toContainText('Jan 15');
+  await expect(page.locator('.it', { hasText: 'Pharmacy' })).not.toContainText('Jan 15');
+
+  // Both to one person, then undone.
+  await bar.getByRole('button', { name: 'Assign' }).click();
+  await bar.getByRole('button', { name: 'Me' }).click();
+  await expect(page.locator('.toast-host')).toContainText('You’re on 2 items');
+  await page.locator('.toast-host').getByRole('button', { name: 'Undo' }).click();
+  await bar.getByRole('button', { name: 'Assign' }).click();
+  await bar.getByRole('button', { name: 'Me' }).click();
+
+  // Ticked off together; selecting ends.
+  await bar.getByRole('button', { name: 'Mark done' }).click();
+  await expect(bar).toHaveCount(0);
+  await expect(page.locator('.it', { hasText: 'Post office' })).toHaveCount(0);
+  await expect(page.locator('.it', { hasText: 'Pharmacy' })).toBeVisible();
+  await page.getByRole('button', { name: /Show done · 2/ }).click();
+  await expect(page.getByRole('button', { name: /is on it\. Change: Post office/ })).toBeVisible();
+});

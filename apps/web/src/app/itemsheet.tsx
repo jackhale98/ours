@@ -45,7 +45,7 @@ export function ItemSheetHost() {
 type Who = 'none' | 'me' | 'partner';
 
 const REACTION_LABEL: Record<Reaction, string> = { loved: 'Loved it', good: 'Good', meh: 'Meh' };
-const BEFORE_CHOICES = [
+export const BEFORE_CHOICES = [
   [null, 'No date'],
   [0, 'On the day'],
   [1, 'The day before'],

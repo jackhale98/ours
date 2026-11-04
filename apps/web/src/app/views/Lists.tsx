@@ -11,11 +11,12 @@ import { keyBetween } from '@ours/core/schema';
 import { signal } from '@preact/signals';
 import { useRef, useState } from 'preact/hooks';
 import { LENGTH_LABEL } from '../freetime';
-import { itemSheet } from '../itemsheet';
+import { BEFORE_CHOICES, itemSheet } from '../itemsheet';
 import {
   allLists,
   bothWant,
   completeItem,
+  completeItems,
   copyList,
   countOf,
   createList,
@@ -48,6 +49,7 @@ import {
   setListPrivacy,
   startOver,
   toggleHeart,
+  updateItems,
 } from '../lists';
 import { nameOf, partner, put, remove, type Slot, settings, update, viewer } from '../model';
 import { fmtLong, nextFreeEvening, relDay, repeatText, today } from '../select';
@@ -58,6 +60,18 @@ import { CrossViewPane, CrossViews, crossView } from './ListViews';
 const showDone = signal(false);
 const picked = signal<string | null>(null);
 const listSheet = signal<{ type: 'new' } | { type: 'settings'; id: string } | null>(null);
+/** Items picked to change together, in the list they belong to; null when not selecting. */
+const selection = signal<{ list: string; ids: Set<string> } | null>(null);
+const selecting = (listId: string) => selection.value?.list === listId;
+function toggleSelected(listId: string, id: string): void {
+  const cur = selection.value;
+  if (!cur || cur.list !== listId) return;
+  const ids = new Set(cur.ids);
+  if (ids.has(id)) ids.delete(id);
+  else ids.add(id);
+  selection.value = { list: listId, ids };
+}
+
 /** Filters on the list in view: what the two of you both want, soon, in season, favourites. */
 const filters = signal<{ both: boolean; soon: boolean; season: boolean; favs: boolean }>({
   both: false,
@@ -162,6 +176,7 @@ export function ItemRow({
   from?: string;
 }) {
   const f = featuresOf(list);
+  const chosen = selecting(list.id) && !from;
   const d = item.rec.data;
   const [done, setDone] = useState(d.done);
   const due = f.has('due') ? dueOf(item) : null;
@@ -180,6 +195,26 @@ export function ItemRow({
       {f.has('notes') && d.note && <span class="it-note">{d.note}</span>}
     </span>
   );
+  if (chosen) {
+    // Selecting: the whole row picks it; nothing else happens on a tap.
+    const on = !!selection.value?.ids.has(item.id);
+    return (
+      <li class={`it selecting${done ? ' done' : ''}${on ? ' sel-on' : ''}`}>
+        <label class="chk">
+          <input
+            type="checkbox"
+            checked={on}
+            aria-label={`Select ${d.text}`}
+            onChange={() => toggleSelected(list.id, item.id)}
+          />
+          <span class="box sel">
+            <Icon name="check" size={15} />
+          </span>
+          {text}
+        </label>
+      </li>
+    );
+  }
   return (
     <li
       class={`it${done ? ' done' : ''}${bothWant(item) && f.has('hearts') ? ' agreed' : ''}${f.has('tick') ? '' : ' idea'}`}
@@ -539,9 +574,23 @@ function ListBody({ list }: { list: ListEntry }) {
           </span>
         </p>
       )}
-      {f.has('pick') && <Pick list={list} pool={open} />}
-      <Filters list={list} />
-      <AddItem list={list} placeholder={placeholderFor(list)} />
+      {f.has('pick') && !selecting(list.id) && <Pick list={list} pool={open} />}
+      <div class="lbar">
+        <Filters list={list} />
+        {all.length > 1 && (
+          <button
+            type="button"
+            class="linkbtn lselect"
+            aria-pressed={selecting(list.id)}
+            onClick={() => {
+              selection.value = selecting(list.id) ? null : { list: list.id, ids: new Set() };
+            }}
+          >
+            {selecting(list.id) ? 'Cancel' : 'Select'}
+          </button>
+        )}
+      </div>
+      {!selecting(list.id) && <AddItem list={list} placeholder={placeholderFor(list)} />}
       <Items items={open} list={list} />
       {!open.length && (
         <p class="nothing">
@@ -588,7 +637,298 @@ function ListBody({ list }: { list: ListEntry }) {
           {showDone.value && <Items items={done} list={list} />}
         </>
       )}
+      {selecting(list.id) && (
+        <BulkBar list={list} shown={[...open, ...(showDone.value ? done : [])]} />
+      )}
     </>
+  );
+}
+
+/** What can be done to the selected items, for the features the list has. */
+function BulkBar({ list, shown }: { list: ListEntry; shown: ItemEntry[] }) {
+  const f = featuresOf(list);
+  const sel = selection.value;
+  const [panel, setPanel] = useState<'due' | 'who' | 'section' | null>(null);
+  const [date, setDate] = useState(today.value);
+  const [before, setBefore] = useState<number | null>(1);
+  const [section, setSection] = useState('');
+  const [armed, setArmed] = useState(false);
+  if (!sel) return null;
+  const items = itemsOf(list.id).filter((i) => sel.ids.has(i.id));
+  const ids = items.map((i) => i.id);
+  const n = ids.length;
+  const forPlan = !!planOf(list);
+  const shared = !list.rec.data.private;
+  const me = viewer.value;
+  const p = partner.value;
+  const allShown = shown.length > 0 && shown.every((i) => sel.ids.has(i.id));
+  const sections = [
+    ...new Set(
+      itemsOf(list.id)
+        .map((i) => i.rec.data.section)
+        .filter((x): x is string => !!x),
+    ),
+  ];
+  const things = (k: number) => `${k} ${k === 1 ? 'item' : 'items'}`;
+  const done = (msg: string, r: { undo: () => void; changed: number }, exit = false) => {
+    setPanel(null);
+    setArmed(false);
+    if (exit) selection.value = null;
+    toast(r.changed ? msg.replace('#', things(r.changed)) : 'Nothing to change.', r.undo);
+  };
+  const toggle = (which: 'due' | 'who' | 'section') => {
+    setArmed(false);
+    setPanel(panel === which ? null : which);
+  };
+  return (
+    <section class="bulkbar" aria-label="Change the selected items">
+      <div class="bulk-top">
+        <span aria-live="polite">
+          <b>{n}</b> selected
+        </span>
+        <button
+          type="button"
+          class="linkbtn"
+          onClick={() => {
+            selection.value = {
+              list: list.id,
+              ids: allShown ? new Set() : new Set(shown.map((i) => i.id)),
+            };
+          }}
+        >
+          {allShown ? 'Select none' : 'Select all'}
+        </button>
+        <button
+          type="button"
+          class="linkbtn"
+          onClick={() => {
+            selection.value = null;
+          }}
+        >
+          Done
+        </button>
+      </div>
+      {panel === 'due' && (
+        <div class="bulk-panel">
+          {forPlan ? (
+            <>
+              <label class="sr" for="bulk-before">
+                When they’re due
+              </label>
+              <select
+                id="bulk-before"
+                class="txt"
+                value={before === null ? '' : String(before)}
+                onChange={(e) =>
+                  setBefore(e.currentTarget.value ? Number(e.currentTarget.value) : null)
+                }
+              >
+                {BEFORE_CHOICES.map(([v, label]) => (
+                  <option key={label} value={v === null ? '' : String(v)}>
+                    {label}
+                  </option>
+                ))}
+              </select>
+              <button
+                type="button"
+                class="btn sm primary"
+                onClick={() =>
+                  done(
+                    'Changed when # are due.',
+                    updateItems(ids, () => ({ before_days: before, due: null })),
+                  )
+                }
+              >
+                Set
+              </button>
+            </>
+          ) : (
+            <>
+              <label class="sr" for="bulk-due">
+                Due date
+              </label>
+              <input
+                id="bulk-due"
+                class="txt"
+                type="date"
+                value={date}
+                onInput={(e) => setDate(e.currentTarget.value)}
+              />
+              <button
+                type="button"
+                class="btn sm primary"
+                disabled={!date}
+                onClick={() =>
+                  done(
+                    `# due ${dayWord(date)}.`,
+                    updateItems(ids, () => ({ due: date })),
+                  )
+                }
+              >
+                Set
+              </button>
+              <button
+                type="button"
+                class="btn sm ghost"
+                onClick={() =>
+                  // A repeating task counts from its date: those keep theirs.
+                  done(
+                    'Took the date off #.',
+                    updateItems(ids, (i) =>
+                      i.rec.data.repeat || !i.rec.data.due ? null : { due: null },
+                    ),
+                  )
+                }
+              >
+                No date
+              </button>
+            </>
+          )}
+        </div>
+      )}
+      {panel === 'who' && (
+        <div class="bulk-panel">
+          {(
+            [
+              [me, 'Me'],
+              [p, nameOf(p)],
+              [null, 'No one'],
+            ] as [Slot | null, string][]
+          ).map(([slot, label]) => (
+            <button
+              type="button"
+              key={label}
+              class="btn sm"
+              onClick={() =>
+                done(
+                  slot ? `${slot === me ? 'You’re' : `${nameOf(slot)}’s`} on #.` : 'Unassigned #.',
+                  updateItems(ids, (i) =>
+                    i.scope === 'space' && i.rec.data.assignee !== slot ? { assignee: slot } : null,
+                  ),
+                )
+              }
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      )}
+      {panel === 'section' && (
+        <form
+          class="bulk-panel"
+          onSubmit={(e) => {
+            e.preventDefault();
+            const name = section.trim().slice(0, 60) || null;
+            done(
+              name ? `Moved # to ${name}.` : 'Took # out of their sections.',
+              updateItems(ids, (i) =>
+                (i.rec.data.section ?? null) === name ? null : { section: name },
+              ),
+            );
+          }}
+        >
+          <label class="sr" for="bulk-section">
+            Section
+          </label>
+          <input
+            id="bulk-section"
+            class="txt"
+            list="bulk-sections"
+            placeholder="Section name, or empty for none"
+            maxLength={60}
+            value={section}
+            onInput={(e) => setSection(e.currentTarget.value)}
+          />
+          <datalist id="bulk-sections">
+            {sections.map((x) => (
+              <option key={x} value={x} />
+            ))}
+          </datalist>
+          <button type="submit" class="btn sm primary">
+            Move
+          </button>
+        </form>
+      )}
+      <div class="bulk-acts">
+        {f.has('due') && (
+          <button
+            type="button"
+            class="btn sm"
+            disabled={!n}
+            aria-expanded={panel === 'due'}
+            onClick={() => toggle('due')}
+          >
+            <Icon name="cal" size={15} />
+            Due date
+          </button>
+        )}
+        {f.has('who') && f.has('tick') && shared && (
+          <button
+            type="button"
+            class="btn sm"
+            disabled={!n}
+            aria-expanded={panel === 'who'}
+            onClick={() => toggle('who')}
+          >
+            Assign
+          </button>
+        )}
+        {f.has('sections') && (
+          <button
+            type="button"
+            class="btn sm"
+            disabled={!n}
+            aria-expanded={panel === 'section'}
+            onClick={() => toggle('section')}
+          >
+            Section
+          </button>
+        )}
+        {f.has('tick') &&
+          (items.length > 0 && items.every((i) => i.rec.data.done) ? (
+            <button
+              type="button"
+              class="btn sm"
+              disabled={!n}
+              onClick={() =>
+                done(
+                  'Unticked #.',
+                  updateItems(ids, () => ({ done: false })),
+                  true,
+                )
+              }
+            >
+              Mark not done
+            </button>
+          ) : (
+            <button
+              type="button"
+              class="btn sm"
+              disabled={!n}
+              onClick={() => done('Ticked off #.', completeItems(ids, f.has('did')), true)}
+            >
+              <Icon name="check" size={15} />
+              Mark done
+            </button>
+          ))}
+        <button
+          type="button"
+          class="btn sm ghost danger"
+          disabled={!n}
+          onClick={() => {
+            if (!armed) {
+              setPanel(null);
+              setArmed(true);
+              return;
+            }
+            if (picked.value && sel.ids.has(picked.value)) picked.value = null;
+            done(`Removed ${things(n)}.`, { undo: remove(ids), changed: n }, true);
+          }}
+        >
+          {armed ? `Tap again: remove ${n}` : 'Remove'}
+        </button>
+      </div>
+    </section>
   );
 }
 

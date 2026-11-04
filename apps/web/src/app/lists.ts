@@ -521,3 +521,62 @@ export function dueText(due: string): { text: string; late: boolean } {
   if (due < t) return { text: `Overdue · was ${relDay(due)}`, late: true };
   return { text: due === t ? 'Due today' : `Due ${relDay(due)}`, late: false };
 }
+
+/* ---------- several items at once ---------- */
+
+type ItemData = ItemEntry['rec']['data'];
+
+/**
+ * Changes several items at once; `patch` gives each its change, or null to
+ * leave it. Returns an undo that puts back what each had, and how many changed.
+ */
+export function updateItems(
+  ids: readonly string[],
+  patch: (item: ItemEntry) => Partial<ItemData> | null,
+): { undo: () => void; changed: number } {
+  const before: [string, Partial<ItemData>][] = [];
+  bulk(() => {
+    for (const id of ids) {
+      const item = findEntry(id);
+      if (item?.rec.kind !== 'item') continue;
+      const p = patch(item as ItemEntry);
+      if (!p) continue;
+      const d = item.rec.data as ItemData;
+      const old = Object.fromEntries(
+        Object.keys(p).map((k) => [k, d[k as keyof ItemData] ?? null]),
+      ) as Partial<ItemData>;
+      before.push([id, old]);
+      update<'item'>(id, p);
+    }
+  });
+  return {
+    changed: before.length,
+    undo: () =>
+      bulk(() => {
+        for (const [id, old] of before) update<'item'>(id, old);
+      }),
+  };
+}
+
+/** Ticks several items off, as ticking each would (repeats move on, "did it" is noted). */
+export function completeItems(
+  ids: readonly string[],
+  alsoDid: boolean,
+): { undo: () => void; changed: number } {
+  const undos: (() => void)[] = [];
+  bulk(() => {
+    for (const id of ids) {
+      const item = findEntry(id);
+      if (item?.rec.kind !== 'item' || item.rec.data.done) continue;
+      undos.push(completeItem(item as ItemEntry).undo);
+      if (alsoDid) undos.push(didIt(item as ItemEntry));
+    }
+  });
+  return {
+    changed: alsoDid ? undos.length / 2 : undos.length,
+    undo: () =>
+      bulk(() => {
+        for (const u of undos.reverse()) u();
+      }),
+  };
+}
