@@ -4,7 +4,7 @@ import { addDays } from '@ours/core/time';
 import { signal } from '@preact/signals';
 import { tasksFor, waiting } from '../inbox';
 import { itemSheet } from '../itemsheet';
-import { dueText } from '../lists';
+import { dueOf, dueText } from '../lists';
 import { commentsFor, nameOf, names, partner, viewer } from '../model';
 import { planMode } from '../planview';
 import {
@@ -185,7 +185,7 @@ function SideCards() {
         {tasks.length ? (
           <ul class="side-tasks">
             {tasks.slice(0, 8).map(({ item, list }) => {
-              const due = dueText(item.rec.data.due ?? today.value);
+              const due = dueText(dueOf(item) ?? today.value);
               return (
                 <li key={item.id}>
                   <button

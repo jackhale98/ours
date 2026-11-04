@@ -9,6 +9,7 @@ import {
   type EventData,
   encodeRecord,
   isTimeZone,
+  isValidData,
   KIND_SCHEMAS,
   MAX_EXCEPTIONS,
   MIGRATIONS,
@@ -268,5 +269,72 @@ describe('exceptions on repeating plans', () => {
   it('keeps at most 200', () => {
     const many = Array.from({ length: MAX_EXCEPTIONS + 1 }, () => ({ at: weekly.start, to: null }));
     expect(ok({ ...weekly, except: many })).toBe(false);
+  });
+});
+
+describe('list features and item details', () => {
+  const item = {
+    list_id: 'l1',
+    text: 'Picture hooks',
+    done: false,
+    assignee: null,
+    due: null,
+    sort_key: 'm',
+  };
+
+  it('accepts lists with features, a starting point and a plan', () => {
+    expect(
+      isValidData('list', {
+        name: 'Weekend away',
+        kind: 'todo',
+        private: false,
+        features: ['tick', 'due', 'sections'],
+        template: 'packing',
+        plan_id: 'p1',
+      }),
+    ).toBe(true);
+    expect(
+      isValidData('list', { name: 'X', kind: 'todo', private: false, features: ['fly'] }),
+    ).toBe(false);
+  });
+
+  it('accepts every item detail, and refuses bad ones', () => {
+    expect(
+      isValidData('item', {
+        ...item,
+        note: 'Brass, not steel',
+        qty: '2 packs',
+        link: 'https://example.com/hooks',
+        price: 1299,
+        section: 'Hardware',
+        hearts: { a: true },
+        did: [{ date: '2026-10-02', a: 'loved', b: 'good' }],
+        again: true,
+        when: 'someday',
+        season: ['summer'],
+        before_days: 3,
+      }),
+    ).toBe(true);
+    for (const bad of [
+      { link: 'javascript:alert(1)' },
+      { link: 'https://a b' },
+      { price: -1 },
+      { price: 1.5 },
+      { did: [{ date: '2026-10-02', a: 'amazing' }] },
+      { season: ['monsoon'] },
+      { before_days: 400 },
+      { hearts: { c: true } },
+    ]) {
+      expect(isValidData('item', { ...item, ...bad }), JSON.stringify(bad)).toBe(false);
+    }
+  });
+
+  it('keeps saved starting points in the shared settings', () => {
+    expect(
+      isValidData('settings', {
+        week_start: 1,
+        list_templates: [{ id: 't1', name: 'Camping', features: ['tick', 'qty'], private: false }],
+      }),
+    ).toBe(true);
   });
 });

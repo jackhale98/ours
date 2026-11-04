@@ -4,13 +4,13 @@ import { addDays } from '@ours/core/time';
 import { signal } from '@preact/signals';
 import type { ComponentChildren } from 'preact';
 import { useState } from 'preact/hooks';
-import { checkinLists, ideasList, itemsOf } from '../lists';
+import { checkinLists, ideasList, itemsOf, memoryToRecall } from '../lists';
 import { byKind, createEvent, nameOf, partner, put, type Slot, settings, viewer } from '../model';
 import { noticeProposal } from '../notices';
 import { withDefaultReminders } from '../reminders';
 import { agenda, type Day, dow, fmtLong, freeEvenings, relDay, today, zone } from '../select';
 import { Icon, Marker, toast } from '../ui';
-import { ItemRow } from './Lists';
+import { ItemRow, planIdea } from './Lists';
 import { EventRow } from './Plan';
 
 interface Draft {
@@ -127,6 +127,7 @@ export function CheckinView() {
   const ideaList = ideasList();
   const ideas = ideaList ? itemsOf(ideaList.id).slice(0, 6) : [];
   const idea = ideas.find((i) => i.id === d.idea) ?? ideas[0];
+  const recall = memoryToRecall();
 
   const checkins = byKind('checkin')
     .flatMap((c) => (c.rec.kind === 'checkin' ? [c.rec.data] : []))
@@ -235,7 +236,7 @@ export function CheckinView() {
                   {shareLists.length > 1 && <p class="sublbl">{g.list.rec.data.name}</p>}
                   <ul class="items">
                     {g.items.map((i) => (
-                      <ItemRow key={i.id} item={i} assignable />
+                      <ItemRow key={i.id} item={i} list={g.list} assign />
                     ))}
                   </ul>
                 </div>
@@ -251,6 +252,23 @@ export function CheckinView() {
           )}
         </Step>
         <Step i={2} title="Plan time together">
+          {recall && (
+            <p class="note recall">
+              <Icon name="star" size={15} />
+              <span>
+                {recall.date
+                  ? `About a month ago you did “${recall.item.rec.data.text}”.`
+                  : `A favourite: “${recall.item.rec.data.text}”.`}{' '}
+                <button
+                  type="button"
+                  class="linkbtn"
+                  onClick={() => planIdea(recall.item.rec.data.text)}
+                >
+                  Do it again
+                </button>
+              </span>
+            </p>
+          )}
           {frees.length && idea ? (
             <>
               <span class="sublbl" id="ci-dates">

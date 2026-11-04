@@ -355,8 +355,8 @@ test('sign up, pair, compare safety codes, and sync plans both ways', async ({ b
   await sam.getByRole('button', { name: 'New list' }).click();
   const listDialog = sam.getByRole('dialog', { name: 'New list' });
   await listDialog
-    .getByRole('group', { name: 'What kind of list?' })
-    .getByRole('button', { name: /^List/ })
+    .getByRole('group', { name: 'Start from' })
+    .getByRole('button', { name: /^To-dos/ })
     .click();
   await listDialog.getByRole('textbox', { name: 'Name' }).fill('Hardware');
   await listDialog.getByRole('button', { name: 'Make list' }).click();

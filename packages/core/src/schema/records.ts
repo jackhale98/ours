@@ -163,13 +163,75 @@ export const BusyStubData = v.pipe(
 export const LIST_KINDS = ['shopping', 'chores', 'todo', 'ideas', 'gifts', 'check'] as const;
 export type ListKind = (typeof LIST_KINDS)[number];
 
+/**
+ * What a list can do, each switched on or off in its settings. A list
+ * without `features` (made before they existed) gets defaults from its kind.
+ * - tick: items are ticked off (otherwise they're ideas, kept until removed)
+ * - who: who's on it, and taking turns on repeating ones (shared lists)
+ * - due: due dates and repeats
+ * - pick: "pick one for us"
+ * - plan: "plan it" turns an item into a plan
+ * - length: roughly how long, to fit your free time
+ * - hearts: each of you can heart an item; "we both want" filter
+ * - did: "we did it", with when and how it was, and "do again"
+ * - when: soon or someday, and seasons
+ * - notes, qty, link, price, sections: details on each item
+ */
+export const LIST_FEATURES = [
+  'tick',
+  'who',
+  'due',
+  'pick',
+  'plan',
+  'length',
+  'hearts',
+  'did',
+  'when',
+  'notes',
+  'qty',
+  'link',
+  'price',
+  'sections',
+] as const;
+export type ListFeature = (typeof LIST_FEATURES)[number];
+
+/** Starting points: each switches on a set of features (the app keeps the sets). */
+export const LIST_TEMPLATES = [
+  'blank',
+  'groceries',
+  'todo',
+  'chores',
+  'dates',
+  'watch',
+  'restaurants',
+  'gifts',
+  'packing',
+  'bucket',
+  'custom',
+] as const;
+export type ListTemplate = (typeof LIST_TEMPLATES)[number];
+
+const Features = v.pipe(v.array(v.picklist(LIST_FEATURES)), v.maxLength(LIST_FEATURES.length));
+
 export const ListData = v.strictObject({
   name: NonEmpty(100),
   kind: v.picklist(LIST_KINDS),
   private: v.boolean(),
   /** Its open items come up in the weekly check-in to share out (shared lists only). */
   checkin: v.optional(v.boolean()),
+  /** What this list can do (see LIST_FEATURES); absent on older lists. */
+  features: v.optional(Features),
+  /** The starting point it was made from. */
+  template: v.optional(v.picklist(LIST_TEMPLATES)),
+  /** A checklist for this plan (packing, getting ready). */
+  plan_id: v.optional(v.nullable(RefId)),
 });
+
+/** How "we did it" was, for each of you. */
+export const REACTIONS = ['loved', 'good', 'meh'] as const;
+export type Reaction = (typeof REACTIONS)[number];
+export const SEASONS = ['spring', 'summer', 'autumn', 'winter'] as const;
+export type Season = (typeof SEASONS)[number];
 
 /** Rough lengths for date ideas, with the minutes each needs free. */
 export const IDEA_LENGTHS = {
@@ -198,6 +260,41 @@ export const ItemData = v.strictObject({
   last_done: v.optional(v.nullable(LocalDate)),
   /** Date ideas: roughly how long it takes, if anyone said (see IDEA_LENGTHS). */
   length: v.optional(v.nullable(v.picklist(['short', 'evening', 'half', 'day']))),
+  /** Details, each shown when its list has that feature. */
+  note: v.optional(v.nullable(Text(2000))),
+  qty: v.optional(v.nullable(Text(30))),
+  /** A web address, kept as text: never fetched or previewed. */
+  link: v.optional(
+    v.nullable(v.pipe(v.string(), v.maxLength(2048), v.regex(/^https?:\/\/[^\s]+$/))),
+  ),
+  /** Price in hundredths (cents, pence). */
+  price: v.optional(v.nullable(v.pipe(v.number(), v.integer(), v.minValue(0), v.maxValue(1e11)))),
+  section: v.optional(v.nullable(Text(60))),
+  /** Who hearted it ("we both want"). */
+  hearts: v.optional(v.strictObject({ a: v.optional(v.boolean()), b: v.optional(v.boolean()) })),
+  /** "We did it": when, and how it was for each of you. */
+  did: v.optional(
+    v.pipe(
+      v.array(
+        v.strictObject({
+          date: LocalDate,
+          a: v.optional(v.picklist(REACTIONS)),
+          b: v.optional(v.picklist(REACTIONS)),
+        }),
+      ),
+      v.maxLength(100),
+    ),
+  ),
+  /** Worth doing again: a favourite. */
+  again: v.optional(v.boolean()),
+  when: v.optional(v.nullable(v.picklist(['soon', 'someday']))),
+  season: v.optional(
+    v.pipe(v.array(v.picklist(['spring', 'summer', 'autumn', 'winter'])), v.maxLength(4)),
+  ),
+  /** On a plan's checklist: due this many days before the plan. */
+  before_days: v.optional(
+    v.nullable(v.pipe(v.number(), v.integer(), v.minValue(0), v.maxValue(365))),
+  ),
 });
 
 export const CommentData = v.strictObject({
@@ -287,6 +384,20 @@ export const SettingsData = v.strictObject({
    */
   notify_notes: v.optional(
     v.strictObject({ a: v.optional(v.boolean()), b: v.optional(v.boolean()) }),
+  ),
+  /** Starting points the two of you saved from your own lists. */
+  list_templates: v.optional(
+    v.pipe(
+      v.array(
+        v.strictObject({
+          id: RefId,
+          name: NonEmpty(40),
+          features: Features,
+          private: v.boolean(),
+        }),
+      ),
+      v.maxLength(12),
+    ),
   ),
 });
 

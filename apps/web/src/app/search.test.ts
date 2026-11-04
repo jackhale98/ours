@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 import { beforeEach, describe, expect, it } from 'vitest';
-import { createList } from './lists';
+import { createList, STARTING_POINTS, type StartingPoint } from './lists';
 import {
   addComment,
   createEvent,
@@ -79,7 +79,7 @@ describe('search', () => {
   });
 
   it('finds list items, list names and notes on plans', () => {
-    const list = createList('Groceries', 'todo', false);
+    const list = createList('Groceries', STARTING_POINTS[0] as StartingPoint, false);
     put('item', {
       list_id: list,
       text: 'Oat milk',

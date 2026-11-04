@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 /** Demo sample data, relative to today (after docs/prototype.html). */
 import { generateKey, toBase64Url } from '@ours/core/crypto';
-import { keyBetween } from '@ours/core/schema';
+import { type ItemData, keyBetween, type ListData } from '@ours/core/schema';
 import { addDays, addWallMinutes, startOfWeek } from '@ours/core/time';
+import { STARTING_POINTS } from './lists';
 import {
   addComment,
   bulk,
@@ -12,7 +13,6 @@ import {
   replaceAll,
   type Slot,
   setViewer,
-  store,
   update,
 } from './model';
 import { dow, today, zone } from './select';
@@ -25,6 +25,7 @@ function seedAll(): void {
   replaceAll({ v: 2, viewer: 'a', space_key: toBase64Url(generateKey()), entries: [] });
   const t = today.value;
   const d = (n: number) => addDays(t, n);
+  let lisbon = '';
   const as = (slot: Slot, fn: () => void) => {
     setViewer(slot);
     fn();
@@ -103,7 +104,7 @@ function seedAll(): void {
       }),
     );
     createEvent(ev('Movie night', 11, '20:00', 'both', { mins: 150 }));
-    createEvent(ev('Lisbon trip', 23, null, 'both', { countdown: true, away: true }));
+    lisbon = createEvent(ev('Lisbon trip', 23, null, 'both', { countdown: true, away: true }));
     createEvent(ev('Our anniversary', 41, null, 'both', { countdown: true }));
     createEvent(ev('Maya’s wedding', 58, null, 'both', { countdown: true, away: true }));
   });
@@ -126,34 +127,43 @@ function seedAll(): void {
   });
 
   setViewer('a');
+  type Seed = [string, Slot | null, boolean?, Partial<ItemData>?];
   const list = (
     name: string,
-    kind: 'todo' | 'gifts' | 'ideas',
-    items: [string, Slot | null, boolean?][],
+    start: string,
+    items: Seed[],
     owner?: Slot,
+    extra: Partial<ListData> = {},
   ) => {
+    const sp = STARTING_POINTS.find((x) => x.id === start) as (typeof STARTING_POINTS)[number];
     const scope = owner ? 'user' : 'space';
-    const id = put('list', { name, kind, private: !!owner }, { scope, owner: owner ?? null });
+    const kind =
+      sp.template === 'gifts' ? 'gifts' : sp.features.includes('tick') ? 'todo' : 'ideas';
+    const id = put(
+      'list',
+      { name, kind, private: !!owner, features: [...sp.features], template: sp.template, ...extra },
+      { scope, owner: owner ?? null },
+    );
     let key: string | null = null;
-    for (const [text, assignee, done] of items) {
+    for (const [text, assignee, done, more] of items) {
       key = keyBetween(key, null);
       put(
         'item',
-        { list_id: id, text, done: !!done, assignee, due: null, sort_key: key },
+        { list_id: id, text, done: !!done, assignee, due: null, sort_key: key, ...more },
         { scope, owner: owner ?? null },
       );
     }
     return id;
   };
-  list('Groceries', 'todo', [
-    ['Oat milk', null],
-    ['Eggs, a dozen', null],
-    ['Lemons', 'b'],
-    ['Coffee beans', 'a'],
-    ['Bay leaves', null],
-    ['Sourdough', null, true],
+  list('Groceries', 'groceries', [
+    ['Oat milk', null, false, { qty: '2', section: 'Dairy' }],
+    ['Eggs', null, false, { qty: 'a dozen', section: 'Dairy' }],
+    ['Lemons', 'b', false, { qty: '4', section: 'Produce' }],
+    ['Bay leaves', null, false, { section: 'Produce' }],
+    ['Coffee beans', 'a', false, { note: 'The Ethiopian one, not the dark roast' }],
+    ['Sourdough', null, true, { section: 'Bakery' }],
   ]);
-  const home = list('Home', 'todo', [
+  const home = list('Home', 'chores', [
     ['Book furnace service', 'a'],
     ['Return library books', 'b'],
     ['Fix the bathroom drawer', null],
@@ -193,33 +203,39 @@ function seedAll(): void {
     'Gift ideas',
     'gifts',
     [
-      ['Alex: chalk bag for climbing', null],
-      ['Alex: the ramen cookbook', null],
-      ['Mom: wool scarf, green', null],
+      ['Alex: chalk bag for climbing', null, false, { price: 2800 }],
+      ['Alex: the ramen cookbook', null, false, { price: 3200 }],
+      ['Mom: wool scarf, green', null, false, { price: 4500, note: 'Not too scratchy' }],
     ],
     'a',
   );
-  const ideas = list('Date ideas', 'ideas', [
-    ['Pottery class', null],
-    ['Night walk and dumplings', null],
-    ['Board game café', null],
-    ['Try the new Georgian place', null],
-    ['Sunrise at the pier', null],
-    ['Cook a three-course dinner', null],
-    ['Day trip to the coast', null],
+  list('Date ideas', 'dates', [
+    ['Pottery class', null, false, { length: 'short', hearts: { a: true, b: true } }],
+    ['Night walk and dumplings', null, false, { length: 'evening', hearts: { b: true } }],
+    [
+      'Board game café',
+      null,
+      false,
+      { did: [{ date: d(-31), a: 'loved', b: 'good' }], again: true, hearts: { a: true } },
+    ],
+    ['Try the new Georgian place', null, false, { when: 'soon', hearts: { a: true, b: true } }],
+    ['Sunrise at the pier', null, false, { season: ['summer'] }],
+    ['Cook a three-course dinner', null, false, { length: 'evening' }],
+    ['Day trip to the coast', null, false, { length: 'day', when: 'someday' }],
   ]);
-  // Some ideas say roughly how long they take; the rest fit whenever.
-  const lengths: Record<string, 'short' | 'evening' | 'half' | 'day'> = {
-    'Pottery class': 'short',
-    'Night walk and dumplings': 'evening',
-    'Cook a three-course dinner': 'evening',
-    'Day trip to the coast': 'day',
-  };
-  for (const e of store.value.entries) {
-    if (e.rec.kind !== 'item' || e.rec.data.list_id !== ideas) continue;
-    const len = lengths[e.rec.data.text];
-    if (len) update<'item'>(e.id, { length: len });
-  }
+  // A packing list for the Lisbon trip, due in the days before it.
+  list(
+    'For Lisbon',
+    'packing',
+    [
+      ['Passports', null, false, { section: 'Documents', before_days: 1 }],
+      ['Book the airport train', 'a', false, { section: 'Before we go', before_days: 7 }],
+      ['Sunscreen', null, false, { section: 'Bags', qty: '2' }],
+      ['Walking shoes', null, false, { section: 'Bags' }],
+    ],
+    undefined,
+    { plan_id: lisbon },
+  );
 
   // The weekly check-in shares out what's open on the Home list.
   update<'list'>(home, { checkin: true });

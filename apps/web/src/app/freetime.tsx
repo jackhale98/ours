@@ -8,7 +8,7 @@
 import { IDEA_LENGTHS, type IdeaLength } from '@ours/core/schema';
 import type { Interval } from '@ours/core/time';
 import { useState } from 'preact/hooks';
-import { allLists, type ItemEntry, itemsOf, typeOf } from './lists';
+import { type ItemEntry, ideaLists, itemsOf } from './lists';
 import { fmtLong, fmtTime, freeStretches, relDay, zone } from './select';
 import { openQuick, sheet } from './sheets';
 import { CloseButton, Icon, Marker, Sheet } from './ui';
@@ -31,11 +31,9 @@ function span(w: Interval): string {
   return `${fmtTime(hhmm(w.start))} – ${fmtTime(hhmm(w.end))} · ${len}`;
 }
 
-/** Every idea on a date-ideas list. */
+/** Every idea on a list of ideas to plan. */
 export function allIdeas(): ItemEntry[] {
-  return allLists()
-    .filter((l) => typeOf(l.rec.data.kind).behaviour === 'ideas')
-    .flatMap((l) => itemsOf(l.id));
+  return ideaLists().flatMap((l) => itemsOf(l.id));
 }
 
 /** The stretch to start with: this evening's if there is one, else the longest. */

@@ -7,6 +7,7 @@ import { signal } from '@preact/signals';
 import { useState } from 'preact/hooks';
 import { AddToCalendar } from './addtocal';
 import { FreeTimeSheet } from './freetime';
+import { countOf, createList, currentList, listsForPlan, STARTING_POINTS } from './lists';
 import {
   addComment,
   commentsFor,
@@ -533,6 +534,7 @@ function EventSheet({ id, occ }: { id: string; occ: string | null }) {
             onChange={(next) => update<'event'>(id, { remind: withReminders(e, me, next) })}
           />
         )}
+      {e.status !== 'declined' && <PlanChecklists id={id} e={e} />}
       {e.status !== 'declined' && <AddToCalendar id={id} e={e} day={day} />}
       <div class="thread">
         <p class="eyebrow">Notes</p>
@@ -583,6 +585,50 @@ function EventSheet({ id, occ }: { id: string; occ: string | null }) {
         </div>
       )}
     </Sheet>
+  );
+}
+
+/* ---------- a plan's checklists ---------- */
+
+/** Packing or getting-ready lists for a plan, and a way to add one. */
+function PlanChecklists({ id, e }: { id: string; e: EventData }) {
+  const lists = listsForPlan(id);
+  const open = (listId: string) => {
+    currentList.value = listId;
+    close();
+    location.hash = '#lists';
+  };
+  return (
+    <div class="checklists">
+      {lists.map((l) => {
+        const { n, what } = countOf(l);
+        return (
+          <button type="button" class="btn sm" key={l.id} onClick={() => open(l.id)}>
+            <Icon name="list" size={15} />
+            {l.rec.data.name}
+            <span class="small muted">
+              {n} {what}
+            </span>
+          </button>
+        );
+      })}
+      <button
+        type="button"
+        class="linkbtn"
+        onClick={() => {
+          const packing = STARTING_POINTS.find((sp) => sp.id === 'packing');
+          if (!packing) return;
+          // A private plan's list is private too: the partner never sees either.
+          const listId = createList(`For ${e.title}`.slice(0, 100), packing, e.privacy === 'busy', {
+            planId: id,
+          });
+          open(listId);
+          toast('Checklist made. Give things a “days before” in their details.');
+        }}
+      >
+        Add a checklist
+      </button>
+    </div>
   );
 }
 

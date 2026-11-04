@@ -135,7 +135,9 @@ export function search(query: string): Hit[] {
   for (const list of allLists()) {
     if (matches(words, list.rec.data.name)) lists.push({ kind: 'list', id: list.id, list });
     for (const item of itemsOf(list.id)) {
-      if (matches(words, item.rec.data.text)) items.push({ kind: 'item', id: item.id, item, list });
+      const d = item.rec.data;
+      if (matches(words, [d.text, d.note ?? '', d.section ?? ''].join(' ')))
+        items.push({ kind: 'item', id: item.id, item, list });
     }
   }
   // Open things before done ones.

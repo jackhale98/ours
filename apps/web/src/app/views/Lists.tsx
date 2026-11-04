@@ -1,7 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-
+/**
+ * Lists. Every list is the same kind of thing; what it can do is switched on
+ * in its settings (lists.ts FEATURES), and a starting point switches on a
+ * sensible set. One view shows whatever a list has on: ticking off, who's
+ * on it, due dates, pick one, plan it, hearts, "we did it", sections and
+ * details.
+ */
 import { parseQuickAdd } from '@ours/core/parse';
-import type { ListKind } from '@ours/core/schema';
 import { keyBetween } from '@ours/core/schema';
 import { signal } from '@preact/signals';
 import { useRef, useState } from 'preact/hooks';
@@ -9,32 +14,57 @@ import { LENGTH_LABEL } from '../freetime';
 import { itemSheet } from '../itemsheet';
 import {
   allLists,
+  bothWant,
   completeItem,
+  copyList,
+  countOf,
   createList,
   currentList,
   deleteList,
+  deleteStartingPoint,
+  didIt,
+  dueOf,
   dueText,
+  FEATURE_GROUPS,
+  FEATURES,
+  type Feature,
+  featuresOf,
   type ItemEntry,
   inCheckin,
   itemsOf,
-  LIST_TYPES,
   type ListEntry,
-  type PickerKind,
-  pickerKind,
+  lastDid,
+  money,
+  planOf,
   renameList,
+  SEASON_NAME,
+  STARTING_POINTS,
+  type StartingPoint,
+  savedStartingPoints,
+  saveStartingPoint,
+  seasonNow,
+  setFeatures,
   setListCheckin,
-  setListKind,
   setListPrivacy,
-  typeOf,
+  startOver,
+  toggleHeart,
 } from '../lists';
 import { nameOf, partner, put, remove, type Slot, settings, update, viewer } from '../model';
-import { nextFreeEvening, relDay, repeatText, today } from '../select';
-import { openQuick } from '../sheets';
+import { fmtLong, nextFreeEvening, relDay, repeatText, today } from '../select';
+import { openEvent, openQuick } from '../sheets';
 import { CloseButton, colorVar, Icon, Sheet, Switch, toast } from '../ui';
+import { CrossViewPane, CrossViews, crossView } from './ListViews';
 
 const showDone = signal(false);
 const picked = signal<string | null>(null);
-const listSheet = signal<{ type: 'new' } | { type: 'edit'; id: string } | null>(null);
+const listSheet = signal<{ type: 'new' } | { type: 'settings'; id: string } | null>(null);
+/** Filters on the list in view: what the two of you both want, soon, in season, favourites. */
+const filters = signal<{ both: boolean; soon: boolean; season: boolean; favs: boolean }>({
+  both: false,
+  soon: false,
+  season: false,
+  favs: false,
+});
 
 function AssignButton({ item }: { item: ItemEntry }) {
   const me = viewer.value;
@@ -60,72 +90,210 @@ function AssignButton({ item }: { item: ItemEntry }) {
   );
 }
 
-/** When an item is due, in words ("Overdue · was Mon", "Due today", "Due Fri"). */
-export function ItemRow({ item, assignable }: { item: ItemEntry; assignable: boolean }) {
-  const d = item.rec.data;
-  const [done, setDone] = useState(d.done);
-  const due = d.due ? dueText(d.due) : null;
+/** My heart (a toggle), and whether the partner hearted it too. */
+function Hearts({ item }: { item: ItemEntry }) {
+  const me = viewer.value;
+  const p = partner.value;
+  const h = item.rec.data.hearts ?? {};
+  const mine = !!h[me];
+  const theirs = !!h[p];
   return (
-    <li class={`it${done ? ' done' : ''}`}>
-      <label class="chk">
-        <input
-          type="checkbox"
-          checked={done}
-          onChange={(e) => {
-            const v = e.currentTarget.checked;
-            setDone(v);
-            // Let the tick register visually before the item moves.
-            setTimeout(() => {
-              if (!v) {
-                update<'item'>(item.id, { done: false });
-                return;
-              }
-              const { undo, next } = completeItem(item);
-              if (d.repeat) {
-                setDone(false);
-                toast(next ? `Done. Next: ${relDay(next)}.` : 'Done.', undo);
-              }
-            }, 420);
-          }}
-        />
-        <span class="box">
-          <Icon name="check" size={15} />
-        </span>
-        <span class="it-t">
-          {d.text}
-          {(due || d.repeat) && (
-            <span class={`it-sub${due?.late ? ' late' : ''}`}>
-              {due?.text}
-              {due && d.repeat ? ' · ' : ''}
-              {d.repeat && (
-                <>
-                  <Icon name="repeat" size={12} />
-                  {repeatText(d.repeat)}
-                  {d.rotate ? ', taking turns' : ''}
-                </>
-              )}
-            </span>
-          )}
-        </span>
-      </label>
-      {assignable && <AssignButton item={item} />}
+    <span class={`hearts${mine && theirs ? ' both' : ''}`}>
       <button
         type="button"
-        class="iconbtn it-more"
-        aria-label={`Details: ${d.text}`}
-        onClick={() => {
-          itemSheet.value = item.id;
-        }}
+        class={`iconbtn heart${mine ? ' on' : ''}`}
+        aria-pressed={mine}
+        aria-label={`I’d like this: ${item.rec.data.text}`}
+        onClick={() => toggleHeart(item, me)}
       >
-        <Icon name="next" size={16} />
+        <Icon name="heart" size={17} />
       </button>
+      {theirs && (
+        <span class="theirs" title={`${nameOf(p)} would like this`}>
+          <Icon name="heart" size={12} />
+          <span class="sr">{nameOf(p)} would like this too.</span>
+        </span>
+      )}
+    </span>
+  );
+}
+
+/** "today", "yesterday", or "Sun, Oct 4", to follow other words. */
+const dayWord = (date: string) => {
+  const r = relDay(date);
+  return /^(Today|Yesterday|Tomorrow)$/.test(r) ? r.toLowerCase() : r;
+};
+
+/** The small line under an item: everything its list shows, in words. */
+function itemSub(item: ItemEntry, f: Set<Feature>): string[] {
+  const d = item.rec.data;
+  const out: string[] = [];
+  if (f.has('qty') && d.qty) out.push(d.qty);
+  if (f.has('due')) {
+    const due = dueOf(item);
+    if (due) out.push(dueText(due).text);
+    if (d.repeat) out.push(`${repeatText(d.repeat)}${d.rotate ? ', taking turns' : ''}`);
+  }
+  if (f.has('length') && d.length) out.push(LENGTH_LABEL[d.length]);
+  if (f.has('when')) {
+    if (d.when) out.push(d.when === 'soon' ? 'Soon' : 'Someday');
+    if (d.season?.length) out.push(d.season.map((s) => SEASON_NAME[s]).join(', '));
+  }
+  if (f.has('price') && d.price != null) out.push(money(d.price));
+  if (f.has('did')) {
+    const last = lastDid(item);
+    const n = d.did?.length ?? 0;
+    if (last) out.push(`Did it ${n > 1 ? `${n} times, last ` : ''}${dayWord(last.date)}`);
+  }
+  return out;
+}
+
+/** One item. `assign` shows who's on it even if the list doesn't (the check-in shares things out). */
+export function ItemRow({
+  item,
+  list,
+  assign,
+  from,
+}: {
+  item: ItemEntry;
+  list: ListEntry;
+  assign?: boolean;
+  /** The list's name, when shown among items from other lists. */
+  from?: string;
+}) {
+  const f = featuresOf(list);
+  const d = item.rec.data;
+  const [done, setDone] = useState(d.done);
+  const due = f.has('due') ? dueOf(item) : null;
+  const late = !!due && !d.done && dueText(due).late;
+  const sub = [...(from ? [from] : []), ...itemSub(item, f)];
+  const text = (
+    <span class="it-t">
+      {d.again && f.has('did') && (
+        <span class="fav" title="Favourite">
+          <Icon name="star" size={13} />
+          <span class="sr">Favourite: </span>
+        </span>
+      )}
+      {d.text}
+      {sub.length > 0 && <span class={`it-sub${late ? ' late' : ''}`}>{sub.join(' · ')}</span>}
+      {f.has('notes') && d.note && <span class="it-note">{d.note}</span>}
+    </span>
+  );
+  return (
+    <li
+      class={`it${done ? ' done' : ''}${bothWant(item) && f.has('hearts') ? ' agreed' : ''}${f.has('tick') ? '' : ' idea'}`}
+    >
+      {f.has('tick') ? (
+        <label class="chk">
+          <input
+            type="checkbox"
+            checked={done}
+            onChange={(e) => {
+              const v = e.currentTarget.checked;
+              setDone(v);
+              // Let the tick register visually before the item moves.
+              setTimeout(() => {
+                if (!v) {
+                  update<'item'>(item.id, { done: false });
+                  return;
+                }
+                const { undo, next } = completeItem(item);
+                if (f.has('did')) didIt(item);
+                if (d.repeat) {
+                  setDone(false);
+                  toast(next ? `Done. Next: ${relDay(next)}.` : 'Done.', undo);
+                }
+              }, 420);
+            }}
+          />
+          <span class="box">
+            <Icon name="check" size={15} />
+          </span>
+          {text}
+        </label>
+      ) : (
+        <span class="grow">{text}</span>
+      )}
+      <span class="it-acts">
+        {f.has('hearts') && <Hearts item={item} />}
+        {f.has('link') && d.link && (
+          <a
+            class="iconbtn"
+            href={d.link}
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label={`Open the link for ${d.text}`}
+          >
+            <Icon name="link" size={16} />
+          </a>
+        )}
+        {(assign || (f.has('who') && f.has('tick'))) && item.scope === 'space' && (
+          <AssignButton item={item} />
+        )}
+        {f.has('did') && !f.has('tick') && (
+          <button
+            type="button"
+            class="btn sm"
+            aria-label={`We did it: ${d.text}`}
+            onClick={() => {
+              const undo = didIt(item);
+              toast(`Noted. How was “${d.text}”? Say in its details.`, undo);
+            }}
+          >
+            We did it
+          </button>
+        )}
+        {f.has('plan') && !f.has('tick') && (
+          <button
+            type="button"
+            class="btn sm"
+            aria-label={`Plan it: ${d.text}`}
+            onClick={() => planIdea(d.text)}
+          >
+            Plan it
+          </button>
+        )}
+        <button
+          type="button"
+          class="iconbtn it-more"
+          aria-label={`Details: ${d.text}`}
+          onClick={() => {
+            itemSheet.value = item.id;
+          }}
+        >
+          <Icon name="next" size={16} />
+        </button>
+        {!f.has('tick') && (
+          <button
+            type="button"
+            class="iconbtn"
+            aria-label={`Remove ${d.text}`}
+            onClick={() => {
+              if (picked.value === item.id) picked.value = null;
+              toast(`Removed “${d.text}”.`, remove([item.id]));
+            }}
+          >
+            <Icon name="x" size={16} />
+          </button>
+        )}
+      </span>
     </li>
   );
 }
 
 function AddItem({ list, placeholder }: { list: ListEntry; placeholder: string }) {
+  const f = featuresOf(list);
   const [text, setText] = useState('');
+  const [section, setSection] = useState('');
   const input = useRef<HTMLInputElement>(null);
+  const sections = [
+    ...new Set(
+      itemsOf(list.id)
+        .map((i) => i.rec.data.section)
+        .filter((s): s is string => !!s),
+    ),
+  ];
   const submit = (e: Event) => {
     e.preventDefault();
     const v = text.trim();
@@ -133,8 +301,8 @@ function AddItem({ list, placeholder }: { list: ListEntry; placeholder: string }
     const first = itemsOf(list.id)[0];
     // "Take out the bins every monday", "Renew passport by mar 1": a due date
     // and repeat come from the words (only date and repeat phrases are taken out).
-    const parsed = parseQuickAdd(v, { today: today.value });
-    const taken = parsed.tokens.filter((t) => t.type === 'date' || t.type === 'repeat');
+    const parsed = f.has('due') ? parseQuickAdd(v, { today: today.value }) : null;
+    const taken = parsed?.tokens.filter((t) => t.type === 'date' || t.type === 'repeat') ?? [];
     let name = v;
     for (const t of [...taken].sort((a, b) => b.start - a.start)) {
       name = name.slice(0, t.start) + name.slice(t.end);
@@ -144,7 +312,7 @@ function AddItem({ list, placeholder }: { list: ListEntry; placeholder: string }
         .replace(/\s+(by|on|due)\s*$/i, '')
         .replace(/\s+/g, ' ')
         .trim() || v;
-    const repeat = parsed.rrule;
+    const repeat = parsed?.rrule ?? null;
     put(
       'item',
       {
@@ -152,9 +320,10 @@ function AddItem({ list, placeholder }: { list: ListEntry; placeholder: string }
         text: taken.length ? name : v,
         done: false,
         assignee: null,
-        due: parsed.date ?? (repeat ? today.value : null),
+        due: parsed?.date ?? (repeat ? today.value : null),
         sort_key: keyBetween(null, first?.rec.data.sort_key ?? null),
         ...(repeat ? { repeat } : {}),
+        ...(f.has('sections') && section.trim() ? { section: section.trim().slice(0, 60) } : {}),
       },
       { scope: list.scope, owner: list.owner },
     );
@@ -162,7 +331,7 @@ function AddItem({ list, placeholder }: { list: ListEntry; placeholder: string }
     input.current?.focus();
   };
   return (
-    <form class="additem" onSubmit={submit}>
+    <form class={`additem${f.has('sections') ? ' with-section' : ''}`} onSubmit={submit}>
       <input
         ref={input}
         class="txt"
@@ -174,6 +343,26 @@ function AddItem({ list, placeholder }: { list: ListEntry; placeholder: string }
         autocomplete="off"
         aria-label={placeholder}
       />
+      {f.has('sections') && (
+        <>
+          <input
+            class="txt sec"
+            type="text"
+            value={section}
+            maxLength={60}
+            list={`sec-${list.id}`}
+            onInput={(e) => setSection(e.currentTarget.value)}
+            placeholder="Section"
+            aria-label="Section"
+            autocomplete="off"
+          />
+          <datalist id={`sec-${list.id}`}>
+            {sections.map((s) => (
+              <option key={s} value={s} />
+            ))}
+          </datalist>
+        </>
+      )}
       <button class="btn primary" type="submit">
         <Icon name="plus" size={16} />
         Add
@@ -182,14 +371,152 @@ function AddItem({ list, placeholder }: { list: ListEntry; placeholder: string }
   );
 }
 
-const placeholderFor = (list: ListEntry) =>
-  list.rec.data.kind === 'gifts' ? 'Add a gift idea' : `Add to ${list.rec.data.name}`;
+const placeholderFor = (list: ListEntry) => {
+  const f = featuresOf(list);
+  if (list.rec.data.template === 'gifts' || list.rec.data.kind === 'gifts')
+    return 'Add a gift idea';
+  if (!f.has('tick') && f.has('plan')) return 'Add an idea';
+  return `Add to ${list.rec.data.name}`;
+};
 
-function CheckList({ list }: { list: ListEntry }) {
-  const items = itemsOf(list.id);
-  const open = items.filter((i) => !i.rec.data.done);
-  const done = items.filter((i) => i.rec.data.done);
+export function planIdea(text: string) {
+  openQuick({ text, date: nextFreeEvening(), time: '19:00', who: 'ours' });
+}
+
+/** Items in their sections (those without one first), in list order. */
+function bySection(items: ItemEntry[]): [string | null, ItemEntry[]][] {
+  const groups = new Map<string | null, ItemEntry[]>();
+  for (const i of items) {
+    const k = i.rec.data.section?.trim() || null;
+    groups.set(k, [...(groups.get(k) ?? []), i]);
+  }
+  const none = groups.get(null);
+  groups.delete(null);
+  return [...(none ? [[null, none] as [null, ItemEntry[]]] : []), ...groups.entries()];
+}
+
+function Items({ items, list }: { items: ItemEntry[]; list: ListEntry }) {
+  if (!featuresOf(list).has('sections'))
+    return (
+      <ul class="items">
+        {items.map((i) => (
+          <ItemRow key={i.id} item={i} list={list} />
+        ))}
+      </ul>
+    );
+  return (
+    <>
+      {bySection(items).map(([name, group]) => (
+        <section class="isection" key={name ?? ''} aria-label={name ?? 'Not in a section'}>
+          {name && <h2 class="eyebrow">{name}</h2>}
+          <ul class="items">
+            {group.map((i) => (
+              <ItemRow key={i.id} item={i} list={list} />
+            ))}
+          </ul>
+        </section>
+      ))}
+    </>
+  );
+}
+
+/** Filter chips for the features a list has, applied to the list and to "pick one". */
+function Filters({ list }: { list: ListEntry }) {
+  const f = featuresOf(list);
+  const v = filters.value;
+  const chips: [keyof typeof v, string][] = [];
+  if (f.has('hearts')) chips.push(['both', 'We both want']);
+  if (f.has('when'))
+    chips.push(['soon', 'Soon'], ['season', `Good in ${SEASON_NAME[seasonNow()].toLowerCase()}`]);
+  if (f.has('did')) chips.push(['favs', 'Favourites']);
+  if (!chips.length) return null;
+  return (
+    // biome-ignore lint/a11y/useSemanticElements: toggle-button group (aria-pressed), labelled
+    <div class="chips lfilters" role="group" aria-label="Show only">
+      {chips.map(([k, label]) => (
+        <button
+          type="button"
+          key={k}
+          class="chip"
+          aria-pressed={v[k]}
+          onClick={() => {
+            filters.value = { ...v, [k]: !v[k] };
+            picked.value = null;
+          }}
+        >
+          {label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function applyFilters(items: ItemEntry[], f: Set<Feature>): ItemEntry[] {
+  const v = filters.value;
+  const now = seasonNow();
+  return items.filter((i) => {
+    const d = i.rec.data;
+    if (v.both && f.has('hearts') && !bothWant(i)) return false;
+    if (v.soon && f.has('when') && d.when !== 'soon') return false;
+    if (v.season && f.has('when') && d.season?.length && !d.season.includes(now)) return false;
+    if (v.favs && f.has('did') && !d.again) return false;
+    return true;
+  });
+}
+
+function Pick({ list, pool }: { list: ListEntry; pool: ItemEntry[] }) {
+  const f = featuresOf(list);
+  const pick = pool.find((i) => i.id === picked.value);
+  const shuffle = () => {
+    if (!pool.length) return;
+    let n: ItemEntry | undefined;
+    do n = pool[Math.floor(Math.random() * pool.length)];
+    while (pool.length > 1 && n?.id === picked.value);
+    picked.value = n?.id ?? null;
+  };
+  if (!pick)
+    return (
+      <div class="pickrow">
+        <button type="button" class="btn primary" onClick={shuffle} disabled={!pool.length}>
+          <Icon name="shuffle" size={16} />
+          Pick one for us
+        </button>
+      </div>
+    );
+  return (
+    <section class="picked" aria-live="polite" aria-labelledby="pick-title">
+      <p class="eyebrow">Your pick</p>
+      <h2 class="h3" id="pick-title">
+        {pick.rec.data.text}
+      </h2>
+      {f.has('plan') && (
+        <p class="sub">Next evening you’re both free: {relDay(nextFreeEvening())}</p>
+      )}
+      <div class="pickrow">
+        {f.has('plan') && (
+          <button type="button" class="btn primary sm" onClick={() => planIdea(pick.rec.data.text)}>
+            Ask {nameOf(partner.value)}
+          </button>
+        )}
+        <button type="button" class="btn sm" onClick={shuffle}>
+          <Icon name="shuffle" size={15} />
+          Another
+        </button>
+      </div>
+    </section>
+  );
+}
+
+function ListBody({ list }: { list: ListEntry }) {
+  const f = featuresOf(list);
+  const all = itemsOf(list.id);
+  const open = applyFilters(f.has('tick') ? all.filter((i) => !i.rec.data.done) : all, f);
+  const done = f.has('tick') ? all.filter((i) => i.rec.data.done) : [];
   const priv = list.rec.data.private;
+  const plan = planOf(list);
+  const toGet = f.has('price')
+    ? all.filter((i) => !i.rec.data.done).reduce((n, i) => n + (i.rec.data.price ?? 0), 0)
+    : 0;
   return (
     <>
       {priv && (
@@ -200,13 +527,36 @@ function CheckList({ list }: { list: ListEntry }) {
           </span>
         </p>
       )}
+      {plan?.rec.kind === 'event' && (
+        <p class="note">
+          <Icon name="cal" size={15} />
+          <span>
+            For{' '}
+            <button type="button" class="linkbtn" onClick={() => openEvent(plan.id)}>
+              {plan.rec.data.title}
+            </button>
+            , {fmtLong(plan.rec.data.start.slice(0, 10))}.
+          </span>
+        </p>
+      )}
+      {f.has('pick') && <Pick list={list} pool={open} />}
+      <Filters list={list} />
       <AddItem list={list} placeholder={placeholderFor(list)} />
-      <ul class="items">
-        {open.map((i) => (
-          <ItemRow key={i.id} item={i} assignable={!priv} />
-        ))}
-      </ul>
-      {!open.length && <p class="nothing">{items.length ? 'All done.' : 'Nothing here yet.'}</p>}
+      <Items items={open} list={list} />
+      {!open.length && (
+        <p class="nothing">
+          {all.length
+            ? f.has('tick') && !filters.value.both && !filters.value.soon
+              ? 'All done.'
+              : 'Nothing matches.'
+            : 'Nothing here yet.'}
+        </p>
+      )}
+      {f.has('price') && toGet > 0 && (
+        <p class="total">
+          Still to get: <b>{money(toGet)}</b>
+        </p>
+      )}
       {done.length > 0 && (
         <>
           <div class="donebar">
@@ -223,151 +573,50 @@ function CheckList({ list }: { list: ListEntry }) {
             <button
               type="button"
               class="linkbtn"
+              onClick={() => toast('Unticked everything.', startOver(list.id))}
+            >
+              Start over
+            </button>
+            <button
+              type="button"
+              class="linkbtn"
               onClick={() => toast('Cleared done items.', remove(done.map((i) => i.id)))}
             >
               Clear done
             </button>
           </div>
-          {showDone.value && (
-            <ul class="items">
-              {done.map((i) => (
-                <ItemRow key={i.id} item={i} assignable={!priv} />
-              ))}
-            </ul>
-          )}
+          {showDone.value && <Items items={done} list={list} />}
         </>
       )}
     </>
   );
 }
 
-export function planIdea(text: string) {
-  openQuick({ text, date: nextFreeEvening(), time: '19:00', who: 'ours' });
-}
-
-function IdeasList({ list }: { list: ListEntry }) {
-  const items = itemsOf(list.id);
-  const pick = items.find((i) => i.id === picked.value);
-  const shuffle = () => {
-    if (!items.length) return;
-    let n: ItemEntry | undefined;
-    do n = items[Math.floor(Math.random() * items.length)];
-    while (items.length > 1 && n?.id === picked.value);
-    picked.value = n?.id ?? null;
-  };
-  return (
-    <>
-      {pick ? (
-        <section class="picked" aria-live="polite" aria-labelledby="pick-title">
-          <p class="eyebrow">Your pick</p>
-          <h2 class="h3" id="pick-title">
-            {pick.rec.data.text}
-          </h2>
-          <p class="sub">Next evening you’re both free: {relDay(nextFreeEvening())}</p>
-          <div class="pickrow">
-            <button
-              type="button"
-              class="btn primary sm"
-              onClick={() => planIdea(pick.rec.data.text)}
-            >
-              Ask {nameOf(partner.value)}
-            </button>
-            <button type="button" class="btn sm" onClick={shuffle}>
-              <Icon name="shuffle" size={15} />
-              Another
-            </button>
-          </div>
-        </section>
-      ) : (
-        <div class="pickrow">
-          <button type="button" class="btn primary" onClick={shuffle} disabled={!items.length}>
-            <Icon name="shuffle" size={16} />
-            Pick one for us
-          </button>
-        </div>
-      )}
-      <AddItem list={list} placeholder="Add a date idea" />
-      <ul class="items">
-        {items.map((i) => (
-          <li class="it" key={i.id}>
-            <span class="it-t grow">
-              {i.rec.data.text}
-              {i.rec.data.length && <span class="it-sub">{LENGTH_LABEL[i.rec.data.length]}</span>}
-            </span>
-            <button
-              type="button"
-              class="btn sm"
-              aria-label={`Plan it: ${i.rec.data.text}`}
-              onClick={() => planIdea(i.rec.data.text)}
-            >
-              Plan it
-            </button>
-            <button
-              type="button"
-              class="iconbtn it-more"
-              aria-label={`Details: ${i.rec.data.text}`}
-              onClick={() => {
-                itemSheet.value = i.id;
-              }}
-            >
-              <Icon name="next" size={16} />
-            </button>
-            <button
-              type="button"
-              class="iconbtn"
-              aria-label={`Remove ${i.rec.data.text}`}
-              onClick={() => {
-                if (picked.value === i.id) picked.value = null;
-                toast(`Removed “${i.rec.data.text}”.`, remove([i.id]));
-              }}
-            >
-              <Icon name="x" size={16} />
-            </button>
-          </li>
-        ))}
-      </ul>
-      {!items.length && <p class="nothing">No ideas yet. Add a few you’d both enjoy.</p>}
-    </>
-  );
-}
-
-/* ---------- create / edit sheets ---------- */
-
-type NewKind = PickerKind;
-const KIND_ORDER = Object.keys(LIST_TYPES) as NewKind[];
-
-function TypePicker({ value, onChange }: { value: ListKind; onChange: (k: NewKind) => void }) {
-  const current = pickerKind(value);
-  return (
-    // biome-ignore lint/a11y/useSemanticElements: toggle-button group (aria-pressed), labelled
-    <div class="typepick" role="group" aria-labelledby="lt-type">
-      {KIND_ORDER.map((k) => (
-        <button type="button" key={k} aria-pressed={current === k} onClick={() => onChange(k)}>
-          <b>{LIST_TYPES[k].label}</b>
-          <span>{LIST_TYPES[k].blurb}</span>
-        </button>
-      ))}
-    </div>
-  );
-}
+/* ---------- new list and settings ---------- */
 
 const closeSheet = () => {
   listSheet.value = null;
 };
 
 function NewListSheet() {
-  const [kind, setKind] = useState<NewKind>('todo');
+  const saved = savedStartingPoints();
+  const all = [
+    ...STARTING_POINTS.slice(0, -1),
+    ...saved,
+    STARTING_POINTS[STARTING_POINTS.length - 1] as StartingPoint,
+  ];
+  const [start, setStart] = useState<StartingPoint>(all[0] as StartingPoint);
   const [name, setName] = useState('');
-  const [priv, setPriv] = useState(LIST_TYPES.todo.defaultPrivate);
-  const [checkin, setCheckin] = useState(false);
+  const [priv, setPriv] = useState(start.private);
   const p = nameOf(partner.value);
   const submit = (e: Event) => {
     e.preventDefault();
-    const finalName = name.trim() || LIST_TYPES[kind].example;
-    const id = createList(finalName, kind, priv, checkin && kind === 'todo');
+    const finalName = name.trim() || start.example;
+    const id = createList(finalName, start, priv);
     currentList.value = id;
     picked.value = null;
-    closeSheet();
+    // A blank list opens its settings, to switch on what it needs.
+    listSheet.value = start.template === 'blank' ? { type: 'settings', id } : null;
     toast(`Made “${finalName}”${priv ? ', just for you' : ''}.`);
   };
   return (
@@ -378,15 +627,40 @@ function NewListSheet() {
           <CloseButton onClose={closeSheet} />
         </div>
         <span class="lbl" id="lt-type">
-          What kind of list?
+          Start from
         </span>
-        <TypePicker
-          value={kind}
-          onChange={(k) => {
-            setKind(k);
-            setPriv(LIST_TYPES[k].defaultPrivate);
-          }}
-        />
+        {/* biome-ignore lint/a11y/useSemanticElements: toggle-button group (aria-pressed), labelled */}
+        <div class="typepick" role="group" aria-labelledby="lt-type">
+          {all.map((sp) => (
+            <span class="tp" key={sp.id}>
+              <button
+                type="button"
+                aria-pressed={start.id === sp.id}
+                onClick={() => {
+                  setStart(sp);
+                  setPriv(sp.private);
+                }}
+              >
+                <b>{sp.label}</b>
+                <span>{sp.blurb}</span>
+              </button>
+              {sp.template === 'custom' && (
+                <button
+                  type="button"
+                  class="iconbtn tp-x"
+                  aria-label={`Forget the starting point ${sp.label}`}
+                  onClick={() => {
+                    deleteStartingPoint(sp.id);
+                    if (start.id === sp.id) setStart(all[0] as StartingPoint);
+                  }}
+                >
+                  <Icon name="x" size={14} />
+                </button>
+              )}
+            </span>
+          ))}
+        </div>
+        <p class="small muted">You can switch features on and off later, in the list’s settings.</p>
         <div class="field">
           <label for="lt-name">Name</label>
           <input
@@ -396,7 +670,7 @@ function NewListSheet() {
             value={name}
             maxLength={100}
             onInput={(e) => setName(e.currentTarget.value)}
-            placeholder={LIST_TYPES[kind].example}
+            placeholder={start.example}
             autocomplete="off"
           />
         </div>
@@ -406,14 +680,6 @@ function NewListSheet() {
           label="Just for me"
           hint={priv ? `${p} won’t see this list at all.` : `Shared with ${p}.`}
         />
-        {!priv && kind === 'todo' && (
-          <Switch
-            checked={checkin}
-            onChange={setCheckin}
-            label="Part of the weekly check-in"
-            hint="Its open items come up in the check-in, to share out who does what."
-          />
-        )}
         <button class="btn primary big" type="submit">
           Make list
         </button>
@@ -422,16 +688,25 @@ function NewListSheet() {
   );
 }
 
-function EditListSheet({ id }: { id: string }) {
+function ListSettingsSheet({ id }: { id: string }) {
   const list = allLists().find((l) => l.id === id);
   const [name, setName] = useState(list?.rec.data.name ?? '');
   const [armed, setArmed] = useState(false);
+  const [saving, setSaving] = useState<string | null>(null);
   if (!list) return null;
   const p = nameOf(partner.value);
   const count = itemsOf(id).length;
+  const f = featuresOf(list);
+  const plan = planOf(list);
   const saveName = () => {
     const v = name.trim();
     if (v && v !== list.rec.data.name) renameList(id, v);
+  };
+  const toggle = (feature: Feature, on: boolean) => {
+    const next = new Set(f);
+    if (on) next.add(feature);
+    else next.delete(feature);
+    setFeatures(id, [...next]);
   };
   return (
     <Sheet labelledBy="le-title" onClose={closeSheet}>
@@ -444,7 +719,7 @@ function EditListSheet({ id }: { id: string }) {
         }}
       >
         <div class="sh-head">
-          <h2 id="le-title">Edit list</h2>
+          <h2 id="le-title">List settings</h2>
           <CloseButton onClose={closeSheet} />
         </div>
         <div class="field">
@@ -461,23 +736,19 @@ function EditListSheet({ id }: { id: string }) {
             autocomplete="off"
           />
         </div>
-        <span class="lbl" id="lt-type">
-          Kind
-        </span>
-        <TypePicker value={list.rec.data.kind} onChange={(k) => setListKind(id, k)} />
         <Switch
           checked={list.rec.data.private}
           onChange={(v) => {
             saveName();
             const newId = setListPrivacy(id, v);
             currentList.value = newId;
-            listSheet.value = { type: 'edit', id: newId };
+            listSheet.value = { type: 'settings', id: newId };
             toast(v ? `${p} can no longer see this list.` : `Shared with ${p}.`);
           }}
           label="Just for me"
           hint={list.rec.data.private ? 'Encrypted with your personal key.' : `Shared with ${p}.`}
         />
-        {!list.rec.data.private && pickerKind(list.rec.data.kind) === 'todo' && (
+        {!list.rec.data.private && f.has('tick') && (
           <Switch
             checked={inCheckin(list, settings.value.chores_list)}
             onChange={(v) => {
@@ -491,9 +762,88 @@ function EditListSheet({ id }: { id: string }) {
             hint="Its open items come up in the check-in, to share out who does what."
           />
         )}
+        {plan?.rec.kind === 'event' && (
+          <p class="small muted">
+            A checklist for “{plan.rec.data.title}”.{' '}
+            <button
+              type="button"
+              class="linkbtn"
+              onClick={() => update<'list'>(id, { plan_id: null })}
+            >
+              Make it a list of its own
+            </button>
+          </p>
+        )}
+        {FEATURE_GROUPS.map(([group, title]) => (
+          <fieldset class="fgroup" key={group}>
+            <legend class="eyebrow">{title}</legend>
+            {(Object.keys(FEATURES) as Feature[])
+              .filter((k) => FEATURES[k].group === group)
+              .filter((k) => !(k === 'who' && list.rec.data.private))
+              .map((k) => (
+                <Switch
+                  key={k}
+                  checked={f.has(k)}
+                  onChange={(on) => toggle(k, on)}
+                  label={FEATURES[k].label}
+                  hint={FEATURES[k].hint}
+                />
+              ))}
+          </fieldset>
+        ))}
         <button class="btn primary big" type="submit">
           Done
         </button>
+        <div class="stack gap">
+          {saving === null ? (
+            <div class="btnrow">
+              <button type="button" class="btn sm" onClick={() => setSaving(list.rec.data.name)}>
+                Save as a starting point
+              </button>
+              <button
+                type="button"
+                class="btn sm"
+                onClick={() => {
+                  const copy = copyList(id);
+                  if (!copy) return;
+                  currentList.value = copy;
+                  closeSheet();
+                  toast(`Copied “${list.rec.data.name}”.`);
+                }}
+              >
+                Copy list
+              </button>
+            </div>
+          ) : (
+            <div class="field">
+              <label for="le-sp">Starting point name</label>
+              <div class="btnrow">
+                <input
+                  id="le-sp"
+                  class="txt"
+                  type="text"
+                  value={saving}
+                  maxLength={40}
+                  onInput={(e) => setSaving(e.currentTarget.value)}
+                  autocomplete="off"
+                />
+                <button
+                  type="button"
+                  class="btn sm primary"
+                  onClick={() => {
+                    const n = saving.trim();
+                    if (!n) return;
+                    saveStartingPoint(list, n);
+                    setSaving(null);
+                    toast(`Saved “${n}”. It’s in New list for both of you.`);
+                  }}
+                >
+                  Save
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
         <div class="sh-foot">
           <button
             type="button"
@@ -518,11 +868,18 @@ function EditListSheet({ id }: { id: string }) {
   );
 }
 
+/** What the list's starting point was called, or "Your list". */
+function startLabel(list: ListEntry): string {
+  const t = list.rec.data.template;
+  return STARTING_POINTS.find((s) => s.template === t)?.label ?? 'List';
+}
+
 /* ---------- view ---------- */
 
 export function ListsView() {
   const lists = allLists();
-  const cur = lists.find((l) => l.id === currentList.value) ?? lists[0];
+  const view = crossView.value;
+  const cur = view ? undefined : (lists.find((l) => l.id === currentList.value) ?? lists[0]);
   const s = listSheet.value;
   return (
     <>
@@ -548,66 +905,76 @@ export function ListsView() {
           New list
         </button>
       </header>
-      {cur ? (
+      {lists.length ? (
         <div class="lists-layout">
-          {/* biome-ignore lint/a11y/useSemanticElements: toggle-button group (aria-pressed), labelled; fieldset/legend breaks the segmented layout */}
-          <div class="ltabs" role="group" aria-label="Lists">
-            {lists.map((l) => {
-              const items = itemsOf(l.id);
-              const isIdeas = typeOf(l.rec.data.kind).behaviour === 'ideas';
-              const n = isIdeas ? items.length : items.filter((i) => !i.rec.data.done).length;
-              return (
-                <button
-                  type="button"
-                  class="ltab"
-                  key={l.id}
-                  aria-pressed={l.id === cur.id}
-                  onClick={() => {
-                    currentList.value = l.id;
-                    picked.value = null;
-                  }}
-                >
-                  {l.rec.data.private && <Icon name="lock" size={14} />}
-                  {l.rec.data.private && <span class="sr">Private: </span>}
-                  {l.rec.data.name}
-                  <span class="n">
-                    {n}
-                    <span class="sr"> {isIdeas ? 'ideas' : 'open'}</span>
-                  </span>
-                </button>
-              );
-            })}
+          <div class="ltabs-col">
+            <CrossViews
+              onPick={() => {
+                picked.value = null;
+              }}
+            />
+            {/* biome-ignore lint/a11y/useSemanticElements: toggle-button group (aria-pressed), labelled; fieldset/legend breaks the segmented layout */}
+            <div class="ltabs" role="group" aria-label="Lists">
+              {lists.map((l) => {
+                const { n, what } = countOf(l);
+                return (
+                  <button
+                    type="button"
+                    class="ltab"
+                    key={l.id}
+                    aria-pressed={!view && l.id === cur?.id}
+                    onClick={() => {
+                      currentList.value = l.id;
+                      crossView.value = null;
+                      picked.value = null;
+                      filters.value = { both: false, soon: false, season: false, favs: false };
+                    }}
+                  >
+                    {l.rec.data.private && <Icon name="lock" size={14} />}
+                    {l.rec.data.private && <span class="sr">Private: </span>}
+                    {l.rec.data.name}
+                    <span class="n">
+                      {n}
+                      <span class="sr"> {what}</span>
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
           </div>
           <div class="lists-pane">
-            <div class="listbar">
-              <span class="small muted">{typeOf(cur.rec.data.kind).label}</span>
-              <button
-                type="button"
-                class="linkbtn"
-                aria-label={`Edit list: ${cur.rec.data.name}`}
-                onClick={() => {
-                  listSheet.value = { type: 'edit', id: cur.id };
-                }}
-              >
-                Edit list
-              </button>
-            </div>
-            <div class="listcard">
-              {typeOf(cur.rec.data.kind).behaviour === 'ideas' ? (
-                <IdeasList key={cur.id} list={cur} />
-              ) : (
-                <CheckList key={cur.id} list={cur} />
-              )}
-            </div>
+            {cur ? (
+              <>
+                <div class="listbar">
+                  <span class="small muted">{startLabel(cur)}</span>
+                  <button
+                    type="button"
+                    class="linkbtn"
+                    aria-label={`List settings: ${cur.rec.data.name}`}
+                    onClick={() => {
+                      listSheet.value = { type: 'settings', id: cur.id };
+                    }}
+                  >
+                    <Icon name="settings" size={15} />
+                    Settings
+                  </button>
+                </div>
+                <div class="listcard">
+                  <ListBody key={cur.id} list={cur} />
+                </div>
+              </>
+            ) : (
+              <CrossViewPane />
+            )}
           </div>
         </div>
       ) : (
         <p class="nothing">
-          No lists yet. Make one for groceries, chores, to-dos, date ideas or gifts.
+          No lists yet. Make one for groceries, chores, date ideas, a trip or anything else.
         </p>
       )}
       {s?.type === 'new' && <NewListSheet />}
-      {s?.type === 'edit' && <EditListSheet key={s.id} id={s.id} />}
+      {s?.type === 'settings' && <ListSettingsSheet key={s.id} id={s.id} />}
     </>
   );
 }

@@ -12,7 +12,7 @@
 import { addDays } from '@ours/core/time';
 import { computed } from '@preact/signals';
 import { partnerMissing } from './invite';
-import { allLists, type ItemEntry, itemsOf, type ListEntry } from './lists';
+import { allLists, dueOf, featuresOf, type ItemEntry, itemsOf, type ListEntry } from './lists';
 import { byKind, type Entry, partner, viewer } from './model';
 import { awaitingMe, today } from './select';
 
@@ -38,14 +38,17 @@ export function tasksFor(horizonDays: number): { item: ItemEntry; list: ListEntr
   const me = viewer.value;
   const out: { item: ItemEntry; list: ListEntry }[] = [];
   for (const list of allLists()) {
+    const f = featuresOf(list);
+    if (!f.has('tick') || !f.has('due')) continue;
     for (const item of itemsOf(list.id)) {
       const d = item.rec.data;
-      if (d.done || !d.due || d.due > until) continue;
+      const due = dueOf(item);
+      if (d.done || !due || due > until) continue;
       if (d.assignee && d.assignee !== me) continue;
       out.push({ item, list });
     }
   }
-  return out.sort((a, b) => ((a.item.rec.data.due ?? '') < (b.item.rec.data.due ?? '') ? -1 : 1));
+  return out.sort((a, b) => ((dueOf(a.item) ?? '') < (dueOf(b.item) ?? '') ? -1 : 1));
 }
 
 export const waiting = computed<Waiting[]>(() => {
