@@ -3,7 +3,7 @@
 import { signal } from '@preact/signals';
 import type { ComponentChildren } from 'preact';
 import { useLayoutEffect, useRef } from 'preact/hooks';
-import { shapes } from '../theme';
+import { SHAPE_NAMES, shapeOf } from './appearance';
 import { nameOf, type Slot } from './model';
 
 const PATHS = {
@@ -59,10 +59,9 @@ export function Icon({ name, size = 18 }: { name: IconName; size?: number }) {
 export const colorVar = (slot: Slot) => (slot === 'a' ? 'var(--person-a)' : 'var(--person-b)');
 
 /**
- * Ownership marker: person A and person B in their colours (chosen to stay
- * distinct under colour-blindness simulations), ours = both overlapping;
+ * Ownership marker: person A and person B in their colours and shapes (each
+ * picked in Privacy → Appearance), ours = both overlapping;
  * filled = confirmed, outline = tentative, hatched = private ("busy").
- * With "Tell us apart by shape too" on, person B is a square.
  */
 export function Marker({ owner, mode }: { owner: Slot | 'both'; mode?: 'dash' | 'busy' }) {
   const cls = `mk${owner === 'both' ? ' mk-ours' : ''}${mode ? ` ${mode}` : ''}`;
@@ -78,11 +77,15 @@ export function Marker({ owner, mode }: { owner: Slot | 'both'; mode?: 'dash' | 
   );
 }
 
+/** " (square)" when your shapes differ, so the key says how to tell you apart. */
+const shapeWord = (slot: Slot) =>
+  shapeOf('a') === shapeOf('b') ? '' : ` (${SHAPE_NAMES[shapeOf(slot)].toLowerCase()})`;
+
 /** Explains the markers in words; shown under the agenda. */
 export function MarkerKey({ names }: { names: Record<Slot, string> }) {
   const items: [ComponentChildren, string][] = [
-    [<Marker owner="a" key="a" />, `${names.a}’s plan${shapes.value ? ' (circle)' : ''}`],
-    [<Marker owner="b" key="b" />, `${names.b}’s plan${shapes.value ? ' (square)' : ''}`],
+    [<Marker owner="a" key="a" />, `${names.a}’s plan${shapeWord('a')}`],
+    [<Marker owner="b" key="b" />, `${names.b}’s plan${shapeWord('b')}`],
     [<Marker owner="both" key="both" />, 'Ours, together'],
     [<Marker owner="both" mode="dash" key="dash" />, 'Tentative: waiting for a yes'],
     [<Marker owner="b" mode="busy" key="busy" />, 'Private: details hidden'],

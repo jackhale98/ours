@@ -3,7 +3,7 @@ import { render } from 'preact';
 import './styles/base.css';
 import './styles/landing.css';
 import { Landing } from './Landing';
-import { applyShapes, applyTheme } from './theme';
+import { applyTheme } from './theme';
 
 const APP_ROUTES = new Set(['plan', 'lists', 'checkin', 'privacy', 'inbox', 'search', 'start']);
 const isAppRoute = () =>
@@ -12,7 +12,6 @@ const isAppRoute = () =>
   location.hash.startsWith('#signin=');
 
 applyTheme();
-applyShapes();
 
 // Offline support: register the service worker (production builds only).
 if ('serviceWorker' in navigator && import.meta.env.PROD) {

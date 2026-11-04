@@ -214,7 +214,30 @@ export const CheckinData = v.strictObject({
   note: v.nullable(Text(4000)),
 });
 
-const Member = v.strictObject({ name: NonEmpty(40), color: Color, user_id: RefId });
+/** Colours each person can pick (light and dark versions live in the web app's tokens). */
+export const PERSON_COLORS = [
+  'blue',
+  'rose',
+  'teal',
+  'green',
+  'amber',
+  'red',
+  'slate',
+  'brown',
+] as const;
+export type PersonColor = (typeof PERSON_COLORS)[number];
+/** Marker shapes: different shapes tell the two of you apart without colour. */
+export const PERSON_SHAPES = ['circle', 'square', 'diamond'] as const;
+export type PersonShape = (typeof PERSON_SHAPES)[number];
+
+const Member = v.strictObject({
+  name: NonEmpty(40),
+  /** Older hex colour, kept so existing records parse; `palette` is what's shown. */
+  color: Color,
+  user_id: RefId,
+  palette: v.optional(v.picklist(PERSON_COLORS)),
+  shape: v.optional(v.picklist(PERSON_SHAPES)),
+});
 
 const DefaultReminders = v.strictObject({
   timed: v.pipe(v.array(ReminderMinutes), v.maxLength(MAX_REMINDERS_PER_PERSON)),

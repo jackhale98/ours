@@ -611,9 +611,15 @@ kbd {
   --c: var(--person-b);
 }
 
-/* "Tell us apart by shape too": person B is a square everywhere. */
-:root[data-shapes="on"] .mk i.b {
+/* Each person's marker shape (Privacy → Appearance; data-shape-a/-b on <html>). */
+:root[data-shape-a="square"] .mk i.a,
+:root[data-shape-b="square"] .mk i.b {
   border-radius: 2px;
+}
+:root[data-shape-a="diamond"] .mk i.a,
+:root[data-shape-b="diamond"] .mk i.b {
+  border-radius: 1px;
+  transform: rotate(45deg) scale(0.84);
 }
 
 .mk-ours i.b {
@@ -3015,4 +3021,71 @@ fieldset.reminders > legend {
 }
 .keybanner.update span {
   flex: 1;
+}
+
+/* Privacy → Appearance: each person's colour and shape. */
+.look {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+.look legend {
+  margin-bottom: 6px;
+}
+.look[disabled] {
+  opacity: 0.6;
+}
+.swatches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.swatch {
+  position: relative;
+  width: var(--tap);
+  height: var(--tap);
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  cursor: pointer;
+}
+.swatch .chip-c {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  border: 2px solid var(--surface);
+  box-shadow: 0 0 0 1px var(--line-strong);
+}
+.swatch.on .chip-c {
+  box-shadow: 0 0 0 2px var(--ink);
+}
+.swatch.taken {
+  cursor: not-allowed;
+}
+.swatch.taken .chip-c {
+  opacity: 0.35;
+}
+.swatch:has(input:focus-visible) {
+  outline: 2px solid var(--focus);
+  outline-offset: 0;
+}
+.seg.shapes button {
+  gap: 8px;
+}
+.shape-mark {
+  width: 11px;
+  height: 11px;
+  background: currentColor;
+  border-radius: 50%;
+}
+.shape-mark.square {
+  border-radius: 2px;
+}
+.shape-mark.diamond {
+  border-radius: 1px;
+  transform: rotate(45deg) scale(0.84);
 }

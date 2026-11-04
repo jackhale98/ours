@@ -7,6 +7,7 @@ import { kvGet, kvSet } from '../account/db';
 import { account, consumeSignInLink, newKeysFrom, syncNow } from '../account/session';
 import { needsNewKeys, syncStatus } from '../account/sync';
 import { LogoMark } from '../Logo';
+import './appearance';
 import { waiting } from './inbox';
 import { ItemSheetHost } from './itemsheet';
 import { findEntry, mode, nameOf, names, partner, viewer } from './model';

@@ -66,6 +66,17 @@ const pairs = [
   ['focus', 'paper', UI],
   ['focus', 'surface', UI],
 ];
+// Every colour a person can pick (Privacy → Appearance) meets the same bar as
+// the defaults: initials on it, markers on every background, text on its tint.
+for (const c of ['blue', 'rose', 'teal', 'green', 'amber', 'red', 'slate', 'brown']) {
+  pairs.push(
+    ['on-accent', `pal-${c}`, TEXT],
+    [`pal-${c}`, 'paper', UI],
+    [`pal-${c}`, 'surface', UI],
+    [`pal-${c}`, 'sunk', UI],
+    ['ink', `pal-${c}-soft`, TEXT],
+  );
+}
 let failed = 0;
 for (const [name, theme] of [
   ['light', light],

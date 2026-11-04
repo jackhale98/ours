@@ -2,9 +2,9 @@
 import { generateRecoveryPhrase, safetyCode } from '@ours/core/crypto';
 import { signal } from '@preact/signals';
 import { currentSafetyCode } from '../../account/session';
-import { setShapes, setTheme, shapes, type ThemePref, theme } from '../../theme';
+import { setTheme, type ThemePref, theme } from '../../theme';
 import { mode, names, SPACE_ID, setViewer, spaceKey, viewer } from '../model';
-import { Avatar, Icon, Marker, Switch, toast } from '../ui';
+import { Avatar, Icon, toast } from '../ui';
 import {
   AccountCard,
   DevicesCard,
@@ -20,6 +20,7 @@ import { PartnerInviteCard } from '../invite';
 import { VersionCard } from '../version';
 import { CalendarsCard } from './Calendars';
 import { DataCard } from './DataCard';
+import { PersonLook } from './PersonLook';
 import { RemindersCard } from './RemindersCard';
 
 const REPO = 'https://github.com/jackhale98/ours';
@@ -193,15 +194,7 @@ export function PrivacyView() {
               </button>
             ))}
           </div>
-          <Switch
-            checked={shapes.value}
-            onChange={setShapes}
-            label="Tell us apart by shape too"
-            hint={`${names.value.a}’s plans get circles and ${names.value.b}’s get squares, for when the two colours are hard to tell apart.`}
-          />
-          <p class="small muted mk-demo" aria-hidden="true">
-            <Marker owner="a" /> <Marker owner="b" /> <Marker owner="both" />
-          </p>
+          <PersonLook />
         </section>
 
         <RemindersCard />
