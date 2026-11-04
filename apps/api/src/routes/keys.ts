@@ -173,18 +173,20 @@ keys.put('/unlock/:id', async (c) => {
       'passkey_too_old',
       'This passkey was added before you changed your keys, so it can’t unlock them. Add a new one.',
     );
-  // A device still on older keys can't replace a copy of newer ones (I8).
+  // A device still on an older personal key can't replace a copy of a newer
+  // one (I8). Only the personal version is compared: it only ever goes up,
+  // while space versions start again in a new space (F2).
   const existing = await c.env.DB.prepare(
-    'SELECT space_version, personal_version FROM key_unlocks WHERE passkey_id = ? AND user_id = ?',
+    'SELECT personal_version FROM key_unlocks WHERE passkey_id = ? AND user_id = ?',
   )
     .bind(id, uid)
-    .first<{ space_version: number; personal_version: number }>();
-  if (
-    existing &&
-    (input.space_version < existing.space_version ||
-      input.personal_version < existing.personal_version)
-  )
-    throw new HttpError(409, 'newer_copy', 'This passkey already unlocks newer keys.');
+    .first<{ personal_version: number }>();
+  if (existing && input.personal_version < existing.personal_version)
+    throw new HttpError(
+      409,
+      'newer_copy',
+      'This passkey already unlocks newer keys. If that’s wrong, choose “Stop unlocking” for it, then turn it on again.',
+    );
   const nonce = fromB64Url(input.wrapped.nonce);
   const ct = fromB64Url(input.wrapped.ciphertext);
   const packed = new Uint8Array(nonce.length + ct.length);
@@ -248,13 +250,14 @@ keys.delete('/unlock/:id', async (c) => {
   const res = await c.env.DB.prepare('DELETE FROM key_unlocks WHERE passkey_id = ? AND user_id = ?')
     .bind(id, uid)
     .run();
+  // Every time: only a stored copy can be turned off, so this can't be used to flood (F4).
   if (res.meta.changes)
     c.executionCtx.waitUntil(
-      notice(c.env, 'off', uid, {
+      sendEmail(c.env, {
         to: c.var.user.email,
         subject: 'A passkey no longer unlocks your Ours keys',
         text: 'Unlocking with one of your passkeys was just turned off. If this wasn’t you, sign in, check Privacy → Passkeys, and change your keys.',
-      }),
+      }).catch(() => {}),
     );
   return c.json({ ok: true });
 });

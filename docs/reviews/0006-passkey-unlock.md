@@ -332,3 +332,12 @@ When both are done, **`PASSKEY_UNLOCK` can be turned on in production.** A check
 **Sign-off.** Every condition from the first review and from the check of the fixes is met. Nothing found in this round puts keys at risk.
 
 **`PASSKEY_UNLOCK` can be turned on in production now** (set `"PASSKEY_UNLOCK": "on"` in the production vars of `apps/api/wrangler.jsonc`, together with a deploy of the matching web build). F1 and F2 should be fixed in the next change. F3 and F4 are at the owner's discretion.
+
+### Follow-ups fixed
+
+- **F1:** THREAT_MODEL and ADR 0015 now say the fetch and "turned off" emails are sent every time; only "turned on" is capped at one an hour.
+- **F2:** `PUT /keys/unlock/:id` compares only `personal_version`, which only goes up for a person. A copy made after leaving a space and joining another is no longer refused. The `newer_copy` error now points to "Stop unlocking", then turning it on again. Tested in `unlock.test.ts`.
+- **F3:** the "lost device removed" tick is shown only while unlocking is on, and only until a passkey is added after the change of keys. The answer is kept on the device (localStorage, per change of keys), so it isn't asked every time.
+- **F4:** the "turned off" email is sent every time.
+
+`PASSKEY_UNLOCK` is on in production.

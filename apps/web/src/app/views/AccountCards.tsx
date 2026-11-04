@@ -142,7 +142,15 @@ export function PasskeysCard() {
   const info = me.value;
   const [busy, setBusy] = useState(false);
   const [armed, setArmed] = useState(false);
-  const [cleared, setCleared] = useState(false);
+  const changedAt = info?.user.keys_changed_at ?? null;
+  const clearedKey = `ours-lost-device-removed-${changedAt}`;
+  const [cleared, setCleared] = useState(() => {
+    try {
+      return !!changedAt && localStorage.getItem(clearedKey) === '1';
+    } catch {
+      return false;
+    }
+  });
   useEffect(() => {
     void loadPasskeys().catch(() => {});
   }, []);
@@ -157,8 +165,11 @@ export function PasskeysCard() {
   const anyTooOld = on && list.some((p) => !p.can_unlock);
   const partnerName = nameOf(partner.value);
   // After a change of keys, a new passkey is only safe once the lost device
-  // is out of the account it would sync through: asked once (review 0006, N3).
-  const askCleared = !!info.user.keys_changed_at && !cleared;
+  // is out of the account it would sync through (review 0006, N3). Asked only
+  // while unlocking is on, and only until a passkey is added after the change
+  // (F3); the answer is kept on this device for that change of keys.
+  const addedSince = list.some((p) => p.can_unlock);
+  const askCleared = on && !!changedAt && !cleared && !addedSince;
   const run = async (fn: () => Promise<void>, ok: string) => {
     setBusy(true);
     try {
@@ -267,12 +278,21 @@ export function PasskeysCard() {
           out of your Apple, Google or password manager account.
         </p>
       )}
-      {info.user.keys_changed_at && (
+      {on && changedAt && !addedSince && (
         <label class="chkline">
           <input
             type="checkbox"
             checked={cleared}
-            onChange={(e) => setCleared(e.currentTarget.checked)}
+            onChange={(e) => {
+              const v = e.currentTarget.checked;
+              setCleared(v);
+              try {
+                if (v) localStorage.setItem(clearedKey, '1');
+                else localStorage.removeItem(clearedKey);
+              } catch {
+                // Private mode: asked again next time.
+              }
+            }}
           />
           <span>
             I’ve removed the lost device from my Apple, Google or password manager account, so a new

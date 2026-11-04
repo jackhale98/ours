@@ -69,8 +69,8 @@
         "MAX_PUSHES_PER_HOUR": "60",
         // Key rotation (ADR 0013), signed off in security review 0005.
         "ROTATION": "on",
-        // Passkey unlock (ADR 0015) stays off until security review 0006 signs off.
-        "PASSKEY_UNLOCK": "off"
+        // Passkey unlock (ADR 0015), signed off in security review 0006.
+        "PASSKEY_UNLOCK": "on"
         // VAPID_PUBLIC_KEY and VAPID_PRIVATE_KEY are secrets here, made by the
         // "Create Worker secrets" workflow; a var of the same name would clash.
       },

@@ -115,10 +115,11 @@ describe('passkey unlock (ADR 0015)', () => {
     await call(`/keys/unlock/${pk}`, { token: sam.token });
     await waitForMail(n + 2);
     expect(outbox.slice(n).filter((m) => /asked to unlock/.test(m.subject))).toHaveLength(2);
-    const older = await put(sam.token, pk, copy(1, 2));
+    const older = await put(sam.token, pk, copy(2, 1));
     expect(older.status).toBe(409);
     expect(older.json.error).toBe('newer_copy');
-    expect((await put(sam.token, pk, copy(2, 2))).status).toBe(200);
+    // A lower space version alone is fine: a new space starts again at 1 (F2).
+    expect((await put(sam.token, pk, copy(1, 2))).status).toBe(200);
   });
 
   it('needs a confirmation from the last ten minutes (L2)', async () => {
