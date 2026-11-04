@@ -8,8 +8,9 @@
   - client: `apps/web/src/account/session.ts` (`rotateKeys`, `keyUpdateLink`, `applyKeyLink`, `refresh`, `restartSync`), `account/sync.ts`, `app/mount.tsx`, `app/App.tsx` (banner), `app/views/AccountCards.tsx` (`SecureCard`)
   - tests: `apps/api/test/rotation.test.ts`, `pairing.test.ts`, the end of `e2e-sync/pair.spec.ts`
   - Uncommitted changes in the working tree (import, recurrence) were not reviewed.
-- Verdict: **No sign-off yet.** Conditions: fix H1 and H2, and M1–M6, with regression tests. Fix the Lows or record them as accepted risks in THREAT_MODEL.
-- Fixes: commit 8693ec3, listed in "Fixes" at the end. Awaiting re-review.
+- Verdict (re-review, 2026-11-04): **No sign-off.** Commit 8693ec3 fixes most findings. But retrying a rotation that already landed throws the new keys away and stops both people from writing (N1, High). Conditions: fix N1 with a test. Fix N2–N4 or accept them in THREAT_MODEL. Correct THREAT_MODEL for N5 and L1. See "Re-review" at the end.
+- First verdict (2026-11-03): no sign-off. Conditions: fix H1 and H2, and M1–M6, with regression tests. Fix the Lows or record them as accepted risks in THREAT_MODEL.
+- Fixes: commit 8693ec3, listed in "Fixes" at the end. Re-reviewed in "Re-review (commits 8693ec3, 199fb4f)".
 
 The reviewer ran the existing suites, all green: `pnpm test:api` (85 tests), `pnpm test` (596) and `e2e:sync` (1, including the rotation part). Seven probe tests ran against the Worker in vitest pool workers from a scratch config outside the repo, and were then deleted. They are referenced as P1–P7 below. Nothing in the repo changed apart from this file.
 
@@ -285,3 +286,102 @@ Tests: `apps/api/test/rotation.test.ts` (server), `apps/web/src/account/rotation
 | I6 | See the tests above. | — |
 
 Also fixed while testing: the push route's idempotent-retry check ignored `key_version`, so re-sending the same bytes under a new version was reported as written without being written.
+
+## Re-review (commits 8693ec3, 199fb4f)
+
+- Reviewer: independent agent that wrote neither the code nor the fixes.
+- Date: 2026-11-04
+- Scope: `git show 8693ec3` (code) and `git show 199fb4f` (docs), against the findings above, ADR 0013 and THREAT_MODEL. The "Fixes" table was treated as claims to check.
+- Suites, all green at HEAD: `pnpm test:api` (100 tests), `TZ=UTC pnpm test` (657), `e2e:sync` (2, including the rotation part).
+- One throwaway API probe (called R1 below) ran and was deleted. It confirmed: `GET /spaces/:id/rotation` and `POST /spaces/:id/keys-ack` answer 404 to non-members; sending the same `POST /rotate` again after it landed gets 409 `rotation_conflict`; `GET /invites/:id/kind` on a rekey link answers 404 to its creator and to outsiders; `keys-ack` accepts the fingerprint copied from `/me`, so it doesn't prove the caller holds the key.
+- Client paths in `session.ts` have no unit tests. The client findings below come from reading.
+- Line numbers are at HEAD (199fb4f). During this review, others left uncommitted review 0004 work in the working tree (`session.ts`, `sync.ts`, `feeds.ts`, `export.ts`, `recurrence.ts`, THREAT_MODEL, review 0004). It doesn't touch the rotation paths and was not reviewed here, but it shifts some lines. Its `caughtUp` change answers the import side effect noted under M5.
+- Nothing in the repo changed apart from this file.
+
+### Original findings
+
+| ID | Verdict | Evidence |
+|---|---|---|
+| H1 | **Partly fixed** | The server takes only the current version: `sync.ts:109`, `push.ts:86`, and the guards at `sync.ts:190`, `push.ts:240`, `:307`. New keys wait in a separate `staged` slot (`keystore.ts`, `prepareRotation` `session.ts:697-715`). They join the ring only on success or when `/me` fingerprints match (`settleStaged` `:607-631`). Fingerprints are stored in one batch (`spaces.ts:87-91`) and returned by `/me`. `dropUnconfirmed`, `activeRing` and `takeKeys` (`rotation.ts:56-181`) do what the fix says. Tests: API "refuses writes under a version newer…", "records key fingerprints…"; web `rotation.test.ts`. **Gap:** the claim "a lost answer is picked up from /me" holds only on the "Try again" path. The form's own button, and two retries at once, drop the keys on 409 (N1). The fingerprint is not in the record AAD (accepted by the author; see N5 for what that leaves). |
+| H2 | **Fixed** | `commitRotation` saves the backup over old and staged keys before `sendRotation` (`session.ts:729-735`). Staged keys with no backup are dropped at start (`:627-630`). The stage is kept in IndexedDB. `RotationBanner` offers "Try again" (`App.tsx:261-295`). E2E covers the happy path. **No test** for the case asked for: abort after `/rotate`, restore from the new phrase, data opens. The new phrase can become the only working one without the person being told (N4). |
+| M1 | **Fixed** | One batch led by a guard row on both versions (`spaces.ts:72-103`). Test "rolls the whole rotation back…" replays the interleaving: personal version and fingerprints unchanged. |
+| M2 | **Fixed** | `settle()` before rotating (`session.ts:702`). `finishSecuring` re-encrypts, settles and asks `GET /rotation`, five rounds, resumed at start (`:800-826`, `:224`). Every device with current keys sweeps (`sync.ts:223`, `:231`). Test "counts what is still under old keys…"; E2E (banner clears). Edge cases in N2 and Info (stuck "securing"). |
+| M3 | **Fixed** | The link can be made again until the partner confirms (`partnerNeedsKeyLink` `session.ts:828-838`, `invites.ts:106-115`). Devices acknowledge automatically (`acknowledgeKeys`). The partner is asked for a new phrase (`session.ts:960`, `PhraseBanner`). API test; E2E (link offered, then gone; phrase prompt). |
+| M4 | **Fixed, residual accepted** | Server: rotator only, current version, 14 days (`invites.ts:106-115`); a stale link can't be claimed (`:153`). Recent passkey check when there is a passkey (`spaces.ts:142-147`, `auth.ts` reauth routes). Both members emailed. Client: code shown before use (`KeyLinkPrompt`). Residual in THREAT_MODEL. API tests for each. The THREAT_MODEL sentence on what a malicious server can't do is too strong (N5). |
+| M5 | **Fixed** | `resolve` no longer stores an envelope it can't open for want of a key (`sync.ts:431-440`). The pull records where it began (`:485`) and the next start re-pulls from there (`:180`). E2E: both edits to the shared item survive. Side effect on import: see review 0004 re-review, its N6. |
+| M6 | **Fixed, residual accepted** | `mergeFloor` never goes down and pins `rotated_rev` per version (`rotation.ts:34-45`); the floor is stored (`learnFloor`). A lower key version than the stored copy is refused (`sync.ts:430`). Web test "never goes down…". THREAT_MODEL describes the fresh-device gap. It doesn't say that someone holding an old key, working with the server, can still add new records that look older than the rotation (Info). |
+| L1 | **Partly fixed** | Push batch guard aborts on a moved floor and answers 503 `keys_changed` (`sync.ts:190`, `:226-233`). Deferred notifications and reminders sit behind a version guard (`push.ts:240`, `:307`). No test (reading). The author accepts the race for immediate notifications, but THREAT_MODEL doesn't record it, which the first sign-off asked for. |
+| L2 | **Fixed** | The rotate batch deletes the rotator's reminders and the space's held notifications (`spaces.ts:97-102`). The client resets the reminders signature (`commitStaged`). Test "drops reminders and held notifications…". |
+| L3 | **Partly fixed** | `unknownKey` now means "no key for this version" (`sync.ts:120-125`), so gaps keep data. `rotationBlocked` refuses while `needsNewKeys`. But the check runs before `settle()` and the fresh `/me`, so an app left open can still rotate from a version it lacks (N3). |
+| L4 | **Fixed** | `multi_space` refusal (`spaces.ts:140-141`). Test. The personal rotation point is still the space's (Info). |
+| L5 | **Fixed** | A held conflict sets `stale` and leaves the loop (`sync.ts:395`). The new downgrade branch in `resolve` returns `false` without touching the outbox, so a conflict whose current copy is a downgrade is sent again until 429. Only a lying server can cause that (Info). |
+| L6 | **Fixed** | Banner text (`App.tsx:193`). E2E. |
+| L7 | **Partly fixed** | The feed link is replaced only when `/rotate` answers (`session.ts:789`). A rotation confirmed later from `/me` (`settleStaged`) doesn't replace it. |
+| I1 | **Fixed** | `GET /invites/:id/kind` doesn't claim and answers only an account that could claim (`invites.ts:190-211`). It returns only what `GET` would return to that account. API test; probe R1. |
+| I2 | **Fixed** | Hourly purge (`app.ts:120`). The card says to share in person or in a private chat. |
+| I3 | **Fixed** | Compare prompt until marked for the current version (`AccountCards.tsx` `toCompare`, `markCompared`). Reading. |
+| I4 | **Accepted** | In THREAT_MODEL. |
+| I5 | **Fixed** | Version check before the rate limit (`spaces.ts:149-150`). Test. |
+| I6 | **Partly fixed** | Good server tests now. On the client, only the pure helpers in `rotation.ts` are tested. Nothing tests `sendRotation`, `commitRotation`, `settleStaged`, `resolve` under held keys, the L1 interleave, L3 or L5. N1 would have been caught by such a test. |
+
+The extra fix (idempotent push retry now compares `key_version`, `sync.ts:137`) is correct.
+
+### New findings
+
+**N1 (High): retrying a rotation that already landed throws the new keys away.**
+- Location: `session.ts` `sendRotation` catch (l. 777-781); `commitRotation` (l. 722-736); `SecureCard` `commit` (`AccountCards.tsx:395`); `RotationBanner` "Try again" (`App.tsx:271`, no busy guard).
+- What happens: Sam presses "Save and use the new keys". The server rotates, but the answer is lost ("You seem to be offline", or a 500 from the queries that run after the batch). The stage stays `staged`, so the form stays on screen. Sam presses the same button again. `commitRotation` skips the backup and calls `sendRotation` at once, without checking `/me`. The server answers 409 `rotation_conflict`, because the versions already moved (probe R1). On any 409 the client drops the staged keys and clears the stage. The same happens when "Try again" is pressed twice and the first call's answer is lost.
+- Result: the server's current keys now exist only in the new backup. Sam's device sees it lacks them and says to link from "another of your devices", which doesn't exist. Sam can't make a key update link: it would carry the old version, and the server refuses it. Alex needs the keys too. Neither person can write until Sam signs out (which wipes unsynced edits) and restores from the new phrase. The last toast said "Keys changed on another device. Try again", so Sam may think that phrase is void. Without it, the space stays read-only for both, because rotating again needs the current keys.
+- Fix: on 409, fetch `/me` and run the `settleStaged` check. Drop the staged keys only if the server's fingerprint for `spaceFrom + 1` differs from the staged key's. When `st.backup` is already true, have `commitRotation` go through `retryRotation`. Disable both buttons while a call runs. Test with a mocked API: `/rotate` lands but the answer is lost, then 409 on the retry; the keys must join the ring.
+
+**N2 (Low): "Try again" that finds the rotation landed keeps the old sync engine.**
+- Location: `retryRotation` → `refresh` → `settleStaged` → `commitStaged`; `refresh` builds an engine only `if (!engine)` (`session.ts:186`).
+- What happens: the ring and floor are updated, but the running engine and notifications keep the old ring until the app restarts. New writes are sealed under the old version and held. A "Sam changed your shared keys" banner shows on the rotator's own device. Re-encryption makes no progress. Reminders re-sent under the old key are refused. The feed link is not replaced (L7).
+- Fix: call `restartSync` when `settleStaged` commits while an engine is running.
+
+**N3 (Low): the L3 block can be bypassed by an app left open.**
+- Location: `prepareRotation` (`session.ts:697-715`).
+- What happens: `rotationBlocked()` runs before `settle()` and before the fresh `/me`. A device started before the partner's rotation has `needsNewKeys` false. `prepareRotation` then reads the new versions from `/me` and rotates from a version it doesn't hold. Its ring has a gap. The partner's records under the missing version stay unreadable to it until the partner opens its link and sweeps. Its "securing" stage can't finish before then.
+- Fix: after `settle()` and the fresh `/me`, run `activeRing` again. Refuse unless both keys are `ok` for the versions being rotated from.
+
+**N4 (Low): the new phrase can become the only working one without the person being told.**
+- Location: `sendRotation` 409 branch; `settleStaged` drop when `!st.backup`; `commitRotation` (backup flag set after the PUT returns).
+- What happens: once the new backup is saved, the old phrase no longer opens it. If the rotation then ends without the server confirming (409 from a partner's rotation, or a reload after the backup's answer was lost), the staged keys are dropped and the card returns to "Make new keys". The toast says "Try again". `phraseStale` is not set. A person who throws the new phrase away has no working recovery phrase.
+- Fix: mark "backup attempted" before the PUT. When staged keys are dropped after that, say that the new phrase is now the recovery phrase, or set `phraseStale` so the "make a new phrase" banner appears.
+
+**N5 (Low, docs and design): fingerprints come from the server, so they don't bind a malicious server.**
+- Location: THREAT_MODEL (key rotation, third residual); `activeRing` and `takeKeys` (`rotation.ts:89`, `:140`, `:147`); `mount.tsx:42`.
+- What happens: THREAT_MODEL says a malicious server "cannot get a device to use keys whose fingerprint it didn't record from a real rotation". But the server can record or return any fingerprint, or none. With none, `activeRing` and `takeKeys` accept a key unchecked. So against a server working with someone who holds the old keys, the safety-code step is the only check. That step is shown for key update links only. Device links are applied at once (`mount.tsx:42`), and any of the person's sessions can make one, including a removed device that signs in again. Also, `takeKeys` deletes a held key the server calls an orphan (`drop`, `rotation.ts:147`), so a lying server plus a skipped comparison removes the real key from disk.
+- With an honest server, the fingerprints work as intended. The removed device can't forge one (128-bit hash).
+- Fix: reword THREAT_MODEL. Show the safety code for a device link that changes the current space key, too. Keep a replaced key on disk, set aside, instead of deleting it.
+
+**N6 (Low, existed before the fixes): a record that won't open is treated as deleted, and its unsynced edit is dropped.**
+- Location: `resolve`, the `!remote` branch (`sync.ts:442-446`).
+- What happens: if a remote copy can't be opened with a key the device holds, the device replaces its base, deletes the pending edit and hides the record. A server with no keys can trigger this: it can send garbage ciphertext, or raise the `rev` of an old-version envelope past the rotation point, so the decrypt-only rule refuses it (`sync.ts:140`). That destroys unsynced edits, which is more than denial of service. An honest trigger also exists: a record in a newer format from the partner's newer app.
+- Fix: hold such a record, as for an unknown key (keep the base and the pending edit, mark it held), unless it opens as a valid deletion.
+
+### Info
+
+- **Stuck "securing".** If a live record under an old key can't be re-sealed by any device holding the current keys, the stage never ends. Examples: a newer format than the rotator's app reads, a corrupt record, or a record a server keeps putting back. While it lasts, `rotationBlocked` refuses a new rotation, even after another lost phone. Consider allowing a new rotation after some rounds, and saying what is stuck.
+- **Backdating (M6).** Someone holding an old key, working with the server, can still add new record ids with a `rev` at or below the rotation point. Devices accept them. Personal records use the space's rotation point, which the partner's later rotation moves forward (L4). THREAT_MODEL should say this.
+- **`keys-ack`** is not proof of holding the key: the fingerprint is in `/me` (probe R1). It only decides whether the rotator is offered a link. Fine as a hint.
+- **UI flag only.** `VITE_ROTATION` hides the card, but the routes and the link-receiving side are live. A removed device that signs in again can rotate today and lock the couple out of writing. Consider a server-side switch until sign-off.
+- **`/rotation`** has no rate limit and counts all of a space's records. Pull has none either, so this is consistent.
+
+### Verdict
+
+**No sign-off.**
+
+Blocking:
+- N1. It brings back the failure H1 was about: an ordinary lost answer, then the obvious retry, leaves both people unable to write, with no recovery in the app. Fix it and add the client test described.
+
+Before turning on `VITE_ROTATION`, also:
+- Fix N2, N3 and N4, or record them in THREAT_MODEL as accepted.
+- Correct THREAT_MODEL for N5, and record the immediate-notification race (L1) and the backdating note (Info).
+- Fix N6, or record it. It existed before this feature but rotation makes it easier to reach.
+- Replace the feed link on the `settleStaged` path too (L7).
+- Add the H2 restore test and client tests for the lost-answer and 409 paths (I6).
+
+A re-review can be limited to the N1 fix and its test, plus the THREAT_MODEL changes.
+
+**Crypto review 0001 M1: not closed yet.** Its four requirements now hold at HEAD and are tested on the server: live records are re-encrypted, old versions are decrypt-only, new ciphertexts under old versions are refused, and notifications go only under the current version. Close it together with the sign-off of this review, once N1 is fixed.
