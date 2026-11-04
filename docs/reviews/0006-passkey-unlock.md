@@ -8,7 +8,8 @@
   - client: `apps/web/src/account/session.ts` (`signInWithPasskey`, `prfRequest`, `takePrf`, `unlockCeremony`, `unlockWith`, `unlockThisDevice`, `enablePasskeyUnlock`, `disablePasskeyUnlock`, `removePasskey`, `loadPasskeys`, `addPasskey`, `commitStaged`, `refresh`), `app/views/AccountCards.tsx` (`PasskeysCard`), `app/views/Start.tsx` (`RestoreKeys`)
   - docs: ADR 0015, THREAT_MODEL, `apps/web/legal/privacy/index.html`
   - tests: `apps/api/test/unlock.test.ts`, the last test in `apps/web/e2e-sync/pair.spec.ts`
-- Verdict (check of the fixes, commit fb1e20e, 2026-11-04): **Sign-off with conditions.** All six conditions are met. The fixes add one small regression (N1: "Confirm it's you" now fails for passkeys that skip user verification) and leave new stored data out of the docs (N2). Fix both, then `PASSKEY_UNLOCK` can be turned on in production. See "Check of the fixes" at the end.
+- Verdict (final check, commit ad1ddd4, 2026-11-04): **Sign-off.** N1 and N2 are fixed. N3, N4 and I8 are addressed. `PASSKEY_UNLOCK` can be turned on in production. Two small follow-ups remain, neither blocking: stale "once an hour" wording (F1), and one refusal that is wrong after changing spaces (F2). See "Final check" at the end.
+- Verdict (check of the fixes, commit fb1e20e, 2026-11-04): sign-off with conditions. All six conditions are met. The fixes add one small regression (N1: "Confirm it's you" now fails for passkeys that skip user verification) and leave new stored data out of the docs (N2). Fix both, then `PASSKEY_UNLOCK` can be turned on in production. See "Check of the fixes" at the end.
 - First verdict (2026-11-04): sign-off with conditions. Fix M1 and M2, L1 and L4, and the docs in L5, with tests. Fix L2 and L3 or record them in THREAT_MODEL. Until then `PASSKEY_UNLOCK` stays `off` in production.
 
 The reviewer ran the existing suites, all green: `pnpm test:api` (104 tests), `TZ=UTC pnpm test` (688) and `e2e:sync` (3, including the passkey test). Two throwaway probes ran and were then deleted:
@@ -289,3 +290,45 @@ When both are done, **`PASSKEY_UNLOCK` can be turned on in production.** A check
 | N4 | Fetch emails are no longer capped (fetches are limited to ten an hour), so a second device asking in the same hour is told. | API "tells every fetch, and never lets older keys replace newer ones" |
 | I8 | `PUT` refuses (409 `newer_copy`) a copy holding older key versions than the one stored. | Same test |
 | I7, I9 | Accepted: unknown providers show as "Passkey N"; a confirmation for unlocking also counts as a recent sign-in for changing keys (both need that passkey and face, fingerprint or passcode). | — |
+
+## Final check (commit ad1ddd4)
+
+- Date: 2026-11-04. Scope: `git show ad1ddd4`, read against "Fixes after the check", which was treated as claims to check.
+- Suites at HEAD, all green: `pnpm test:api` (106), `TZ=UTC pnpm test` (691), `e2e:sync` (3). The other browser e2e projects were not run again. No probes were needed this time.
+
+### Items
+
+| Item | Verdict | Notes |
+|---|---|---|
+| N1 | **Fixed** | `/auth/passkey/reauth/options` now asks for `userVerification: 'required'` (`auth.ts:401`). `confirmItsYou` passes the server's options unchanged, so the browser now asks for face, fingerprint or PIN, or says it can't, instead of the server refusing the answer afterwards. `enablePasskeyUnlock` already asked for `'required'`. There is no test, but it is a one-line change, read and confirmed. |
+| N2 | **Fixed** | THREAT_MODEL's table now lists `passkeys.aaguid` (and notes that it is recorded whether or not unlocking is on), `sessions.reauth_at`/`passkey_id`, `users.keys_changed_at` and the copy versions, and says the server sees when a copy is fetched. The privacy policy names the passkey provider, the copy versions and fetch times, and when keys last changed. The wording is accurate. |
+| N3 | **Addressed** | `/me` returns `keys_changed_at`. After a change of keys, "Add a passkey" and "Choose a passkey" stay disabled until the person ticks "I've removed the lost device from my Apple, Google or password manager account…". This is the confirmation the check asked for. It is enforced only in the UI, which is enough here: the risk is the person's own mistake, not an attacker's. See F3 for its rough edges. |
+| N4 | **Fixed** | Fetch emails now go out on every fetch, with no cap (`keys.ts`). Fetches are still limited to 10 an hour per user, so this is at most 10 emails an hour. API test: two fetches send two emails. The "set" and "off" notices are still capped at one an hour (F4). |
+| I8 | **Fixed** | `PUT` refuses with 409 `newer_copy` a copy whose space or personal version is below the stored one. API test. See F2 for one case where the refusal is wrong. |
+| I7, I9 | **Accepted** | As recorded in the table. Fine. |
+
+### Follow-ups (none blocking)
+
+**F1 (Low, docs): the "once an hour" wording is out of date.** Fetch emails are no longer capped (N4). But THREAT_MODEL line 100 still says the fetch email is sent "at most once an hour", and ADR 0015 line 16 still says "(at most one of each an hour)". Both now say less than the app does. Reword them: fetches are emailed every time; setting a copy up and turning one off are emailed at most once an hour each.
+
+**F2 (Low): `newer_copy` compares space versions across different spaces.**
+
+- `PUT` compares `space_version` with the stored copy's, but a copy doesn't record which space its version belongs to.
+- Someone can leave a space whose key had reached version 3 (`DELETE /spaces/:id/membership`), then create or join another space at version 1. Every new copy for that passkey is then refused with "This passkey already unlocks newer keys", which is wrong. Leaving the old space doesn't delete the copy.
+- The way out exists ("Stop unlocking", then turn it on again), but nothing points to it.
+- Fix: store the space id with the copy and compare versions only within the same space. Or delete the user's copies when they leave a space. Or, on `newer_copy`, offer "Replace it". Not a security issue.
+
+**F3 (Info): rough edges in the N3 confirmation.**
+
+- The tick is kept only in component state, and it is asked whenever `keys_changed_at` is set. So anyone who ever changed keys must tick it every time they open the card to add a passkey, even years later.
+- It is shown, and blocks "Add a passkey", even when `PASSKEY_UNLOCK` is off, where it doesn't apply.
+- The "Add a passkey" step in Start's set-up flow isn't covered. That flow is reached again after leaving a space.
+- Suggestion: show the tick only while unlocking is on, and only until the first passkey added after the change of keys.
+
+**F4 (Info): the "off" notice is still capped.** Someone with a session token can turn off several copies in one hour, and only the first sends an email. This only removes the one-touch way back; it exposes nothing. THREAT_MODEL already records turning copies off from a session as accepted. It could add that only the first one in an hour is emailed.
+
+### Verdict
+
+**Sign-off.** Every condition from the first review and from the check of the fixes is met. Nothing found in this round puts keys at risk.
+
+**`PASSKEY_UNLOCK` can be turned on in production now** (set `"PASSKEY_UNLOCK": "on"` in the production vars of `apps/api/wrangler.jsonc`, together with a deploy of the matching web build). F1 and F2 should be fixed in the next change. F3 and F4 are at the owner's discretion.
