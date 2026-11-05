@@ -563,8 +563,13 @@ test('a partner invite can be made again later, from Privacy or Waiting on you',
   await jo.setViewportSize({ width: 375, height: 740 });
   const fits = () => jo.evaluate(() => document.documentElement.scrollWidth <= innerWidth);
   expect(await fits()).toBe(true);
+  // Linking a device is under Privacy.
+  await jo
+    .getByRole('navigation', { name: 'Settings' })
+    .getByRole('link', { name: 'Privacy' })
+    .click();
   await jo.getByRole('button', { name: 'Link a new device' }).click();
-  await expect(jo.locator('.url code').nth(1)).toContainText('/join/#');
+  await expect(jo.locator('.url code').first()).toContainText('/join/#');
   expect(await fits()).toBe(true);
 
   // And it's first in Waiting on you.
@@ -630,7 +635,11 @@ test('a passkey can sign in and unlock the keys, without a link or the phrase', 
   expect(setup.some((b) => b.includes('space_version'))).toBe(true);
   for (const b of setup) expect(b).not.toMatch(/"prf"|"results"/);
 
-  // Signing out removes everything from this device...
+  // Signing out (under Account) removes everything from this device...
+  await page
+    .getByRole('navigation', { name: 'Settings' })
+    .getByRole('link', { name: 'Account' })
+    .click();
   await page
     .locator('section[aria-labelledby="acct-h"]')
     .getByRole('button', { name: 'Sign out' })
