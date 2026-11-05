@@ -120,7 +120,7 @@ Pull from upstream into your fork and push. Migrations run before the new Worker
 | `wrangler secret put` | `EMAIL_API_KEY` | Provider API key. |
 | `wrangler secret put` | `TURNSTILE_SECRET` | Cloudflare Turnstile secret; bot checks are skipped if unset. |
 | Web build repo variable `TURNSTILE_SITE_KEY` | `VITE_TURNSTILE_SITE_KEY` | Turnstile site key for the sign-in screen. Set it together with `TURNSTILE_SECRET`: with only the secret, sign-in fails. Adds `https://challenges.cloudflare.com` to the page's CSP. |
-| `wrangler secret put` | `RATE_LIMIT_SALT` | Random string used to hash rate-limit keys. |
+| `wrangler secret put` | `RATE_LIMIT_SALT` | Random string used to hash rate-limit keys and to key the hash of emailed sign-in codes. Required when `EMAIL_PROVIDER` is `resend`. |
 | `wrangler.jsonc` vars | `MAX_SPACES_PER_USER`, `MAX_DEVICES_PER_USER`, `MAX_SPACE_BYTES`, `MAX_PUSHES_PER_MINUTE`, `MAX_PUSHES_PER_HOUR` | Quotas (defaults 3, 10, 20 MB, 120 sync pushes a minute, 60 notifications an hour). |
 | `wrangler.jsonc` vars | `INACTIVE_WARN_DAYS`, `INACTIVE_GRACE_DAYS` | Inactive accounts get a warning email after this many days (default 365) and are deleted this many days later (default 30). Keep the privacy policy in step. |
 | `wrangler.jsonc` vars | `VAPID_SUBJECT` | Web Push contact (`mailto:` or https; defaults to `APP_URL`). |

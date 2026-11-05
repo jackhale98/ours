@@ -117,6 +117,8 @@ export async function cleanup(env: Env, now = Date.now()): Promise<void> {
   await env.DB.batch([
     env.DB.prepare('DELETE FROM email_tokens WHERE expires_at < ?').bind(now - 86_400_000),
     env.DB.prepare('DELETE FROM auth_challenges WHERE expires_at < ?').bind(now),
+    // Wrong sign-in codes are forgotten after 90 quiet days.
+    env.DB.prepare('DELETE FROM code_failures WHERE updated_at < ?').bind(now - 90 * 86_400_000),
     env.DB.prepare('DELETE FROM invites WHERE expires_at < ? OR used_at < ?').bind(
       now,
       now - 86_400_000,

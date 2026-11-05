@@ -16,7 +16,7 @@ Keep a private log with times for every step below; you will need it for notific
 |---|---|
 | Cloudflare API token, account, or GitHub account | Revoke the token or reset the password and 2FA; review recent deploys (`wrangler deployments list`), Worker code and repo commits; redeploy from a known-good commit. |
 | `EMAIL_API_KEY` | Revoke it with the email provider, `wrangler secret put EMAIL_API_KEY` with a new one. |
-| `RATE_LIMIT_SALT` | `wrangler secret put RATE_LIMIT_SALT` with a new random value. Existing rate-limit windows reset; nothing else is affected. |
+| `RATE_LIMIT_SALT` | `wrangler secret put RATE_LIMIT_SALT` with a new random value. Existing rate-limit windows and wrong-code counts reset, and sign-in codes already emailed stop working (links still work); nothing else is affected. |
 | `TURNSTILE_SECRET` | Rotate in the Cloudflare dashboard and `wrangler secret put TURNSTILE_SECRET`. |
 | `VAPID_PRIVATE_KEY` | Generate a new pair (SELF_HOSTING.md, "Notifications"), update `VAPID_PUBLIC_KEY` and the secret, and redeploy. All push subscriptions stop working: run `DELETE FROM push_subs;` and tell users to turn notifications on again. Notification text was never readable with this key. |
 | The D1 database (copied or accessed) | Revoke all sessions: `DELETE FROM sessions;` (everyone signs in again; tokens are stored hashed, but revoking is cheap). Revoke calendar feed links: `UPDATE feed_tokens SET revoked_at = <now> WHERE revoked_at IS NULL;` and `DELETE FROM feed_busy;`. Pending invites: `DELETE FROM invites;`. |

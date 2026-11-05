@@ -22,7 +22,7 @@ const fallbackSalt = () => {
  * address or email address is ever stored for rate limiting. Rows are deleted
  * by the hourly cleanup after a day.
  */
-async function opaqueKey(env: Env, key: string): Promise<string> {
+export async function opaqueKey(env: Env, key: string): Promise<string> {
   const data = new TextEncoder().encode(`${env.RATE_LIMIT_SALT ?? fallbackSalt()}|${key}`);
   const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', data));
   return [...digest.subarray(0, 16)].map((b) => b.toString(16).padStart(2, '0')).join('');

@@ -112,6 +112,32 @@ function ConfirmSignIn() {
   );
 }
 
+/**
+ * The address a code was sent to, for 15 minutes, in this tab only (another
+ * person on a shared computer never sees it): the code box is still there
+ * after a reload or the app being reopened. Cleared on sign-in.
+ */
+const WAITING_KEY = 'ours.signin-waiting';
+function waitingAddress(): string | null {
+  try {
+    const kept = JSON.parse(sessionStorage.getItem(WAITING_KEY) ?? 'null') as {
+      email: string;
+      at: number;
+    } | null;
+    return kept && Date.now() - kept.at < 15 * 60_000 ? kept.email : null;
+  } catch {
+    return null;
+  }
+}
+function keepWaitingAddress(email: string | null): void {
+  try {
+    if (email) sessionStorage.setItem(WAITING_KEY, JSON.stringify({ email, at: Date.now() }));
+    else sessionStorage.removeItem(WAITING_KEY);
+  } catch {
+    // Private browsing: the box just won't survive the app closing.
+  }
+}
+
 /** The six-digit code from the email: works whichever app or browser opened the email. */
 function CodeForm({ email }: { email: string }) {
   const [code, setCode] = useState('');
@@ -126,6 +152,7 @@ function CodeForm({ email }: { email: string }) {
         setBusy(true);
         try {
           await verifyCode(email, code);
+          keepWaitingAddress(null);
         } catch (err) {
           toast(signInErrorText(err));
         } finally {
@@ -142,10 +169,14 @@ function CodeForm({ email }: { email: string }) {
           inputMode="numeric"
           autocomplete="one-time-code"
           pattern="[0-9]*"
-          maxLength={7}
           data-autofocus
           value={code}
-          onInput={(e) => setCode(e.currentTarget.value.replace(/\D/g, '').slice(0, 6))}
+          onInput={(e) => {
+            // Digits only, so a pasted "Code: 123 456" works too.
+            const clean = e.currentTarget.value.replace(/\D/g, '').slice(0, 6);
+            e.currentTarget.value = clean;
+            setCode(clean);
+          }}
         />
       </div>
       <button class="btn primary" type="submit" disabled={!ready || busy}>
@@ -170,9 +201,10 @@ function SignIn() {
     setInviteAdded((n) => n + 1);
     toast('Invite added. Now sign in with your email.');
   };
-  const [email, setEmail] = useState('');
+  const waiting = waitingAddress();
+  const [email, setEmail] = useState(waiting ?? '');
   const [terms, setTerms] = useState(false);
-  const [sent, setSent] = useState(false);
+  const [sent, setSent] = useState(!!waiting);
   const [busy, setBusy] = useState(false);
   const [bot, setBot] = useState<string | null>(null);
   const botEl = useRef<HTMLDivElement>(null);
@@ -208,7 +240,14 @@ function SignIn() {
           accept={['signin']}
           onLink={useLink}
         />
-        <button type="button" class="linkbtn" onClick={() => setSent(false)}>
+        <button
+          type="button"
+          class="linkbtn"
+          onClick={() => {
+            keepWaitingAddress(null);
+            setSent(false);
+          }}
+        >
           Use a different address
         </button>
       </section>
@@ -229,6 +268,7 @@ function SignIn() {
                 return;
               }
               await startEmail(email.trim(), terms, bot ?? undefined);
+              keepWaitingAddress(email.trim());
               setSent(true);
             } catch (err) {
               toast(errorText(err));

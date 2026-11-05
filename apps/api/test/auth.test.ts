@@ -63,7 +63,9 @@ describe('email sign-in', () => {
     const mail = await nextMail(before);
     const code = /^\s+(\d{6})$/m.exec(mail?.text ?? '')?.[1];
     expect(code).toMatch(/^\d{6}$/);
-    expect(mail?.subject).toContain(code);
+    // Not in the subject (lock-screen previews); bound to the site for autofill.
+    expect(mail?.subject).not.toContain(code);
+    expect(mail?.text).toMatch(new RegExp(`\\n@[^ ]+ #${code}$`));
     // Codes are kept only as a keyed hash.
     const row = await env.DB.prepare('SELECT code_hash FROM email_tokens WHERE email = ?')
       .bind(email)
@@ -110,6 +112,37 @@ describe('email sign-in', () => {
     // An address with no code pending gets the same answer.
     const none = await call('/auth/email/code', { body: { email: uniqueEmail(), code: '123456' } });
     expect(none.json).toEqual(late.json);
+  });
+
+  it('after too many wrong codes an address gets links only, until it signs in', async () => {
+    const email = uniqueEmail();
+    await signIn(email);
+    const { opaqueKey } = await import('../src/lib/ratelimit');
+    const key = await opaqueKey(env, `code-failures:${email}`);
+    await env.DB.prepare('INSERT INTO code_failures (key, n, updated_at) VALUES (?, 100, ?)')
+      .bind(key, Date.now())
+      .run();
+    const before = outbox.length;
+    await call('/auth/email/start', { body: { email } });
+    const mail = await nextMail(before);
+    expect(mail?.text).toMatch(/link only/);
+    expect(mail?.text).not.toMatch(/^\s+\d{6}$/m);
+    expect((await call('/auth/email/code', { body: { email, code: '000000' } })).status).toBe(400);
+    // Signing in with the link clears the count.
+    const token = /#signin=([A-Za-z0-9_-]{43})/.exec(mail?.text ?? '')?.[1];
+    expect((await call('/auth/email/verify', { body: { token } })).status).toBe(200);
+    expect(
+      await env.DB.prepare('SELECT n FROM code_failures WHERE key = ?').bind(key).first(),
+    ).toBeNull();
+  });
+
+  it('limits code attempts per address, whoever asks', async () => {
+    const email = uniqueEmail();
+    const statuses: number[] = [];
+    for (let i = 0; i < 11; i++)
+      statuses.push((await call('/auth/email/code', { body: { email, code: '000000' } })).status);
+    expect(statuses.slice(0, 10).every((s) => s === 400)).toBe(true);
+    expect(statuses[10]).toBe(429);
   });
 
   it('rejects malformed input', async () => {

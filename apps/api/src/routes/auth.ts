@@ -16,15 +16,23 @@ import { Hono } from 'hono';
 import * as v from 'valibot';
 import { type AppEnv, createSession, endSession, requireAuth } from '../auth/session';
 import { type Env, num } from '../env';
-import { bytesOf, hashToken, newId, newToken } from '../lib/crypto';
+import { bytesOf, hashToken, newId, newToken, toB64Url } from '../lib/crypto';
 import { sendEmail } from '../lib/email';
 import { body, HttpError } from '../lib/http';
-import { clientNet, rateLimit } from '../lib/ratelimit';
+import { clientNet, opaqueKey, rateLimit } from '../lib/ratelimit';
 import { verifyTurnstile } from '../lib/turnstile';
 
 const EMAIL_TOKEN_MINUTES = 15;
 /** Wrong guesses a sign-in code allows before it stops working. */
 const CODE_TRIES = 5;
+/** Code attempts per address per hour, across all its codes and callers. */
+const CODE_TRIES_PER_HOUR = 10;
+/**
+ * Wrong codes for an address since its last successful sign-in, past which
+ * emails carry a link only: guessing six digits then succeeds with odds of
+ * at most 1 in 10,000 over an address's lifetime between sign-ins.
+ */
+const CODE_FAILURES_MAX = 100;
 const CHALLENGE_MINUTES = 5;
 const MAX_PASSKEYS = 10;
 /** Adding a passkey needs a sign-in this recent (a stolen old session can't add one). */
@@ -61,8 +69,32 @@ function newCode(): string {
   while ((n[0] as number) >= 4_294_000_000);
   return String((n[0] as number) % 1_000_000).padStart(6, '0');
 }
-const codeHash = (env: Env, tokenHash: string, code: string) =>
-  hashToken(`ours/signin-code/v1|${env.RATE_LIMIT_SALT ?? ''}|${tokenHash}|${code}`);
+async function codeHash(env: Env, tokenHash: string, code: string): Promise<string> {
+  // Keyed by the server secret (required in production), so a copy of the
+  // database alone can't be searched for live codes.
+  const key = await crypto.subtle.importKey(
+    'raw',
+    new TextEncoder().encode(`ours/signin-code/v1|${env.RATE_LIMIT_SALT ?? 'dev-only'}`),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign'],
+  );
+  const mac = await crypto.subtle.sign(
+    'HMAC',
+    key,
+    new TextEncoder().encode(`${tokenHash}|${code}`),
+  );
+  return toB64Url(new Uint8Array(mac));
+}
+
+const failuresKey = (env: Env, email: string) => opaqueKey(env, `code-failures:${email}`);
+
+async function codeFailures(env: Env, email: string): Promise<number> {
+  const row = await env.DB.prepare('SELECT n FROM code_failures WHERE key = ?')
+    .bind(await failuresKey(env, email))
+    .first<{ n: number }>();
+  return row?.n ?? 0;
+}
 
 function sameText(a: string, b: string): boolean {
   if (a.length !== b.length) return false;
@@ -151,7 +183,8 @@ async function issueLink(
     (env.ALLOW_SIGNUPS === 'open' || (!!input.invite && (await inviteUsable(env, input.invite))));
   if (!existing && !mayCreate) return;
   const token = newToken();
-  const code = newCode();
+  // Too many wrong codes for this address since it last signed in: a link only.
+  const code = (await codeFailures(env, input.email)) < CODE_FAILURES_MAX ? newCode() : null;
   const tokenHash = await hashToken(token);
   const now = Date.now();
   // The invite presented now is the one opening the link uses (review 0007, I11).
@@ -164,25 +197,45 @@ async function issueLink(
       now,
       now + EMAIL_TOKEN_MINUTES * 60_000,
       input.invite ? await hashToken(input.invite) : null,
-      await codeHash(env, tokenHash, code),
+      code ? await codeHash(env, tokenHash, code) : null,
     )
     .run();
   const app = (env.APP_URL ?? rp(env, undefined).origin).replace(/\/?$/, '/');
+  const host = new URL(app).host;
+  const link = `${app}#signin=${token}`;
   await sendEmail(env, {
     to: input.email,
-    subject: `Your Ours sign-in code: ${code}`,
-    text: [
-      'Type this code where you asked to sign in:',
-      '',
-      `    ${code}`,
-      '',
-      'Or tap to sign in on this device:',
-      '',
-      `${app}#signin=${token}`,
-      '',
-      `The code and link work once and expire in ${EMAIL_TOKEN_MINUTES} minutes.`,
-      'If you didn’t ask for them, ignore this email.',
-    ].join('\n'),
+    subject: code ? 'Your Ours sign-in code' : 'Your Ours sign-in link',
+    text: (code
+      ? [
+          `Type this code in Ours at ${host}, where you asked to sign in:`,
+          '',
+          `    ${code}`,
+          '',
+          'Only type it in Ours. Never share it: Ours will never ask you for it',
+          'by email, text or phone, or on any other site.',
+          '',
+          'Or tap to sign in on this device:',
+          '',
+          link,
+          '',
+          `The code and link work once and expire in ${EMAIL_TOKEN_MINUTES} minutes.`,
+          'If you didn’t ask for them, ignore this email.',
+          '',
+          // Domain-bound code (WebOTP format): browsers offer it only on this site.
+          `@${host} #${code}`,
+        ]
+      : [
+          'Tap to sign in to Ours:',
+          '',
+          link,
+          '',
+          `This link works once and expires in ${EMAIL_TOKEN_MINUTES} minutes.`,
+          'Too many wrong codes were tried for this address, so this email has a',
+          'link only. Signing in with it brings codes back.',
+          'If you didn’t ask for it, ignore this email.',
+        ]
+    ).join('\n'),
   });
 }
 
@@ -245,7 +298,19 @@ auth.post('/email/code', async (c) => {
     v.object({ email: Email, code: Code, device_label: DeviceLabel, invite: InviteId }),
   );
   await rateLimit(c.env, `email-verify:ip:${clientNet(c)}`, 20, 3600);
+  // Per address too, whoever is asking: per-IP limits don't bound guessing
+  // spread over many addresses' worth of IPs.
+  await rateLimit(c.env, `email-code:addr:${input.email}`, CODE_TRIES_PER_HOUR, 3600);
   const now = Date.now();
+  // One answer for "no code", "too many tries" and "wrong": nothing about the
+  // address or its codes is revealed to someone guessing.
+  const refuse = () =>
+    new HttpError(
+      400,
+      'code_invalid',
+      'That code isn’t right, or it has expired. Use the newest email, or ask for a new code.',
+    );
+  if ((await codeFailures(c.env, input.email)) >= CODE_FAILURES_MAX) throw refuse();
   // The newest code sent to this address, counting this guess first so that
   // concurrent guesses can't share a try.
   const pending = await c.env.DB.prepare(
@@ -259,17 +324,18 @@ auth.post('/email/code', async (c) => {
   )
     .bind(input.email, now, CODE_TRIES)
     .first<{ token_hash: string; code_hash: string }>();
-  // One answer for "no code", "too many tries" and "wrong": nothing about the
-  // address or its codes is revealed to someone guessing.
-  const refuse = () =>
-    new HttpError(
-      400,
-      'code_invalid',
-      'That code isn’t right, or it has expired. Use the newest email, or ask for a new code.',
-    );
-  if (!pending) throw refuse();
-  if (!sameText(await codeHash(c.env, pending.token_hash, input.code), pending.code_hash))
+  // The same work whether or not a code is pending (timing).
+  const given = await codeHash(c.env, pending?.token_hash ?? 'none', input.code);
+  if (!pending || !sameText(given, pending.code_hash)) {
+    const key = await failuresKey(c.env, input.email);
+    await c.env.DB.prepare(
+      `INSERT INTO code_failures (key, n, updated_at) VALUES (?1, 1, ?2)
+        ON CONFLICT (key) DO UPDATE SET n = n + 1, updated_at = ?2`,
+    )
+      .bind(key, now)
+      .run();
     throw refuse();
+  }
   const row = await c.env.DB.prepare(
     `UPDATE email_tokens SET used_at = ?1
       WHERE token_hash = ?2 AND used_at IS NULL AND expires_at > ?1
@@ -328,6 +394,10 @@ async function finishEmailSignIn(
     created = true;
   }
   const session = await createSession(env, user.id, input.device_label);
+  // Signed in: wrong codes guessed for this address start counting afresh.
+  await env.DB.prepare('DELETE FROM code_failures WHERE key = ?')
+    .bind(await failuresKey(env, row.email))
+    .run();
   return { ...session, user, new_user: created };
 }
 

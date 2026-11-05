@@ -486,6 +486,12 @@ type EmailSignIn = Session & { new_user: boolean; expires_at: number };
 async function signedIn(res: EmailSignIn): Promise<{ newUser: boolean }> {
   const session: Session = { token: res.token, user: res.user, device_id: res.device_id };
   claimKeptInvite(res.user.email);
+  try {
+    // Start's "waiting for a code" note: done with, however you got in.
+    sessionStorage.removeItem('ours.signin-waiting');
+  } catch {
+    // Storage blocked: nothing was kept.
+  }
   await kvSet('session', session);
   setToken(session.token);
   try {
