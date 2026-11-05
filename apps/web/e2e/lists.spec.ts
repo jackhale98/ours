@@ -50,7 +50,7 @@ test('gift lists are private by default and hidden from the partner', async ({ p
   await expect(dialog.getByRole('switch', { name: /Just for me/ })).toBeChecked();
   await dialog.getByRole('button', { name: 'Make list' }).click();
   await expect(page.getByRole('button', { name: /Private: Birthday/ })).toBeVisible();
-  await nav(page, 'Privacy');
+  await nav(page, 'Settings');
   await page.getByRole('group', { name: 'View as' }).getByRole('button', { name: 'Alex' }).click();
   await nav(page, 'Lists');
   await expect(page.getByRole('button', { name: /Birthday/ })).toHaveCount(0);

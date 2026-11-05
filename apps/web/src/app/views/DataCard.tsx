@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-/** Privacy → Your data: export (readable, encrypted, calendar) and import. */
+/** Settings → Your data: export (readable, encrypted, calendar) and import. */
 import { normalizePhrase } from '@ours/core/crypto';
 import { useRef, useState } from 'preact/hooks';
 import { isCurrentPhrase } from '../../account/session';

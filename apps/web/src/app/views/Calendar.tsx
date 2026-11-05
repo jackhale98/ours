@@ -125,8 +125,25 @@ const byImportance = (a: Row, b: Row) =>
 const markerMode = (r: Row) =>
   r.type === 'busy' ? ('busy' as const) : r.status !== 'confirmed' ? ('dash' as const) : undefined;
 
-function Markers({ rows, max = 3 }: { rows: Row[]; max?: number }) {
-  const shown = rows.slice(0, max);
+function Markers({
+  rows,
+  max = 3,
+  compact = false,
+}: {
+  rows: Row[];
+  max?: number;
+  compact?: boolean;
+}) {
+  // Phones: one marker per person (and kind: tentative, busy), not one per
+  // plan, so a full day reads as "yours and ours, and more" in one row.
+  const groups = compact
+    ? rows.filter(
+        (r, i) =>
+          rows.findIndex((x) => x.owner === r.owner && markerMode(x) === markerMode(r)) === i,
+      )
+    : rows;
+  // Room for three markers, or two and a count, in a phone cell.
+  const shown = groups.slice(0, compact && groups.length > max ? max - 1 : max);
   const more = rows.length - shown.length;
   return (
     <span class="cal-marks" aria-hidden="true">
@@ -636,7 +653,10 @@ export function MonthView() {
                                 })}
                               </span>
                             )}
-                            <Markers rows={wide.value ? plans.slice(titles) : plans} />
+                            <Markers
+                              rows={wide.value ? plans.slice(titles) : plans}
+                              compact={phone}
+                            />
                             {day.bothFree && !out && day.date >= t && (
                               <span class="mfree" aria-hidden="true" />
                             )}

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-/** Privacy → Default reminders: what new plans (and plans you say yes to) remind you of. */
+/** Settings → Default reminders: what new plans (and plans you say yes to) remind you of. */
 import { nameOf, partner, updateSettings, viewer } from '../model';
 import { ReminderPicker } from '../reminderpicker';
 import { defaultReminders, setDefaultReminders } from '../reminders';

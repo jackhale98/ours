@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 /**
  * How each of you appears: a colour from a tested palette and a marker
- * shape, chosen in Privacy → Appearance and shared, so you both see the same.
+ * shape, chosen in Settings → Appearance and shared, so you both see the same.
  *
  * The colour is applied by pointing --person-a/--person-b (and their -soft
  * tints) at a palette token, so light and dark themes follow by themselves.

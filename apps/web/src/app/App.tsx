@@ -48,12 +48,12 @@ const StartView = lazy(() => import('./views/Start').then((m) => ({ default: m.S
 /** Show onboarding (sign-in, setup) instead of the tabs. */
 export const startRequested = signal(location.hash === '#start');
 
-export type Tab = 'plan' | 'lists' | 'checkin' | 'privacy' | 'inbox' | 'search';
+export type Tab = 'plan' | 'lists' | 'checkin' | 'settings' | 'inbox' | 'search';
 const TABS: [Tab, string, IconName][] = [
   ['plan', 'Plan', 'cal'],
   ['lists', 'Lists', 'list'],
   ['checkin', 'Check-in', 'rings'],
-  ['privacy', 'Privacy', 'shield'],
+  ['settings', 'Settings', 'settings'],
 ];
 export const isTab = (h: string): h is Tab =>
   h === 'inbox' || h === 'search' || TABS.some(([t]) => t === h);
@@ -156,6 +156,12 @@ function syncFromHash() {
     return;
   }
   if (h === 'plan') setPlanMode('agenda', false);
+  // The tab was called Privacy: its old address still opens it.
+  if (h === 'privacy') {
+    tab.value = 'settings';
+    startRequested.value = false;
+    return;
+  }
   if (isTab(h)) {
     tab.value = h;
     startRequested.value = false;
@@ -272,7 +278,7 @@ function NewKeysBanner() {
       <Icon name="lock" size={16} />
       <span>
         {from === 'my-device'
-          ? 'Your keys were changed on another of your devices. On that device, go to Privacy → Link a new device, and open the link here.'
+          ? 'Your keys were changed on another of your devices. On that device, go to Settings → Link a new device, and open the link here.'
           : `${nameOf(partner.value)} changed your shared keys. Open the key update link they sent you, or a device link from your other device that already has the new keys. Until then, new plans can’t sync.`}
       </span>
     </div>
@@ -297,7 +303,7 @@ function KeyLinkPrompt() {
         </h2>
         <p>
           {mine
-            ? `Before using them, compare this safety code with the one in Privacy on your other device, or on ${who}’s phone:`
+            ? `Before using them, compare this safety code with the one in Settings on your other device, or on ${who}’s phone:`
             : `Before using them, compare this safety code with the one on ${who}’s phone, in person or on a call:`}
         </p>
         <p class="fp">
@@ -316,7 +322,7 @@ function KeyLinkPrompt() {
                 keyLinkOffer.value = null;
                 toast(
                   offer.kind === 'rekey'
-                    ? 'New keys added. Make a new recovery phrase in Privacy.'
+                    ? 'New keys added. Make a new recovery phrase in Settings.'
                     : 'This device has the new keys.',
                 );
               } catch (err) {
@@ -473,7 +479,7 @@ function PhraseBanner() {
         <Icon name="lock" size={16} />
         <span>
           The keys didn’t change, but your new recovery phrase was saved: keep it, it’s now the one
-          that restores your keys. <a href="#privacy">Details in Privacy</a>.
+          that restores your keys. <a href="#settings">Details in Settings</a>.
         </span>
       </div>
     );
@@ -483,7 +489,7 @@ function PhraseBanner() {
       <Icon name="lock" size={16} />
       <span>
         Your keys changed, so your recovery phrase can’t restore them.{' '}
-        <a href="#privacy">Make a new phrase in Privacy</a>.
+        <a href="#settings">Make a new phrase in Settings</a>.
       </span>
     </div>
   );
@@ -604,7 +610,7 @@ export function App() {
     plan: PlanView,
     lists: ListsView,
     checkin: CheckinView,
-    privacy: PrivacyView,
+    settings: PrivacyView,
     inbox: InboxView,
     search: SearchView,
   }[tab.value];

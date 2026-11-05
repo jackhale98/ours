@@ -38,7 +38,7 @@ test('import a calendar shared as busy-only: I see details, my partner sees Busy
   await nav(page, 'Plan');
   await expect(page.getByRole('button', { name: /Team standup/ }).first()).toBeVisible();
 
-  await nav(page, 'Privacy');
+  await nav(page, 'Settings');
   await page.getByRole('group', { name: 'View as' }).getByRole('button', { name: 'Alex' }).click();
   await expect(page.getByText(/shared by Sam · busy times only/)).toBeVisible();
   await nav(page, 'Plan');
@@ -109,7 +109,7 @@ test('each person picks a colour and a shape, and everything follows', async ({ 
   // Both circles by default, so the key doesn't mention shapes.
   await expect(page.getByText('Alex’s plan', { exact: true })).toBeVisible();
 
-  await page.goto('/#privacy');
+  await page.goto('/#settings');
   const alex = page.getByRole('group', { name: 'Alex’s shape' });
   await alex.getByRole('button', { name: 'Square' }).click();
   await expect(alex.getByRole('button', { name: 'Square' })).toHaveAttribute(
@@ -146,7 +146,7 @@ test('each person picks a colour and a shape, and everything follows', async ({ 
 });
 
 test('colours that colour blindness could confuse suggest different shapes', async ({ page }) => {
-  await page.goto('/#privacy');
+  await page.goto('/#settings');
   await page
     .getByRole('radiogroup', { name: 'Sam’s colour' })
     .getByTitle('Green', { exact: true })

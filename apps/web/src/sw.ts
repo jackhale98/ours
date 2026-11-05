@@ -101,7 +101,7 @@ async function tellClients(): Promise<void> {
 
 /**
  * Why the last notification was shown in full or not, kept on this device
- * only (a reason code, never content), for Privacy → Notifications.
+ * only (a reason code, never content), for Settings → Notifications.
  */
 type PushOutcome =
   | 'shown'

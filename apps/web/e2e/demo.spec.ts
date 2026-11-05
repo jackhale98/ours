@@ -72,7 +72,7 @@ test('declining a proposal hides it for me and shows the answer to my partner', 
   await expect(page.locator('.toast-host')).toContainText('can’t make it');
   await expect(page.locator('.ask')).toHaveCount(0);
   // Switch to the partner who asked: the plan is still there, marked declined.
-  await nav(page, 'Privacy');
+  await nav(page, 'Settings');
   await page.getByRole('group', { name: 'View as' }).getByRole('button', { name: 'Alex' }).click();
   await nav(page, 'Plan');
   const row = page.locator('.ev.is-declined').first();
@@ -195,7 +195,7 @@ test('a private plan is hidden from the partner but visible as Busy', async ({ p
   await dialog.getByRole('button', { name: 'Add plan' }).click();
   await expect(page.getByRole('button', { name: /Surprise planning/ })).toBeVisible();
 
-  await nav(page, 'Privacy');
+  await nav(page, 'Settings');
   await page.getByRole('group', { name: 'View as' }).getByRole('button', { name: 'Alex' }).click();
   await nav(page, 'Plan');
   await expect(page.getByText('Surprise planning')).toHaveCount(0);
@@ -238,7 +238,7 @@ test('lists: add, assign, check off; private list is hidden from the partner', a
   await expect(page.getByRole('button', { name: /Show done · 2/ })).toBeVisible();
 
   await expect(page.getByRole('button', { name: /Gift ideas/ })).toBeVisible();
-  await nav(page, 'Privacy');
+  await nav(page, 'Settings');
   await page.getByRole('group', { name: 'View as' }).getByRole('button', { name: 'Alex' }).click();
   await nav(page, 'Lists');
   await expect(page.getByRole('button', { name: /Gift ideas/ })).toHaveCount(0);

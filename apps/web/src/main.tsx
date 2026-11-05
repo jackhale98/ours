@@ -5,7 +5,16 @@ import './styles/landing.css';
 import { Landing } from './Landing';
 import { applyTheme } from './theme';
 
-const APP_ROUTES = new Set(['plan', 'lists', 'checkin', 'privacy', 'inbox', 'search', 'start']);
+const APP_ROUTES = new Set([
+  'plan',
+  'lists',
+  'checkin',
+  'settings',
+  'privacy',
+  'inbox',
+  'search',
+  'start',
+]);
 const isAppRoute = () =>
   APP_ROUTES.has(location.hash.slice(1)) ||
   /^#plan[/&]/.test(location.hash) ||

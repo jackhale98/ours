@@ -23,7 +23,7 @@ export function PartnerInvite() {
     if (!link) return;
     const t = setInterval(async () => {
       if (await checkPartner().catch(() => false)) {
-        toast('They’ve joined. Compare your safety codes in Privacy.');
+        toast('They’ve joined. Compare your safety codes in Settings.');
       }
     }, 5000);
     return () => clearInterval(t);

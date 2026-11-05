@@ -442,7 +442,7 @@ function RestoreKeys() {
       <p class="d">
         This device doesn’t have your keys yet.
         {canUnlock ? ' Unlock them with your passkey, ' : ' '}
-        Scan the code or open the link from another of your devices (Privacy → Link a new device),
+        Scan the code or open the link from another of your devices (Settings → Link a new device),
         or enter your recovery phrase.
       </p>
       {canUnlock && (
@@ -493,7 +493,7 @@ function RestoreKeys() {
       />
       <PasteLink
         label="Paste a device link"
-        hint={`Make one on a device that's already set up: Privacy → Link a new device. ${PASTE_HINT}`}
+        hint={`Make one on a device that's already set up: Settings → Link a new device. ${PASTE_HINT}`}
         accept={['join']}
         onLink={async (link) => {
           if (link.kind !== 'join') return;

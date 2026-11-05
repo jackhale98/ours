@@ -44,7 +44,7 @@ export function noticeAnswer(id: string, yes: boolean): void {
 export function noticeNote(id: string, text: string): void {
   const d = eventOf(id);
   if (!d) return;
-  // The partner chose not to hear about notes (Privacy → Notifications).
+  // The partner chose not to hear about notes (Settings → Notifications).
   if (settings.value.notify_notes?.[partner.value] === false) return;
   notifyPartner({
     title: `${nameOf(viewer.value)} added a note: ${d.title}`,

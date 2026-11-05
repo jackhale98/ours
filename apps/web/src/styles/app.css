@@ -3918,3 +3918,28 @@ kbd {
   flex-wrap: wrap;
   margin-block: 4px 10px;
 }
+/* Phone month cells: one quiet row of markers, never wrapping. */
+.month-wrap.phone .cal-marks {
+  flex-wrap: nowrap;
+  gap: 0;
+  max-width: 100%;
+  overflow: hidden;
+  min-height: 12px;
+}
+.month-wrap.phone .cal-marks .mk {
+  width: 12px;
+  transform: scale(0.8);
+  transform-origin: left center;
+}
+.month-wrap.phone .cal-marks .mk-ours {
+  width: 15px;
+}
+.month-wrap.phone .cal-more {
+  font-size: 0.625rem;
+  margin-inline-start: 1px;
+  line-height: 1;
+}
+.month-wrap.phone .maway {
+  height: 2px;
+  opacity: 0.4;
+}

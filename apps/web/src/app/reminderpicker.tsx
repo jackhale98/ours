@@ -228,7 +228,7 @@ export function ReminderPicker({
         ) : (
           pushState.value !== 'on' && (
             <p class="small muted">
-              Turn on notifications in Privacy to get reminders on this device.
+              Turn on notifications in Settings to get reminders on this device.
             </p>
           )
         ))}

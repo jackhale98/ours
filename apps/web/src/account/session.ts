@@ -1238,7 +1238,7 @@ export const joinInsteadOffer = signal<JoinOffer | null>(null);
  * changed on another device since, they could be the newest plans (Q2).
  */
 const MISSING_KEYS =
-  'This device doesn’t have your latest keys, so it can’t show everything in your space yet. Link it from your other device first (Privacy → Link a new device), then open the invite again.';
+  'This device doesn’t have your latest keys, so it can’t show everything in your space yet. Link it from your other device first (Settings → Link a new device), then open the invite again.';
 
 export async function openJoinOffer(fragment: string): Promise<JoinOffer> {
   const state = account.value;

@@ -44,7 +44,7 @@ export function PrivacyView() {
           <p class="eyebrow">
             {n.a} &amp; {n.b}
           </p>
-          <h1>Privacy</h1>
+          <h1>Settings</h1>
         </div>
       </header>
       <div class="cards">

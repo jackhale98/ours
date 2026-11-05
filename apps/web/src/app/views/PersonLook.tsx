@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 /**
- * Privacy → Appearance: each person's colour and marker shape. Shared, so
+ * Settings → Appearance: each person's colour and marker shape. Shared, so
  * either of you can set either; the two of you can't have the same colour.
  * When the two colours could be confused with colour blindness and the
  * shapes match too, a note suggests different shapes.

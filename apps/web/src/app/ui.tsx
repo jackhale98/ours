@@ -71,7 +71,7 @@ export const colorVar = (slot: Slot) => (slot === 'a' ? 'var(--person-a)' : 'var
 
 /**
  * Ownership marker: person A and person B in their colours and shapes (each
- * picked in Privacy → Appearance), ours = both overlapping;
+ * picked in Settings → Appearance), ours = both overlapping;
  * filled = confirmed, outline = tentative, hatched = private ("busy").
  */
 export function Marker({ owner, mode }: { owner: Slot | 'both'; mode?: 'dash' | 'busy' }) {
