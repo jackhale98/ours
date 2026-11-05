@@ -144,6 +144,24 @@ export const EventData = v.pipe(
     remind: v.optional(v.strictObject({ a: PersonReminders, b: PersonReminders })),
     /** The idea it was planned from (a list item), so the idea shows it's planned. */
     from_item: v.optional(v.nullable(RefId)),
+    /**
+     * What it was before the last change by one of you (review 0009, P-4): the
+     * old time, title or place, and who changed it. A move asked about keeps
+     * the old time here, so "Can't make it" puts it back.
+     */
+    was: v.optional(
+      v.nullable(
+        v.strictObject({
+          by: Slot,
+          start: v.optional(Text(25)),
+          end: v.optional(Text(25)),
+          title: v.optional(Text(200)),
+          location: v.optional(v.nullable(Text(200))),
+          /** It was a confirmed plan before the move: "can't make it" puts it back. */
+          confirmed: v.optional(v.boolean()),
+        }),
+      ),
+    ),
   }),
   v.check((e) => isValidWhen(e), WHEN_MESSAGE),
 );

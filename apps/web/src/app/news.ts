@@ -9,7 +9,7 @@ import { computed, signal } from '@preact/signals';
 import { allLists, itemsOf } from './lists';
 import { byKind, type Entry, findEntry, other, viewer } from './model';
 import { type Hit, nextTime } from './search';
-import { now } from './select';
+import { changeText, now } from './select';
 
 const KEY = 'ours-seen-at';
 
@@ -62,6 +62,10 @@ export const news = computed((): Hit[] => {
         where: d.location,
         upcoming: t.up,
         repeats: !!d.rrule,
+        // What they changed, when it's known: "Fri 7:30 PM → Sat 7 PM" (P-4).
+        ...(d.was && d.was.by !== viewer.value && changeText(d)
+          ? { change: changeText(d) as string }
+          : {}),
       },
     });
   }

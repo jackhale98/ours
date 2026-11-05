@@ -25,6 +25,8 @@ export type Hit =
       where: string | null;
       upcoming: boolean;
       repeats: boolean;
+      /** What the partner changed ("Fri 7:30 PM → Sat 7 PM"), in "New from …". */
+      change?: string;
     }
   | { kind: 'note'; id: string; planId: string; planTitle: string; text: string }
   | { kind: 'item'; id: string; item: ItemEntry; list: ListEntry }

@@ -266,3 +266,43 @@ test('a plan’s place opens in maps', async ({ page }) => {
   );
   await expect(link).toHaveAttribute('rel', 'noopener noreferrer');
 });
+
+test('moving a shared plan asks; "can’t make it" puts it back (review 0009, P-4)', async ({
+  page,
+}) => {
+  await page.goto('/#plan');
+  await page.getByRole('button', { name: /Ours: Dinner with Jordan/ }).click();
+  await page
+    .getByRole('dialog', { name: 'Dinner with Jordan & Priya' })
+    .getByRole('button', { name: 'Edit' })
+    .click();
+  const f = form(page);
+  const was = await f.getByLabel('Start time').inputValue();
+  await f.getByLabel('Start time').fill('21:00');
+  await expect(f.getByRole('switch', { name: 'Ask Alex about the new time' })).toBeChecked();
+  await f.getByRole('button', { name: 'Save changes' }).click();
+  await expect(page.locator('.toast-host')).toContainText('Asked Alex about the new time');
+  await page.keyboard.press('Escape');
+
+  // Alex sees the move, old → new, and can't make it: it goes back.
+  await page
+    .getByRole('navigation', { name: 'Main' })
+    .filter({ visible: true })
+    .getByRole('link', { name: 'Privacy' })
+    .click();
+  await page.getByRole('group', { name: 'View as' }).getByRole('button', { name: 'Alex' }).click();
+  await page
+    .getByRole('navigation', { name: 'Main' })
+    .filter({ visible: true })
+    .getByRole('link', { name: 'Plan' })
+    .click();
+  const card = page.locator('.ask', { hasText: 'Dinner with Jordan' });
+  await expect(card).toContainText('Sam wants to move this');
+  await expect(card).toContainText('→');
+  await card.getByRole('button', { name: 'Can’t make it' }).click();
+  await expect(page.locator('.toast-host')).toContainText('Kept at the old time');
+  await page.getByRole('button', { name: /Ours: Dinner with Jordan/ }).click();
+  const sheet = page.getByRole('dialog', { name: 'Dinner with Jordan & Priya' });
+  await sheet.getByRole('button', { name: 'Edit' }).click();
+  await expect(form(page).getByLabel('Start time')).toHaveValue(was);
+});

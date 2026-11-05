@@ -21,6 +21,7 @@ import {
   monDay,
   now,
   type Row,
+  routineWhileAway,
   startOfWeek,
   today,
   weekStartsOn,
@@ -203,7 +204,13 @@ function DayPanel({ day }: { day: Day }) {
       <h2 class="h3">{isToday ? `Today, ${fmtLong(day.date)}` : fmtLong(day.date)}</h2>
       <div class="dlist">
         {day.rows.map((row) => (
-          <EventRow key={row.key} row={row} date={day.date} />
+          <EventRow
+            key={row.key}
+            row={row}
+            date={day.date}
+            clash={day.clash.has(row.key)}
+            dim={routineWhileAway(row, day)}
+          />
         ))}
         {!day.rows.length && <p class="nothing">Nothing planned</p>}
         {day.bothFree && day.date >= today.value && (
@@ -421,7 +428,13 @@ function DayDrawer({ day }: { day: Day }) {
         {...({ inert: !open } as Record<string, boolean>)}
       >
         {day.rows.map((row) => (
-          <EventRow key={row.key} row={row} date={day.date} />
+          <EventRow
+            key={row.key}
+            row={row}
+            date={day.date}
+            clash={day.clash.has(row.key)}
+            dim={routineWhileAway(row, day)}
+          />
         ))}
         {!day.rows.length && <p class="nothing">Nothing planned</p>}
         {day.bothFree && day.date >= today.value && (

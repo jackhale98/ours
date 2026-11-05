@@ -17,6 +17,7 @@ import {
   byKind,
   commentsFor,
   type Entry,
+  type EventData,
   partner,
   type Slot,
   settings,
@@ -107,6 +108,19 @@ const DAY_NAMES: Record<string, string> = {
 export function repeatText(rrule: string | null): string {
   if (!rrule) return '';
   const p = Object.fromEntries(rrule.split(';').map((kv) => kv.split('=') as [string, string]));
+  const ord = (d: number) =>
+    `${d}${d % 10 === 1 && d !== 11 ? 'st' : d % 10 === 2 && d !== 12 ? 'nd' : d % 10 === 3 && d !== 13 ? 'rd' : 'th'}`;
+  const on = p.FREQ === 'MONTHLY' && p.BYMONTHDAY ? ` on the ${ord(Number(p.BYMONTHDAY))}` : '';
+  // How it ends (review 0009, P-6): "10 times", "until Jan 31".
+  const ends = p.COUNT
+    ? `, ${p.COUNT} times`
+    : p.UNTIL
+      ? `, until ${fmtLong(`${p.UNTIL.slice(0, 4)}-${p.UNTIL.slice(4, 6)}-${p.UNTIL.slice(6, 8)}`)}`
+      : '';
+  return baseRepeat(p) + on + ends;
+}
+
+function baseRepeat(p: Record<string, string>): string {
   const n = Number(p.INTERVAL ?? 1);
   const unit =
     { DAILY: 'day', WEEKLY: 'week', MONTHLY: 'month', YEARLY: 'year' }[p.FREQ ?? ''] ?? '';
@@ -346,6 +360,91 @@ export interface Day {
   date: string;
   rows: Row[];
   bothFree: boolean;
+  /** Rows that overlap another for the same person (review 0009, P-3). */
+  clash: ReadonlySet<string>;
+  /** Who is away all day: their routines that day are dimmed (P-3). */
+  away: ReadonlySet<Slot>;
+}
+
+/** Whether two rows can clash: they involve the same person. */
+const sharesPerson = (a: Row, b: Row) =>
+  a.owner === 'both' || b.owner === 'both' || a.owner === b.owner;
+
+/** Each overlapping pair's rows, by key. Days hold a few dozen rows at most. */
+function clashesIn(rows: Row[]): Set<string> {
+  const timed = rows.filter(blocksTime);
+  const out = new Set<string>();
+  for (let i = 0; i < timed.length; i++) {
+    const a = timed[i] as Row;
+    for (let j = i + 1; j < timed.length; j++) {
+      const b = timed[j] as Row;
+      if (b.occStart >= a.occEnd) continue;
+      if (a.occStart < b.occEnd && sharesPerson(a, b) && a.id !== b.id) {
+        out.add(a.key);
+        out.add(b.key);
+      }
+    }
+  }
+  return out;
+}
+
+function awayOn(rows: Row[]): Set<Slot> {
+  const out = new Set<Slot>();
+  for (const r of rows)
+    if (r.allDay && r.away && r.status !== 'declined') {
+      if (r.owner === 'both') {
+        out.add('a');
+        out.add('b');
+      } else out.add(r.owner);
+    }
+  return out;
+}
+
+/** A routine on a day its person is away: shown dimmed, it likely isn't happening. */
+export function routineWhileAway(row: Row, day: Day): boolean {
+  if (!row.repeat || row.allDay || !day.away.size) return false;
+  return row.owner === 'both' ? day.away.size === 2 : day.away.has(row.owner);
+}
+
+/**
+ * What a plan from `start` to `end` (instants) would overlap, for `owner`:
+ * timed plans of the same person (or both), their Busy markers and
+ * imported calendars. `except` leaves out the plan itself when editing.
+ */
+export function conflictsFor(
+  start: number,
+  end: number,
+  owner: Slot | 'both',
+  except?: string,
+): Row[] {
+  if (!(end > start)) return [];
+  const first = dateIn(start, zone);
+  const days = Math.min(14, Math.max(1, Math.round((end - start) / 86_400_000) + 2));
+  const seen = new Set<string>();
+  const out: Row[] = [];
+  for (const d of agendaFrom(first, days)) {
+    for (const r of d.rows) {
+      if (seen.has(r.key) || r.id === except || !blocksTime(r)) continue;
+      if (r.occStart >= end || r.occEnd <= start) continue;
+      if (!(owner === 'both' || r.owner === 'both' || r.owner === owner)) continue;
+      seen.add(r.key);
+      out.push(r);
+    }
+  }
+  return out;
+}
+
+/** "Overlaps Book club (yours)", "Alex is busy then", or null. */
+export function clashText(rows: Row[], names: { me: Slot; partner: string }): string | null {
+  const r = rows[0];
+  if (!r) return null;
+  const more = rows.length > 1 ? ` and ${rows.length - 1} more` : '';
+  if (r.type === 'busy' || (r.origin === 'import' && r.type !== 'import'))
+    return r.owner === names.me
+      ? `You’re busy then${more}`
+      : `${names.partner} is busy then${more}`;
+  const whose = r.owner === 'both' ? 'ours' : r.owner === names.me ? 'yours' : `${names.partner}’s`;
+  return `Overlaps ${r.title} (${whose})${more}`;
 }
 
 /** The last few windows, oldest dropped first (it used to clear all at once). */
@@ -443,7 +542,13 @@ function computeAgenda(first: string, days: number): Day[] {
   return Array.from({ length: days }, (_, i) => {
     const date = addDays(first, i);
     const rows = (byDay.get(date) ?? []).sort(sortRows);
-    return { date, rows, bothFree: isEveningFree(date, rows) };
+    return {
+      date,
+      rows,
+      bothFree: isEveningFree(date, rows),
+      clash: clashesIn(rows),
+      away: awayOn(rows),
+    };
   });
 }
 
@@ -548,3 +653,33 @@ export function ownerLabel(owner: Slot | 'both', names: Record<Slot, string>): s
   if (owner === viewer.value) return 'Yours';
   return `${names[owner]}’s`;
 }
+
+/**
+ * What changed in a plan's last edit by one of you (review 0009, P-4):
+ * "Fri 7:30 PM → Sat 7 PM", "was “Dinner”", "new place". Null if nothing.
+ */
+export function changeText(d: EventData): string | null {
+  const w = d.was;
+  if (!w) return null;
+  const parts: string[] = [];
+  if (w.start && w.end)
+    parts.push(
+      `${whenText(w.start.slice(0, 10), d.all_day, w.start.slice(11), w.end.slice(11))} → ${whenText(
+        d.start.slice(0, 10),
+        d.all_day,
+        d.start.slice(11),
+        d.end.slice(11),
+      )}`,
+    );
+  if (w.title !== undefined) parts.push(`was “${w.title}”`);
+  if (w.location !== undefined) parts.push(d.location ? `now at ${d.location}` : 'no place now');
+  return parts.length ? parts.join(' · ') : null;
+}
+
+/** A proposal that changes the time: a move of a plan you had, or another time suggested. */
+export const isMoveAsk = (d: EventData) =>
+  d.status === 'proposed' && !!d.was?.start && d.was.by === d.proposed_by;
+
+/** "wants to move this" (a plan you had) or "suggests another time" (an answer to a request). */
+export const askVerb = (d: EventData) =>
+  !isMoveAsk(d) ? 'asked' : d.was?.confirmed ? 'wants to move this' : 'suggests another time';

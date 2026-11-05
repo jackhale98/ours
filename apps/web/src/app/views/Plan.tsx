@@ -11,26 +11,51 @@ import { markSeen, news } from '../news';
 import { planMode } from '../planview';
 import {
   agenda,
+  askVerb,
   awaitingMe,
+  changeText,
   countdowns,
   dayNum,
   dowShort,
   fmtLong,
   fmtTime,
+  isMoveAsk,
   monDay,
   ownerLabel,
   type Row,
+  routineWhileAway,
   today,
   whenText,
 } from '../select';
-import { accept, decline, openEvent, openFreeTime, openImport, openPlanForm } from '../sheets';
+import {
+  accept,
+  ClashNote,
+  decline,
+  openEvent,
+  openFreeTime,
+  openImport,
+  openPlanForm,
+  SuggestTime,
+} from '../sheets';
 import { Icon, Marker, MarkerKey } from '../ui';
 import { MonthView, ViewSwitch, WeekView } from './Calendar';
 import { Result } from './Search';
 
 const weeks = signal<1 | 2>(1);
 
-export function EventRow({ row, date }: { row: Row; date: string }) {
+export function EventRow({
+  row,
+  date,
+  clash = false,
+  dim = false,
+}: {
+  row: Row;
+  date: string;
+  /** It overlaps another plan of the same person (P-3). */
+  clash?: boolean;
+  /** A routine on a day its person is away. */
+  dim?: boolean;
+}) {
   const me = viewer.value;
   const p = partner.value;
   const masked = row.type === 'busy';
@@ -39,7 +64,7 @@ export function EventRow({ row, date }: { row: Row; date: string }) {
   return (
     <button
       type="button"
-      class={`ev${masked ? ' is-masked' : ''}${row.free ? ' is-free' : ''}${row.status === 'declined' ? ' is-declined' : ''}`}
+      class={`ev${masked ? ' is-masked' : ''}${row.free ? ' is-free' : ''}${row.status === 'declined' ? ' is-declined' : ''}${dim ? ' is-away' : ''}`}
       onClick={() => (row.origin === 'import' ? openImport(row, date) : openEvent(row.id, row.occ))}
     >
       <span class="ev-time">
@@ -94,6 +119,8 @@ export function EventRow({ row, date }: { row: Row; date: string }) {
               </span>
             )}
             {row.away && row.allDay && <span>Away</span>}
+            {clash && <span class="tag warn">Overlaps</span>}
+            {dim && <span>While away</span>}
             {row.origin === 'import' && (
               <span>
                 <Icon name="cal" size={13} />
@@ -148,14 +175,26 @@ function AskCard({ id }: { id: string }) {
   const titleId = `ask-${id}`;
   return (
     <section class="ask" aria-labelledby={titleId}>
-      <p class="eyebrow">{nameOf(from)} asked · needs your answer</p>
+      <p class="eyebrow">
+        {nameOf(from)} {askVerb(d)} · needs your answer
+      </p>
       <h2 class="h3" id={titleId}>
         {d.title}
       </h2>
       <p class="ask-when">
-        {whenText(d.start.slice(0, 10), d.all_day, d.start.slice(11), d.end.slice(11))}
+        {isMoveAsk(d)
+          ? changeText(d)
+          : whenText(d.start.slice(0, 10), d.all_day, d.start.slice(11), d.end.slice(11))}
         {d.location ? ` · ${d.location}` : ''}
       </p>
+      <ClashNote
+        start={d.start}
+        end={d.end}
+        allDay={d.all_day}
+        tz={d.tz}
+        owner={d.owner}
+        except={id}
+      />
       {note && note.rec.kind === 'comment' && <p class="ask-note">{note.rec.data.text}</p>}
       <div class="ask-actions">
         <button type="button" class="btn primary" onClick={() => accept(id)}>
@@ -169,6 +208,7 @@ function AskCard({ id }: { id: string }) {
           Can’t make it
         </button>
       </div>
+      <SuggestTime id={id} />
     </section>
   );
 }
@@ -436,7 +476,13 @@ export function PlanView() {
                   </div>
                   <div class="dlist">
                     {day.rows.map((row) => (
-                      <EventRow key={row.key} row={row} date={day.date} />
+                      <EventRow
+                        key={row.key}
+                        row={row}
+                        date={day.date}
+                        clash={day.clash.has(row.key)}
+                        dim={routineWhileAway(row, day)}
+                      />
                     ))}
                     {!day.rows.length && !day.bothFree && <p class="nothing">Nothing planned</p>}
                     {day.bothFree && (

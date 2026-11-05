@@ -251,6 +251,227 @@ describe('mergeRecord', () => {
   });
 });
 
+describe('plans merge field by field (review 0009, P-5)', () => {
+  type EventFields = Extract<DecodedRecord, { kind: 'event' }>['data'];
+  const ev = (
+    patch: Partial<EventFields>,
+    updated_at: number,
+    device_id: string,
+  ): DecodedRecord => {
+    const r = event('Dinner', updated_at, device_id);
+    return {
+      ...r,
+      data: { ...(r.data as EventFields), rrule: 'FREQ=WEEKLY', ...patch },
+    } as DecodedRecord;
+  };
+  const data = (r: DecodedRecord) => r.data as EventFields;
+
+  it('keeps my reminder when Alex moves the time', () => {
+    const base = ev({}, 1, 'x');
+    const mine = ev({ remind: { a: [30], b: [] } }, 2, 'me');
+    const theirs = ev({ start: '2026-11-06T20:00', end: '2026-11-06T21:00' }, 3, 'them');
+    const out = mergeRecord(base, mine, theirs, true, writer);
+    expect(out.action).toBe('merged');
+    expect(data(out.record)).toMatchObject({ start: '2026-11-06T20:00', remind: { a: [30] } });
+  });
+
+  it('keeps both reminders when each of us sets our own', () => {
+    const base = ev({ remind: { a: [], b: [] } }, 1, 'x');
+    const out = mergeRecord(
+      base,
+      ev({ remind: { a: [15], b: [] } }, 2, 'me'),
+      ev({ remind: { a: [], b: [60] } }, 3, 'them'),
+      true,
+      writer,
+    );
+    expect(data(out.record).remind).toEqual({ a: [15], b: [60] });
+  });
+
+  it('keeps both skipped days: I skip Christmas, Alex skips New Year', () => {
+    const base = ev({ except: [] }, 1, 'x');
+    const out = mergeRecord(
+      base,
+      ev({ except: [{ at: '2026-12-25T19:00', to: null }] }, 2, 'me'),
+      ev({ except: [{ at: '2027-01-01T19:00', to: null }] }, 3, 'them'),
+      true,
+      writer,
+    );
+    expect(data(out.record).except?.map((x) => x.at)).toEqual([
+      '2026-12-25T19:00',
+      '2027-01-01T19:00',
+    ]);
+  });
+
+  it('keeps Alex’s yes and my new place', () => {
+    const base = ev({ status: 'proposed', proposed_by: 'a' }, 1, 'x');
+    const out = mergeRecord(
+      base,
+      ev({ status: 'proposed', proposed_by: 'a', location: 'Vic’s' }, 2, 'me'),
+      ev({ status: 'confirmed', proposed_by: null }, 3, 'them'),
+      true,
+      writer,
+    );
+    expect(data(out.record)).toMatchObject({
+      status: 'confirmed',
+      proposed_by: null,
+      location: 'Vic’s',
+    });
+  });
+
+  it('never half-merges a time: both moved it, the later move wins whole', () => {
+    const base = ev({}, 1, 'x');
+    const out = mergeRecord(
+      base,
+      ev({ start: '2026-11-06T18:00' }, 2, 'me'),
+      ev({ end: '2026-11-06T22:00' }, 3, 'them'),
+      true,
+      writer,
+    );
+    expect(data(out.record)).toMatchObject({ start: '2026-11-06T19:00', end: '2026-11-06T22:00' });
+  });
+
+  it('skipped days follow a change of time, keeping the other side’s new skips', () => {
+    const base = ev({ except: [{ at: '2026-11-13T19:00', to: null }] }, 1, 'x');
+    const moved = ev(
+      {
+        start: '2026-11-06T20:00',
+        end: '2026-11-06T21:00',
+        except: [{ at: '2026-11-13T20:00', to: null }],
+      },
+      2,
+      'me',
+    );
+    const skipped = ev(
+      {
+        except: [
+          { at: '2026-11-13T19:00', to: null },
+          { at: '2026-11-20T19:00', to: null },
+        ],
+      },
+      3,
+      'them',
+    );
+    const out = mergeRecord(base, moved, skipped, true, writer);
+    expect(data(out.record).start).toBe('2026-11-06T20:00');
+    // Alex's new skip comes along, at the new time.
+    expect(data(out.record).except).toEqual([
+      { at: '2026-11-13T20:00', to: null },
+      { at: '2026-11-20T20:00', to: null },
+    ]);
+  });
+});
+
+it('drops the other side’s skips when the days themselves change', () => {
+  const r = event('Gym', 1, 'x');
+  type D = Extract<DecodedRecord, { kind: 'event' }>['data'];
+  const mk = (p: Partial<D>, at: number, dev: string) =>
+    ({
+      ...r,
+      updated_at: at,
+      device_id: dev,
+      data: { ...(r.data as D), rrule: 'FREQ=WEEKLY', ...p },
+    }) as DecodedRecord;
+  const out = mergeRecord(
+    mk({ except: [] }, 1, 'x'),
+    mk({ rrule: 'FREQ=DAILY' }, 2, 'me'),
+    mk({ except: [{ at: '2026-11-13T19:00', to: null }] }, 3, 'them'),
+    true,
+    writer,
+  );
+  expect((out.record.data as D).rrule).toBe('FREQ=DAILY');
+  expect((out.record.data as D).except ?? []).toEqual([]);
+});
+
+describe('plan merge, after its review', () => {
+  type D = Extract<DecodedRecord, { kind: 'event' }>['data'];
+  const base0 = event('Gym', 1, 'x');
+  const mk = (p: Partial<D>, at: number, dev: string) =>
+    ({
+      ...base0,
+      updated_at: at,
+      device_id: dev,
+      data: { ...(base0.data as D), rrule: 'FREQ=WEEKLY', ...p },
+    }) as DecodedRecord;
+  const get = (r: DecodedRecord) => r.data as D;
+  const both = (b: DecodedRecord, l: DecodedRecord, r: DecodedRecord) => {
+    const one = mergeRecord(b, l, r, true, writer);
+    const two = mergeRecord(b, r, l, true, writer);
+    expect(get(one.record)).toEqual(get(two.record));
+    return get(one.record);
+  };
+
+  it('a day put back on one side survives a change of length on the other', () => {
+    const skip = [{ at: '2026-11-13T19:00', to: null }];
+    const out = both(
+      mk({ except: skip }, 1, 'x'),
+      mk({ except: skip, end: '2026-11-06T21:00' }, 2, 'me'),
+      mk({ except: [] }, 3, 'them'),
+    );
+    expect(out.end).toBe('2026-11-06T21:00');
+    expect(out.except).toEqual([]);
+  });
+
+  it('a moved day turned into a skip survives a change of time', () => {
+    const moved = [
+      { at: '2026-11-13T19:00', to: { start: '2026-11-14T19:00', end: '2026-11-14T20:00' } },
+    ];
+    const out = both(
+      mk({ except: moved }, 1, 'x'),
+      mk(
+        {
+          start: '2026-11-06T20:00',
+          end: '2026-11-06T21:00',
+          except: [{ ...moved[0], at: '2026-11-13T20:00' }] as D['except'],
+        },
+        2,
+        'me',
+      ),
+      mk({ except: [{ at: '2026-11-13T19:00', to: null }] }, 3, 'them'),
+    );
+    expect(out.except).toEqual([{ at: '2026-11-13T20:00', to: null }]);
+  });
+
+  it('keeps both reminders set on a plan that had none', () => {
+    const out = both(
+      mk({}, 1, 'x'),
+      mk({ remind: { a: [30], b: null } }, 2, 'me'),
+      mk({ remind: { a: null, b: [60] } }, 3, 'them'),
+    );
+    expect(out.remind).toEqual({ a: [30], b: [60] });
+  });
+
+  it('does not carry skips from a repeat the other side dropped', () => {
+    const out = both(
+      mk({ except: [] }, 1, 'x'),
+      mk({ rrule: 'FREQ=DAILY', except: [{ at: '2026-11-10T19:00', to: null }] }, 2, 'them'),
+      mk({ start: '2026-11-06T20:00', end: '2026-11-06T21:00' }, 3, 'me'),
+    );
+    expect(out.rrule).toBe('FREQ=WEEKLY');
+    expect(out.except ?? []).toEqual([]);
+  });
+
+  it('keeps away with the time: an all-day trip made timed loses it', () => {
+    const allDay = { all_day: true, tz: null, start: '2026-11-06', end: '2026-11-08', rrule: null };
+    const out = both(
+      mk(allDay, 1, 'x'),
+      mk({ ...allDay, away: true }, 2, 'me'),
+      mk(
+        {
+          ...allDay,
+          all_day: false,
+          tz: 'UTC',
+          start: '2026-11-06T09:00',
+          end: '2026-11-06T10:00',
+        },
+        3,
+        'them',
+      ),
+    );
+    expect(out.all_day).toBe(false);
+    expect(out.away).toBe(false);
+  });
+});
+
 describe('mergeRecord after review', () => {
   const settings = (
     data: Record<string, unknown>,

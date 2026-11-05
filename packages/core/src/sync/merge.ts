@@ -12,10 +12,110 @@
  * Because the timestamps are inside the ciphertext, a server replaying an
  * old version of a record loses to the newer version the device holds.
  */
-import { type DecodedRecord, isValidData, type Kind } from '../schema/records';
+import { type DecodedRecord, isValidData, type Kind, MAX_EXCEPTIONS } from '../schema/records';
 import { compareWrites, nextTimestamp } from './clock';
 
-export const FIELD_MERGE_KINDS: ReadonlySet<Kind> = new Set<Kind>(['item', 'list', 'settings']);
+export const FIELD_MERGE_KINDS: ReadonlySet<Kind> = new Set<Kind>([
+  'item',
+  'list',
+  'settings',
+  'event',
+  'busy_stub',
+]);
+
+/**
+ * Plans' fields that only make sense together, merged as one unit: the
+ * time (never half of a move), the answer (yes from one side, "can't make
+ * it" from the other: the later wins), and privacy with its Busy marker.
+ * Each person's reminders merge on their own (`remind.a`, `remind.b`), and
+ * skipped or moved days merge day by day (review 0009, P-5).
+ */
+// `away` too: it only means something on an all-day plan.
+const WHEN = ['start', 'end', 'all_day', 'tz', 'rrule', 'away'];
+const UNITS: Partial<Record<Kind, string[][]>> = {
+  // `was` describes one change as a whole: never half of two.
+  event: [WHEN, ['status', 'proposed_by'], ['privacy', 'stub_id'], ['was']],
+  busy_stub: [WHEN],
+};
+
+/** Copies each unit whole from the side that changed it (the later writer if both did). */
+function mergeUnits(
+  out: Record<string, unknown>,
+  b: Record<string, unknown>,
+  l: Record<string, unknown>,
+  r: Record<string, unknown>,
+  units: string[][],
+  localWins: boolean,
+): Record<string, unknown> | null {
+  let whenFrom: Record<string, unknown> | null = null;
+  for (const unit of units) {
+    const lc = unit.some((k) => !sameJson(l[k], b[k]));
+    const rc = unit.some((k) => !sameJson(r[k], b[k]));
+    const from = lc && rc ? (localWins ? l : r) : lc ? l : rc ? r : b;
+    for (const k of unit) {
+      if (from[k] === undefined) delete out[k];
+      else out[k] = from[k];
+    }
+    if (unit === WHEN && (lc || rc)) whenFrom = from;
+  }
+  return whenFrom;
+}
+
+type Except = { at: string; to: unknown };
+
+/** Whether a side repeats on the same days as the base (it may have moved the time of day). */
+function sameDays(b: Record<string, unknown>, x: Record<string, unknown>): boolean {
+  return (
+    x.rrule === b.rrule &&
+    x.all_day === b.all_day &&
+    x.tz === b.tz &&
+    String(x.start).slice(0, 10) === String(b.start).slice(0, 10)
+  );
+}
+
+/**
+ * Skipped days when a side changed the time. If both sides still repeat on
+ * the base's days (only the time of day or length changed), all three
+ * lists are named by the new time of day and merged day by day, so a day
+ * the other side skipped, put back or changed meanwhile isn't lost. If the
+ * days themselves changed, the old names no longer fit: the changing
+ * side's list stands, as editing the series does.
+ */
+function exceptAfterMove(
+  b: Record<string, unknown>,
+  l: Record<string, unknown>,
+  r: Record<string, unknown>,
+  w: Record<string, unknown>,
+  localWins: boolean,
+): unknown {
+  if (!sameDays(b, l) || !sameDays(b, r)) return w.except;
+  const time = String(w.start).slice(10);
+  const rekey = (x: unknown) =>
+    Array.isArray(x) ? (x as Except[]).map((e) => ({ ...e, at: e.at.slice(0, 10) + time })) : x;
+  return mergeExcept(rekey(b.except), rekey(l.except), rekey(r.except), localWins);
+}
+
+/**
+ * Skipped and moved days, three-way by day: a day skipped on one phone and
+ * another on the other keeps both; the same day changed on both takes the
+ * later writer's. Sorted, so both phones end up with the same list.
+ */
+function mergeExcept(b: unknown, l: unknown, r: unknown, localWins: boolean): Except[] {
+  const map = (x: unknown) =>
+    new Map((Array.isArray(x) ? (x as Except[]) : []).map((e) => [e.at, e] as const));
+  const [mb, ml, mr] = [map(b), map(l), map(r)];
+  const out: Except[] = [];
+  for (const at of new Set([...mb.keys(), ...ml.keys(), ...mr.keys()])) {
+    const [bv, lv, rv] = [mb.get(at), ml.get(at), mr.get(at)];
+    const lc = !sameJson(lv, bv);
+    const rc = !sameJson(rv, bv);
+    const v = lc && rc ? (localWins ? lv : rv) : lc ? lv : rv;
+    if (v) out.push(v);
+  }
+  // Over the limit the record wouldn't be valid, and the whole merge would
+  // fall back to the later write: keep the latest days instead.
+  return out.sort((x, y) => (x.at < y.at ? -1 : x.at > y.at ? 1 : 0)).slice(-MAX_EXCEPTIONS);
+}
 
 export type MergeOutcome =
   /** Remote is the result. Store it; nothing to push. */
@@ -133,13 +233,34 @@ export function mergeRecord(
   }
 
   const localWins = order > 0;
-  const merged = mergeFields(
-    base.data as Record<string, unknown>,
-    local.data as Record<string, unknown>,
-    remote.data as Record<string, unknown>,
-    localWins,
-    1,
-  );
+  // Copies: the records passed in stay as they are.
+  const [bd, ld, rd] = [base.data, local.data, remote.data].map((d) => ({
+    ...(d as Record<string, unknown>),
+  })) as [Record<string, unknown>, Record<string, unknown>, Record<string, unknown>];
+  // Reminders merge per person even when the plan had none yet (one side
+  // adds mine while the other adds theirs).
+  if (remote.kind === 'event' && (bd.remind || ld.remind || rd.remind)) {
+    const none = { a: null, b: null };
+    for (const x of [bd, ld, rd]) if (!x.remind) x.remind = none;
+  }
+  const merged = mergeFields(bd, ld, rd, localWins, 1);
+  const had = (d: unknown) => !!(d as { remind?: unknown }).remind;
+  if (sameJson(merged.remind, { a: null, b: null }) && !had(local.data) && !had(remote.data))
+    delete merged.remind;
+  const units = UNITS[remote.kind];
+  if (units) {
+    const whenFrom = mergeUnits(merged, bd, ld, rd, units, localWins);
+    // Skipped days are named by their time: after a change of time or
+    // repeat they follow that change whole; otherwise they merge by day.
+    if (whenFrom) {
+      const kept = exceptAfterMove(bd, ld, rd, whenFrom, localWins);
+      if (kept === undefined) delete merged.except;
+      else merged.except = kept;
+    } else if (!sameJson(ld.except, bd.except) && !sameJson(rd.except, bd.except)) {
+      // Only when both sides changed them; otherwise mergeFields took the one that did.
+      merged.except = mergeExcept(bd.except, ld.except, rd.except, localWins);
+    }
+  }
   // A merge must still be a valid record; otherwise fall back to LWW.
   if (!isValidData(remote.kind, merged)) {
     return localWins

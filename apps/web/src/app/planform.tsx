@@ -19,10 +19,10 @@ import {
   updateEvent,
   viewer,
 } from './model';
-import { noticeProposal } from './notices';
+import { noticeChange, noticeMove, noticeProposal } from './notices';
 import { ReminderPicker } from './reminderpicker';
 import { defaultReminders, remindersOf, withReminders } from './reminders';
-import { repeatText, today, zone } from './select';
+import { repeatText, today, weekStartsOn, zone } from './select';
 import { afterAdd, sheet } from './sheets';
 import { CloseButton, Marker, Sheet, Switch, toast } from './ui';
 
@@ -38,6 +38,43 @@ export const REPEAT_CHOICES: [string, string][] = [
 ];
 
 type Who = 'me' | 'ours' | 'partner';
+
+/* A repeat rule as the form edits it (review 0009, P-6): how often, which weekdays, when it ends. */
+const DAY_CODES = ['SU', 'MO', 'TU', 'WE', 'TH', 'FR', 'SA'];
+interface RuleParts {
+  base: string;
+  byday: string[];
+  until: string | null;
+  count: number | null;
+}
+/** Null when the rule has parts the form doesn't edit (it stays as typed). */
+export function readRule(rule: string): RuleParts | null {
+  if (!rule) return null;
+  const m = new Map(rule.split(';').map((p) => p.split('=') as [string, string]));
+  if ([...m.keys()].some((k) => !['FREQ', 'INTERVAL', 'BYDAY', 'UNTIL', 'COUNT'].includes(k)))
+    return null;
+  const byday = m.get('BYDAY')?.split(',') ?? [];
+  if (byday.some((d) => !DAY_CODES.includes(d))) return null;
+  const interval = m.get('INTERVAL');
+  const until = m.get('UNTIL');
+  return {
+    base: `FREQ=${m.get('FREQ')}${interval && interval !== '1' ? `;INTERVAL=${interval}` : ''}`,
+    byday,
+    until: until ? `${until.slice(0, 4)}-${until.slice(4, 6)}-${until.slice(6, 8)}` : null,
+    count: m.has('COUNT') ? Number(m.get('COUNT')) : null,
+  };
+}
+export function writeRule(r: RuleParts): string {
+  const days = DAY_CODES.filter((d) => r.byday.includes(d));
+  return [
+    r.base,
+    days.length && r.base.startsWith('FREQ=WEEKLY') ? `BYDAY=${days.join(',')}` : '',
+    r.until ? `UNTIL=${r.until.replace(/-/g, '')}T235959Z` : '',
+    !r.until && r.count ? `COUNT=${r.count}` : '',
+  ]
+    .filter(Boolean)
+    .join(';');
+}
 
 const close = () => {
   sheet.value = null;
@@ -79,6 +116,8 @@ export function PlanForm({ id, draft }: { id: string | null; draft?: Draft }) {
   const [countdown, setCountdown] = useState(base.countdown ?? false);
   const [priv, setPriv] = useState(base.privacy === 'busy');
   const [ask, setAsk] = useState(!editing);
+  // Moving a shared plan asks the partner about the new time (review 0009, P-4).
+  const [askMove, setAskMove] = useState(true);
   // My reminders: what the plan has, or my defaults for a new plan.
   const [reminders, setReminders] = useState<number[]>(() => {
     if (editing) return remindersOf(base, me);
@@ -90,6 +129,19 @@ export function PlanForm({ id, draft }: { id: string | null; draft?: Draft }) {
   const [lostOk, setLostOk] = useState(false);
 
   const custom = !!repeat && !REPEAT_CHOICES.some(([v]) => v === repeat);
+  const parts = readRule(repeat);
+  // The plan's own weekday, ticked when no days are chosen.
+  const firstDay = DAY_CODES[new Date(`${startDate || today.value}T12:00`).getDay()] as string;
+  const ws = weekStartsOn.value;
+  const weekdays = [0, 1, 2, 3, 4, 5, 6].map((i) => {
+    const d = (ws + i) % 7;
+    const date = new Date(2026, 10, 1 + d); // 1 Nov 2026 is a Sunday
+    return [
+      DAY_CODES[d] as string,
+      date.toLocaleDateString(undefined, { weekday: 'narrow' }),
+      date.toLocaleDateString(undefined, { weekday: 'long' }),
+    ] as const;
+  });
 
   const save = (e: Event) => {
     e.preventDefault();
@@ -141,9 +193,31 @@ export function PlanForm({ id, draft }: { id: string | null; draft?: Draft }) {
         if ((existing.rec.data.privacy === 'busy') !== isPrivate) {
           target = setEventPrivacy(existing.id, isPrivate);
         }
-        updateEvent(target, fields);
+        const before = existing.rec.data;
+        // A plan you both have, or theirs: they hear about changes to it.
+        const shared = !isPrivate && before.privacy === 'full' && (owner === 'both' || owner === p);
+        const moved = fields.start !== before.start || fields.end !== before.end;
+        const renamed = fields.title !== before.title;
+        const placed = fields.location !== before.location;
+        const was =
+          shared && (moved || renamed || placed)
+            ? {
+                by: me,
+                ...(moved ? { start: before.start, end: before.end } : {}),
+                ...(renamed ? { title: before.title } : {}),
+                ...(placed ? { location: before.location } : {}),
+              }
+            : null;
+        const asking = !!was && moved && askMove && before.status === 'confirmed';
+        updateEvent(target, {
+          ...fields,
+          ...(was ? { was: asking ? { ...was, confirmed: true } : was } : {}),
+          ...(asking ? { status: 'proposed' as const, proposed_by: me } : {}),
+        });
+        if (asking) noticeMove(target);
+        else if (was) noticeChange(target);
         sheet.value = { type: 'event', id: target };
-        toast('Plan updated.');
+        toast(asking ? `Asked ${nameOf(p)} about the new time.` : 'Plan updated.');
       } else {
         const proposing = who !== 'me' && ask;
         const newId = createEvent({
@@ -169,6 +243,16 @@ export function PlanForm({ id, draft }: { id: string | null; draft?: Draft }) {
       setError('That plan couldn’t be saved. Check the dates and times.');
     }
   };
+
+  // Editing a confirmed plan you share and changing its time.
+  const startNow = allDay ? startDate : `${startDate}T${startTime}`;
+  const endNow = allDay ? addDays(endDate || startDate, 1) : `${endDate || startDate}T${endTime}`;
+  const movingShared =
+    existing?.rec.kind === 'event' &&
+    existing.rec.data.status === 'confirmed' &&
+    existing.rec.data.privacy === 'full' &&
+    who !== 'me' &&
+    (startNow !== existing.rec.data.start || endNow !== existing.rec.data.end);
 
   const options: [Who, string][] = [
     ['me', 'Mine'],
@@ -300,17 +384,117 @@ export function PlanForm({ id, draft }: { id: string | null; draft?: Draft }) {
           <select
             id="pf-rep"
             class="txt"
-            value={repeat}
-            onChange={(e) => setRepeat(e.currentTarget.value)}
+            value={parts ? parts.base : repeat}
+            onChange={(e) => {
+              const v = e.currentTarget.value;
+              // A new "how often" keeps the end, and the weekdays if still weekly.
+              setRepeat(
+                v && parts && REPEAT_CHOICES.some(([c]) => c === v)
+                  ? writeRule({ ...parts, base: v })
+                  : v,
+              );
+            }}
           >
             {REPEAT_CHOICES.map(([v, label]) => (
               <option key={v} value={v}>
                 {label}
               </option>
             ))}
-            {custom && <option value={repeat}>{repeatText(repeat) || 'Custom'}</option>}
+            {custom && !parts && <option value={repeat}>{repeatText(repeat) || 'Custom'}</option>}
+            {parts && !REPEAT_CHOICES.some(([c]) => c === parts.base) && (
+              <option value={parts.base}>{repeatText(parts.base) || 'Custom'}</option>
+            )}
           </select>
         </div>
+        {parts?.base.startsWith('FREQ=WEEKLY') && (
+          <div class="field">
+            <span class="lbl" id="pf-days">
+              On
+            </span>
+            {/* biome-ignore lint/a11y/useSemanticElements: toggle-button group (aria-pressed), labelled */}
+            <div class="chips daypick" role="group" aria-labelledby="pf-days">
+              {weekdays.map(([code, label, long]) => {
+                const on = parts.byday.includes(code) || (!parts.byday.length && code === firstDay);
+                return (
+                  <button
+                    type="button"
+                    key={code}
+                    class="chip"
+                    aria-pressed={on}
+                    aria-label={long}
+                    onClick={() => {
+                      const cur = parts.byday.length ? parts.byday : [firstDay];
+                      const next = on ? cur.filter((d) => d !== code) : [...cur, code];
+                      if (next.length) setRepeat(writeRule({ ...parts, byday: next }));
+                    }}
+                  >
+                    {label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+        {parts && (
+          <div class="row2">
+            <div class="field">
+              <label for="pf-ends">Ends</label>
+              <select
+                id="pf-ends"
+                class="txt"
+                value={parts.until ? 'on' : parts.count ? 'after' : 'never'}
+                onChange={(e) => {
+                  const v = e.currentTarget.value;
+                  setRepeat(
+                    writeRule({
+                      ...parts,
+                      until: v === 'on' ? addDays(startDate || today.value, 70) : null,
+                      count: v === 'after' ? 10 : null,
+                    }),
+                  );
+                }}
+              >
+                <option value="never">Never</option>
+                <option value="on">On a date</option>
+                <option value="after">After a number of times</option>
+              </select>
+            </div>
+            {parts.until && (
+              <div class="field">
+                <label for="pf-until">Last day</label>
+                <input
+                  id="pf-until"
+                  class="txt"
+                  type="date"
+                  value={parts.until}
+                  min={startDate}
+                  onInput={(e) =>
+                    e.currentTarget.value &&
+                    setRepeat(writeRule({ ...parts, until: e.currentTarget.value }))
+                  }
+                />
+              </div>
+            )}
+            {!parts.until && parts.count !== null && (
+              <div class="field">
+                <label for="pf-count">Times</label>
+                <input
+                  id="pf-count"
+                  class="txt"
+                  type="number"
+                  inputMode="numeric"
+                  min={1}
+                  max={500}
+                  value={parts.count}
+                  onInput={(e) => {
+                    const n = Math.round(Number(e.currentTarget.value));
+                    if (n >= 1 && n <= 500) setRepeat(writeRule({ ...parts, count: n }));
+                  }}
+                />
+              </div>
+            )}
+          </div>
+        )}
 
         <div class="field">
           <label for="pf-loc">
@@ -363,13 +547,20 @@ export function PlanForm({ id, draft }: { id: string | null; draft?: Draft }) {
             label="Keep the details private"
             hint={`${nameOf(p)} sees “Busy” and nothing else.`}
           />
+        ) : !editing ? (
+          <Switch
+            checked={ask}
+            onChange={setAsk}
+            label={`Ask ${nameOf(p)} first`}
+            hint="It stays tentative until they say yes."
+          />
         ) : (
-          !editing && (
+          movingShared && (
             <Switch
-              checked={ask}
-              onChange={setAsk}
-              label={`Ask ${nameOf(p)} first`}
-              hint="It stays tentative until they say yes."
+              checked={askMove}
+              onChange={setAskMove}
+              label={`Ask ${nameOf(p)} about the new time`}
+              hint="Tentative at the new time until they say yes. If they can’t make it, it goes back."
             />
           )
         )}

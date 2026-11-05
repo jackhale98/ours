@@ -47,10 +47,12 @@ export function Result({ hit }: { hit: Hit }) {
           <span>
             <b>{hit.title}</b>
             <span class="small muted">
-              {hit.when === null
-                ? 'No date'
-                : `${hit.upcoming ? (hit.repeats ? 'Next: ' : '') : 'Last: '}${when(hit.when)}`}
-              {hit.where ? ` · ${hit.where}` : ''}
+              {hit.change
+                ? hit.change
+                : hit.when === null
+                  ? 'No date'
+                  : `${hit.upcoming ? (hit.repeats ? 'Next: ' : '') : 'Last: '}${when(hit.when)}`}
+              {hit.where && !hit.change ? ` · ${hit.where}` : ''}
             </span>
           </span>
         </button>

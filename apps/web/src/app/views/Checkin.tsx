@@ -8,7 +8,17 @@ import { checkinLists, ideasList, itemsOf, memoryToRecall } from '../lists';
 import { byKind, createEvent, nameOf, partner, put, type Slot, settings, viewer } from '../model';
 import { noticeProposal } from '../notices';
 import { withDefaultReminders } from '../reminders';
-import { agenda, type Day, dow, fmtLong, freeEvenings, relDay, today, zone } from '../select';
+import {
+  agenda,
+  type Day,
+  dow,
+  fmtLong,
+  freeEvenings,
+  relDay,
+  routineWhileAway,
+  today,
+  zone,
+} from '../select';
 import { Icon, Marker, toast } from '../ui';
 import { ItemRow, planIdea } from './Lists';
 import { EventRow } from './Plan';
@@ -86,7 +96,13 @@ function WeekList({ days, owner, empty }: { days: Day[]; owner: Slot | 'both'; e
             <h3 class="sublbl">{relDay(day.date)}</h3>
             <div class="dlist">
               {rows.map((row) => (
-                <EventRow key={row.key} row={row} date={day.date} />
+                <EventRow
+                  key={row.key}
+                  row={row}
+                  date={day.date}
+                  clash={day.clash.has(row.key)}
+                  dim={routineWhileAway(row, day)}
+                />
               ))}
             </div>
           </section>

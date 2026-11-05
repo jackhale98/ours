@@ -23,8 +23,8 @@ import {
 } from '../lists';
 import { commentsFor, deleteEvent, findEntry, nameOf, partner, update, viewer } from '../model';
 import { noticeProposal } from '../notices';
-import { relDay, repeatText, today, whenText } from '../select';
-import { accept, decline, openEvent } from '../sheets';
+import { askVerb, changeText, isMoveAsk, relDay, repeatText, today, whenText } from '../select';
+import { accept, ClashNote, decline, openEvent, SuggestTime } from '../sheets';
 import { Icon, Marker, toast } from '../ui';
 
 function eventWhen(d: { start: string; end: string; all_day: boolean; location: string | null }) {
@@ -213,12 +213,20 @@ function Current({ w, headRef }: { w: Waiting; headRef: { current: HTMLHeadingEl
     return (
       <>
         <p class="eyebrow">
-          <Marker owner={d.owner} mode="dash" /> {nameOf(from)} asked · needs your answer
+          <Marker owner={d.owner} mode="dash" /> {nameOf(from)} {askVerb(d)} · needs your answer
         </p>
         <h2 class="h3" id="wo-title" tabIndex={-1} ref={headRef}>
           {d.title}
         </h2>
-        <p class="ask-when">{eventWhen(d)}</p>
+        <p class="ask-when">{isMoveAsk(d) ? changeText(d) : eventWhen(d)}</p>
+        <ClashNote
+          start={d.start}
+          end={d.end}
+          allDay={d.all_day}
+          tz={d.tz}
+          owner={d.owner}
+          except={w.id}
+        />
         {note?.rec.kind === 'comment' && <p class="ask-note">{note.rec.data.text}</p>}
         <div class="ask-actions">
           <button type="button" class="btn primary" onClick={() => accept(w.id)}>
@@ -232,6 +240,7 @@ function Current({ w, headRef }: { w: Waiting; headRef: { current: HTMLHeadingEl
             Reply or see details
           </button>
         </div>
+        <SuggestTime id={w.id} />
       </>
     );
   }

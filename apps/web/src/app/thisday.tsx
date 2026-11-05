@@ -8,6 +8,7 @@ import { addDays, addWallMinutes, wallMinutes } from '@ours/core/time';
 import { useState } from 'preact/hooks';
 import { type EventData, setException } from './model';
 import { fmtLong, planWhen } from './select';
+import { skipBetween, splitSeries } from './series';
 import { Icon, toast } from './ui';
 
 /** Start and end of one day of the series, as it stands (moved or not). */
@@ -29,15 +30,20 @@ export function ThisDay({
   e,
   occ,
   onDone,
+  onSplit,
 }: {
   id: string;
   e: EventData;
   occ: string;
   onDone: () => void;
+  /** "This and following": the new series to edit. */
+  onSplit?: (copy: string) => void;
 }) {
   const cur = dayTimes(e, occ);
   const moved = e.except?.some((x) => x.at === occ && x.to);
   const [moving, setMoving] = useState(false);
+  const [skipping, setSkipping] = useState(false);
+  const [skipTo, setSkipTo] = useState(addDays(occ.slice(0, 10), 6));
   const [date, setDate] = useState(cur.start.slice(0, 10));
   const [start, setStart] = useState(e.all_day ? '' : cur.start.slice(11, 16));
   const [end, setEnd] = useState(e.all_day ? '' : cur.end.slice(11, 16));
@@ -73,7 +79,43 @@ export function ThisDay({
           <Icon name="clock" size={14} /> Moved from {dayName(occ)}.
         </p>
       )}
-      {moving ? (
+      {skipping ? (
+        <form
+          class="stack gap"
+          onSubmit={(ev) => {
+            ev.preventDefault();
+            const r = skipBetween(id, occ.slice(0, 10), skipTo);
+            onDone();
+            toast(
+              r.n
+                ? `Skipped ${r.n} ${r.n === 1 ? 'day' : 'days'}. The rest still repeat.`
+                : 'Those days were already skipped.',
+              r.undo,
+            );
+          }}
+        >
+          <div class="field">
+            <label for="td-until">Skip from {dayName(occ)} until</label>
+            <input
+              id="td-until"
+              class="txt"
+              type="date"
+              value={skipTo}
+              min={occ.slice(0, 10)}
+              data-autofocus
+              onInput={(ev) => setSkipTo(ev.currentTarget.value)}
+            />
+          </div>
+          <div class="btnrow">
+            <button type="submit" class="btn sm primary">
+              Skip these days
+            </button>
+            <button type="button" class="btn sm ghost" onClick={() => setSkipping(false)}>
+              Cancel
+            </button>
+          </div>
+        </form>
+      ) : moving ? (
         <form class="stack gap" onSubmit={move} noValidate>
           <div class={e.all_day ? 'field' : 'row3'}>
             <div class="field">
@@ -144,6 +186,21 @@ export function ThisDay({
             <Icon name="x" size={15} />
             Skip this day
           </button>
+          <button type="button" class="btn sm ghost" onClick={() => setSkipping(true)}>
+            Skip several days
+          </button>
+          {onSplit && occ.slice(0, 10) > e.start.slice(0, 10) && (
+            <button
+              type="button"
+              class="btn sm ghost"
+              onClick={() => {
+                const copy = splitSeries(id, occ);
+                if (copy) onSplit(copy);
+              }}
+            >
+              Change from {dayName(occ)} on
+            </button>
+          )}
           {moved && (
             <button
               type="button"

@@ -2,7 +2,7 @@
 /** Quick add and event details sheets. */
 
 import { parseQuickAdd, type Weekday } from '@ours/core/parse';
-import { addDays, addWallMinutes } from '@ours/core/time';
+import { addDays, addWallMinutes, toInstant, wallMinutes } from '@ours/core/time';
 import { signal } from '@preact/signals';
 import { useState } from 'preact/hooks';
 import { AddToCalendar } from './addtocal';
@@ -31,14 +31,17 @@ import {
   type Slot,
   setEventPrivacy,
   update,
+  updateEvent,
   viewer,
 } from './model';
-import { noticeAnswer, noticeNote, noticeProposal } from './notices';
+import { noticeAnswer, noticeMove, noticeNote, noticeProposal, noticeRemoved } from './notices';
 import { PlaceLink } from './place';
 import { type Draft, PlanForm, REPEAT_CHOICES } from './planform';
 import { ReminderPicker } from './reminderpicker';
 import { remindersOf, withDefaultReminders, withReminders } from './reminders';
 import {
+  clashText,
+  conflictsFor,
   DATE_ORDER,
   fmtTime,
   ownerLabel,
@@ -51,6 +54,7 @@ import {
   whenText,
   zone,
 } from './select';
+import { routinesDuring, skipRoutines } from './series';
 import { dayTimes, ThisDay } from './thisday';
 import { Avatar, CloseButton, Icon, Marker, Sheet, Switch, toast } from './ui';
 
@@ -130,6 +134,73 @@ const rememberWho = (w: Whose) => {
   }
 };
 
+/**
+ * "Overlaps Book club (yours)" or "Alex is busy then" for a plan's time
+ * (review 0009, P-3): from the plans, Busy markers and imported calendars
+ * already on this device. Nothing for all-day plans.
+ */
+export function ClashNote({
+  start,
+  end,
+  allDay,
+  tz,
+  owner,
+  except,
+}: {
+  start: string;
+  end: string;
+  allDay: boolean;
+  tz: string | null;
+  owner: Slot | 'both';
+  except?: string;
+}) {
+  if (allDay || !start.includes('T') || !end.includes('T')) return null;
+  let rows: Row[] = [];
+  try {
+    rows = conflictsFor(toInstant(start, tz ?? zone), toInstant(end, tz ?? zone), owner, except);
+  } catch {
+    return null;
+  }
+  const text = clashText(rows, { me: viewer.value, partner: nameOf(partner.value) });
+  return text ? (
+    <p class="clash">
+      <Icon name="flag" size={14} />
+      {text}
+    </p>
+  ) : null;
+}
+
+/** On a trip: the routines it clashes with, skipped in one go (review 0009, P-6). */
+function SkipWhileAway({ id, e }: { id: string; e: EventData }) {
+  const from = e.start.slice(0, 10);
+  const to = addDays(e.end.slice(0, 10), -1);
+  const ids = routinesDuring(e.owner, from, to).filter((x) => x !== id);
+  if (!ids.length || to < today.value) return null;
+  const names = ids
+    .map((x) => findEntry(x))
+    .map((x) => (x?.rec.kind === 'event' ? x.rec.data.title : ''))
+    .filter(Boolean);
+  return (
+    <p class="small">
+      {names.slice(0, 3).join(', ')}
+      {names.length > 3 ? ` and ${names.length - 3} more` : ''} still repeat on these days.{' '}
+      <button
+        type="button"
+        class="linkbtn"
+        onClick={() => {
+          const r = skipRoutines(ids, from, to);
+          toast(
+            `Skipped ${r.n} ${r.n === 1 ? 'day' : 'days'} of routines while you’re away.`,
+            r.undo,
+          );
+        }}
+      >
+        Skip them while away
+      </button>
+    </p>
+  );
+}
+
 /* ---------- quick add ---------- */
 
 function QuickAdd({ preset }: { preset: QuickPreset }) {
@@ -166,6 +237,7 @@ function QuickAdd({ preset }: { preset: QuickPreset }) {
       : '';
   const proposing = who !== 'me' && (ask || parsed.ask);
   const startAt = time ? `${date}T${time}` : date;
+  const owner: Slot | 'both' = who === 'me' ? me : who === 'partner' ? p : 'both';
   const endAt = (minutes: number): string => {
     if (!time) return addDays(lastDay ?? date, 1);
     const typed = parsed.endTime && !timeOverride ? parsed.endTime : null;
@@ -174,6 +246,19 @@ function QuickAdd({ preset }: { preset: QuickPreset }) {
     const end = `${date}T${typed}`;
     return end > startAt ? end : `${addDays(date, 1)}T${typed}`;
   };
+  // Typed a time: say if it overlaps something (P-3).
+  let clash: string | null = null;
+  if (time && text.trim()) {
+    try {
+      const at = toInstant(startAt, zone);
+      clash = clashText(conflictsFor(at, toInstant(endAt(preset.minutes ?? 60), zone), owner), {
+        me,
+        partner: nameOf(p),
+      });
+    } catch {
+      clash = null;
+    }
+  }
   const isPrivate = who === 'me' && (priv || parsed.private);
 
   const submit = (e: Event) => {
@@ -266,6 +351,12 @@ function QuickAdd({ preset }: { preset: QuickPreset }) {
                 <span class="pchip">
                   <Icon name="pin" size={13} />
                   {parsed.place}
+                </span>
+              )}
+              {clash && (
+                <span class="pchip warn">
+                  <Icon name="flag" size={13} />
+                  {clash}
                 </span>
               )}
               {parsed.private && who === 'me' && (
@@ -400,10 +491,116 @@ export function accept(id: string): void {
   toast(`Added. ${nameOf(e.rec.data.proposed_by ?? partner.value)} will see your yes.`);
 }
 
+/**
+ * Answers a request with another time (review 0009, P-4): the plan moves
+ * there, tentative, and it's now their turn to say yes. Keeps its length.
+ */
+export function SuggestTime({ id }: { id: string }) {
+  const [open, setOpen] = useState(false);
+  const e = findEntry(id);
+  const d = e?.rec.kind === 'event' ? e.rec.data : null;
+  const [date, setDate] = useState(d?.start.slice(0, 10) ?? today.value);
+  const [time, setTime] = useState(d && !d.all_day ? d.start.slice(11, 16) : '19:00');
+  if (d?.status !== 'proposed' || d.proposed_by === viewer.value || d.rrule) return null;
+  if (!open)
+    return (
+      <button type="button" class="btn ghost" onClick={() => setOpen(true)}>
+        Suggest another time
+      </button>
+    );
+  const send = (ev: Event) => {
+    ev.preventDefault();
+    if (!date) return;
+    const me = viewer.value;
+    const start = d.all_day ? date : `${date}T${time}`;
+    const end = d.all_day
+      ? addDays(date, Math.max(1, Math.round(wallMinutes(d.start, d.end) / 1440)))
+      : addWallMinutes(start, wallMinutes(d.start, d.end));
+    updateEvent(id, {
+      start,
+      end,
+      status: 'proposed',
+      proposed_by: me,
+      was: { by: me, start: d.start, end: d.end },
+    });
+    noticeMove(id);
+    toast(`Suggested. ${nameOf(partner.value)} can say yes to the new time.`);
+  };
+  return (
+    <form class="suggest" onSubmit={send}>
+      <div class="row2">
+        <div class="field">
+          <label for={`sg-d-${id}`}>Day</label>
+          <input
+            id={`sg-d-${id}`}
+            class="txt"
+            type="date"
+            value={date}
+            min={today.value}
+            onInput={(ev) => setDate(ev.currentTarget.value)}
+          />
+        </div>
+        {!d.all_day && (
+          <div class="field">
+            <label for={`sg-t-${id}`}>Time</label>
+            <input
+              id={`sg-t-${id}`}
+              class="txt"
+              type="time"
+              value={time}
+              onInput={(ev) => setTime(ev.currentTarget.value)}
+            />
+          </div>
+        )}
+      </div>
+      <ClashNote
+        start={d.all_day ? date : `${date}T${time}`}
+        end={d.all_day ? date : addWallMinutes(`${date}T${time}`, wallMinutes(d.start, d.end))}
+        allDay={d.all_day}
+        tz={d.tz}
+        owner={d.owner}
+        except={id}
+      />
+      <div class="btnrow">
+        <button class="btn primary" type="submit">
+          Suggest it
+        </button>
+        <button type="button" class="btn ghost" onClick={() => setOpen(false)}>
+          Cancel
+        </button>
+      </div>
+    </form>
+  );
+}
+
 /** Says no to a proposal. It disappears for me; my partner sees the answer. */
 export function decline(id: string): void {
   const e = findEntry(id);
   if (e?.rec.kind !== 'event') return;
+  const d = e.rec.data;
+  // A move asked about: "can't make it" keeps the plan at its old time (P-4).
+  if (d.was?.start && d.was.end && d.was.by === d.proposed_by && d.was.confirmed) {
+    const before = {
+      start: d.start,
+      end: d.end,
+      status: d.status,
+      proposed_by: d.proposed_by,
+      was: d.was,
+    };
+    updateEvent(id, {
+      start: d.was.start,
+      end: d.was.end,
+      status: 'confirmed',
+      proposed_by: null,
+      was: null,
+    });
+    noticeAnswer(id, false);
+    toast(
+      `Kept at the old time. ${nameOf(partner.value)} will see you can’t make the new one.`,
+      () => updateEvent(id, before),
+    );
+    return;
+  }
   update<'event'>(id, { status: 'declined' });
   noticeAnswer(id, false);
   toast(`Declined. ${nameOf(partner.value)} will see you can’t make it.`, () =>
@@ -456,6 +653,9 @@ function EventSheet({ id, occ }: { id: string; occ: string | null }) {
       return;
     }
     close();
+    // A plan you share: they hear it's gone (P-4). Not for a request withdrawn.
+    if (!(proposed && e.proposed_by === me) && (e.owner === 'both' || e.owner === p))
+      noticeRemoved(id);
     const undo = deleteEvent(id);
     toast(proposed && e.proposed_by === me ? 'Request withdrawn.' : 'Plan deleted.', undo);
   };
@@ -481,6 +681,15 @@ function EventSheet({ id, occ }: { id: string; occ: string | null }) {
       </div>
       <h2 id="sh-title">{e.title}</h2>
       <p class="when">{day ? planWhen({ ...dayTimes(e, day), all_day: e.all_day }) : when}</p>
+      {e.status !== 'declined' && (
+        <ClashNote
+          {...(day ? dayTimes(e, day) : e)}
+          allDay={e.all_day}
+          tz={e.tz}
+          owner={e.owner}
+          except={id}
+        />
+      )}
       {e.location && <PlaceLink place={e.location} />}
       {e.rrule && (
         <p class="loc">
@@ -488,7 +697,21 @@ function EventSheet({ id, occ }: { id: string; occ: string | null }) {
           {repeatText(e.rrule)}
         </p>
       )}
-      {day && canDelete && <ThisDay id={id} e={e} occ={day} onDone={close} />}
+      {day && canDelete && (
+        <ThisDay
+          id={id}
+          e={e}
+          occ={day}
+          onDone={close}
+          onSplit={(copy) => {
+            openPlanForm(copy);
+            toast('Days before stay as they were. Changes here apply from this day on.');
+          }}
+        />
+      )}
+      {e.away && e.all_day && !e.rrule && e.status === 'confirmed' && (
+        <SkipWhileAway id={id} e={e} />
+      )}
       {(e.countdown || e.away) && (
         <p class="loc">
           <Icon name="flag" size={15} />
@@ -523,6 +746,7 @@ function EventSheet({ id, occ }: { id: string; occ: string | null }) {
           </button>
         </div>
       )}
+      <SuggestTime id={id} />
       {proposed && e.proposed_by === me && (
         <p class="note">
           <Icon name="clock" size={15} />

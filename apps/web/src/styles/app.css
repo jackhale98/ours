@@ -3769,3 +3769,35 @@ body:has(.bulkbar) .fab {
 .ideaacts {
   margin-bottom: 12px;
 }
+
+/* ---------- clashes and away days (review 0009, P-3) ---------- */
+.tag.warn {
+  color: var(--danger);
+}
+.ev.is-away .ev-title {
+  color: var(--muted);
+  text-decoration: line-through;
+  text-decoration-thickness: 1px;
+}
+.pchip.warn,
+.clash {
+  color: var(--danger);
+}
+.clash {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.9rem;
+  margin: 4px 0 0;
+}
+/* Weekdays a weekly plan repeats on (review 0009, P-6). */
+.daypick {
+  flex-wrap: wrap;
+}
+.daypick .chip {
+  min-width: 44px;
+  justify-content: center;
+}
+.suggest {
+  margin-top: 10px;
+}

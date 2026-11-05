@@ -53,3 +53,52 @@ export function noticeNote(id: string, text: string): void {
     kind: 'note',
   });
 }
+
+/*
+ * Changes to a shared plan (review 0009, P-4). Sent without a kind, so
+ * versions of the app that don't know these yet still show them.
+ */
+
+/** Asked to move a plan: "Sam wants to move: Dinner", from → to. */
+export function noticeMove(id: string): void {
+  const d = eventOf(id);
+  if (d?.status !== 'proposed' || !d.was?.start || !d.was.end) return;
+  const from = whenText(
+    d.was.start.slice(0, 10),
+    d.all_day,
+    d.was.start.slice(11),
+    d.was.end.slice(11),
+  );
+  notifyPartner({
+    title: `${nameOf(viewer.value)} wants to move: ${d.title}`,
+    body: `${from} → ${when(d)}`,
+    record_id: id,
+  });
+}
+
+/** Changed without asking: moved, renamed or a new place. */
+export function noticeChange(id: string): void {
+  const d = eventOf(id);
+  if (!d?.was || d.status === 'declined') return;
+  const what = d.was.start
+    ? 'moved'
+    : d.was.title !== undefined
+      ? `renamed “${d.was.title}”`
+      : 'changed the place for';
+  notifyPartner({
+    title: `${nameOf(viewer.value)} ${what}: ${d.title}`,
+    body: when(d) + (d.location ? ` · ${d.location}` : ''),
+    record_id: id,
+  });
+}
+
+/** A shared plan removed: said before it goes, while its title is known. */
+export function noticeRemoved(id: string): void {
+  const d = eventOf(id);
+  if (!d || d.status === 'declined') return;
+  notifyPartner({
+    title: `${nameOf(viewer.value)} removed: ${d.title}`,
+    body: when(d),
+    record_id: id,
+  });
+}
