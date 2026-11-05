@@ -3684,6 +3684,12 @@ body:has(.bulkbar) .fab {
 }
 
 /* ---------- list order, find, sections (review 0008, L-4, L-7) ---------- */
+.txt.code {
+  max-width: 12rem;
+  font-size: 1.5rem;
+  letter-spacing: 0.3em;
+  font-variant-numeric: tabular-nums;
+}
 .txt.sm {
   height: 38px;
   /* 16px: smaller makes phones zoom in when it's focused. */

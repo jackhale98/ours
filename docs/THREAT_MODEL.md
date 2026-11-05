@@ -61,7 +61,7 @@ Every stored field (keep in sync with `apps/api/migrations` and the privacy poli
 | users (added) | last_active, inactive_warned_at | Inactive-account policy (warn at 12 months, delete a month later) |
 | spaces (added) | bytes | Storage quota (total ciphertext size per space) |
 | invites (added) | claimed_by | The first account to fetch an invite claims it; blob erased on accept |
-| email_tokens | token_hash, email, created_at, expires_at, used_at | Magic links; deleted a day after expiry |
+| email_tokens | token_hash, email, created_at, expires_at, used_at, invite_hash, code_hash, code_tries | Magic links and their six-digit codes (code_hash: SHA-256 keyed by the server secret and the token hash; five wrong tries end a code; only the newest code for an address is accepted); deleted a day after expiry |
 | auth_challenges | id, user_id, challenge, purpose, expires_at | Passkey ceremonies; single use, 5 minutes |
 | rate_limits | key (salted hash, no IP or email), window_start, count | Abuse protection; deleted after a day |
 

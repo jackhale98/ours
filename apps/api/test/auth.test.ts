@@ -56,6 +56,62 @@ describe('email sign-in', () => {
     expect(late.json.message).toMatch(/expired/);
   });
 
+  it('a code from the email signs in where the link can’t be opened', async () => {
+    const email = uniqueEmail();
+    const before = outbox.length;
+    await call('/auth/email/start', { body: { email, accept_terms: true } });
+    const mail = await nextMail(before);
+    const code = /^\s+(\d{6})$/m.exec(mail?.text ?? '')?.[1];
+    expect(code).toMatch(/^\d{6}$/);
+    expect(mail?.subject).toContain(code);
+    // Codes are kept only as a keyed hash.
+    const row = await env.DB.prepare('SELECT code_hash FROM email_tokens WHERE email = ?')
+      .bind(email)
+      .first<{ code_hash: string }>();
+    expect(row?.code_hash).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    expect(row?.code_hash).not.toContain(code as string);
+
+    const wrong = String((Number(code) + 1) % 1_000_000).padStart(6, '0');
+    const bad = await call('/auth/email/code', { body: { email, code: wrong } });
+    expect(bad.status).toBe(400);
+    expect(bad.json.error).toBe('code_invalid');
+    const ok = await call('/auth/email/code', {
+      body: { email: email.toUpperCase(), code, device_label: 'Test' },
+    });
+    expect(ok.status).toBe(200);
+    expect(ok.json.user.email).toBe(email);
+    // Once used, neither the code nor the link works again.
+    expect((await call('/auth/email/code', { body: { email, code } })).json.error).toBe(
+      'code_invalid',
+    );
+    const token = /#signin=([A-Za-z0-9_-]{43})/.exec(mail?.text ?? '')?.[1];
+    expect((await call('/auth/email/verify', { body: { token } })).json.message).toMatch(
+      /already used/,
+    );
+  });
+
+  it('a code stops working after five wrong tries, and only the newest counts', async () => {
+    const email = uniqueEmail();
+    const before = outbox.length;
+    await call('/auth/email/start', { body: { email, accept_terms: true } });
+    const first = /^\s+(\d{6})$/m.exec((await nextMail(before))?.text ?? '')?.[1] as string;
+    const before2 = outbox.length;
+    await call('/auth/email/start', { body: { email, accept_terms: true } });
+    const second = /^\s+(\d{6})$/m.exec((await nextMail(before2))?.text ?? '')?.[1] as string;
+    if (first !== second) {
+      // An older email's code isn't accepted once a newer one was sent.
+      expect((await call('/auth/email/code', { body: { email, code: first } })).status).toBe(400);
+    }
+    const wrong = String((Number(second) + 1) % 1_000_000).padStart(6, '0');
+    for (let i = 0; i < 5; i++) await call('/auth/email/code', { body: { email, code: wrong } });
+    const late = await call('/auth/email/code', { body: { email, code: second } });
+    expect(late.status).toBe(400);
+    expect(late.json.error).toBe('code_invalid');
+    // An address with no code pending gets the same answer.
+    const none = await call('/auth/email/code', { body: { email: uniqueEmail(), code: '123456' } });
+    expect(none.json).toEqual(late.json);
+  });
+
   it('rejects malformed input', async () => {
     expect((await call('/auth/email/start', { body: { email: 'not-an-email' } })).status).toBe(422);
     expect((await call('/auth/email/start', { body: '{' })).status).toBe(422);

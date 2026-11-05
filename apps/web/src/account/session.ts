@@ -457,10 +457,33 @@ export async function verifyEmail(token: string): Promise<{ newUser: boolean }> 
   // Only this tab's invite: the server uses the one given when the link was
   // asked for, so one kept for someone else's address is never sent (I11).
   const invite = tabInviteId();
-  const res = await api<Session & { new_user: boolean; expires_at: number }>('/auth/email/verify', {
-    auth: false,
-    body: { token, device_label: deviceLabel(), ...(invite ? { invite } : {}) },
-  });
+  return signedIn(
+    await api<EmailSignIn>('/auth/email/verify', {
+      auth: false,
+      body: { token, device_label: deviceLabel(), ...(invite ? { invite } : {}) },
+    }),
+  );
+}
+
+/** Signs in with the six-digit code from the email, typed where it was asked for. */
+export async function verifyCode(email: string, code: string): Promise<{ newUser: boolean }> {
+  const invite = tabInviteId();
+  return signedIn(
+    await api<EmailSignIn>('/auth/email/code', {
+      auth: false,
+      body: {
+        email: email.trim(),
+        code,
+        device_label: deviceLabel(),
+        ...(invite ? { invite } : {}),
+      },
+    }),
+  );
+}
+
+type EmailSignIn = Session & { new_user: boolean; expires_at: number };
+
+async function signedIn(res: EmailSignIn): Promise<{ newUser: boolean }> {
   const session: Session = { token: res.token, user: res.user, device_id: res.device_id };
   claimKeptInvite(res.user.email);
   await kvSet('session', session);
@@ -468,7 +491,7 @@ export async function verifyEmail(token: string): Promise<{ newUser: boolean }> 
   try {
     await refresh(session);
   } catch {
-    // The link worked and the session is kept: a reload finishes this.
+    // Signed in and the session is kept: a reload finishes this.
     throw new SignedInButNotLoaded();
   }
   return { newUser: res.new_user };

@@ -33,6 +33,7 @@ import {
   signInWithPasskey,
   startEmail,
   unlockThisDevice,
+  verifyCode,
   verifyEmail,
 } from '../../account/session';
 import { mountTurnstile, turnstileEnabled } from '../../account/turnstile';
@@ -111,6 +112,49 @@ function ConfirmSignIn() {
   );
 }
 
+/** The six-digit code from the email: works whichever app or browser opened the email. */
+function CodeForm({ email }: { email: string }) {
+  const [code, setCode] = useState('');
+  const [busy, setBusy] = useState(false);
+  const ready = /^\d{6}$/.test(code);
+  return (
+    <form
+      class="stack gap"
+      onSubmit={async (e) => {
+        e.preventDefault();
+        if (!ready || busy) return;
+        setBusy(true);
+        try {
+          await verifyCode(email, code);
+        } catch (err) {
+          toast(signInErrorText(err));
+        } finally {
+          setBusy(false);
+        }
+      }}
+    >
+      <div class="field">
+        <label for="signin-code">Code from the email</label>
+        <input
+          id="signin-code"
+          class="txt code"
+          type="text"
+          inputMode="numeric"
+          autocomplete="one-time-code"
+          pattern="[0-9]*"
+          maxLength={7}
+          data-autofocus
+          value={code}
+          onInput={(e) => setCode(e.currentTarget.value.replace(/\D/g, '').slice(0, 6))}
+        />
+      </div>
+      <button class="btn primary" type="submit" disabled={!ready || busy}>
+        <Busy busy={busy}>Sign in</Busy>
+      </button>
+    </form>
+  );
+}
+
 function SignIn() {
   const [, setInviteAdded] = useState(0);
   const useLink = async (link: PastedLink) => {
@@ -154,9 +198,10 @@ function SignIn() {
       <section class="card">
         <h2 class="h3">Check your email</h2>
         <p class="d">
-          We sent a sign-in link to <b class="ink">{email}</b>. Open it on this device. It works
-          once and expires in 15 minutes.
+          We sent a code to <b class="ink">{email}</b>. Type it here, or open the link in the email
+          on this device. Both work once and expire in 15 minutes.
         </p>
+        <CodeForm email={email} />
         <PasteLink
           label="Paste the sign-in link"
           hint={PASTE_HINT}

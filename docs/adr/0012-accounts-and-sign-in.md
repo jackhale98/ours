@@ -16,5 +16,5 @@ The plan calls for passkeys with an email magic-link fallback, bearer tokens (no
 
 ## Consequences
 - Every account has an email address the server can read (already in the threat model).
-- Sign-in from a new device needs either a passkey synced by the platform or a magic link; keys still come from the recovery phrase or a device-link invite.
+- Sign-in from a new device needs either a passkey synced by the platform or a magic link (or the six-digit code in the same email, typed where it was asked for: an iPhone opens email links in Safari or the mail app's own browser, each with separate storage, so the link alone can't reach a Home Screen app or the tab that asked); keys still come from the recovery phrase or a device-link invite.
 - Self-hosters without an email provider can't create accounts until they configure one (or use `log` in development and read tokens from tests/tools).

@@ -24,7 +24,18 @@ async function magicLink(page: Page, email: string): Promise<string> {
   throw new Error(`no magic link for ${email}`);
 }
 
-async function signUp(page: Page, email: string, how: 'open' | 'paste' = 'open') {
+async function signInCode(page: Page, email: string): Promise<string> {
+  for (let i = 0; i < 50; i++) {
+    const res = await page.request.get(`${API}/dev/outbox?to=${encodeURIComponent(email)}`);
+    const mails = (await res.json()) as { text: string }[];
+    const code = mails.at(-1)?.text.match(/^\s+(\d{6})$/m)?.[1];
+    if (code) return code;
+    await page.waitForTimeout(100);
+  }
+  throw new Error(`no sign-in code for ${email}`);
+}
+
+async function signUp(page: Page, email: string, how: 'open' | 'paste' | 'code' = 'open') {
   await expect(
     page.getByRole('heading', { name: /Sign in or create an account|Join your partner/ }),
   ).toBeVisible();
@@ -32,6 +43,14 @@ async function signUp(page: Page, email: string, how: 'open' | 'paste' = 'open')
   await page.getByRole('checkbox', { name: /16 or older/ }).check();
   await page.getByRole('button', { name: 'Email me a link' }).click();
   await expect(page.getByRole('heading', { name: 'Check your email' })).toBeVisible();
+  if (how === 'code') {
+    // Typed where it was asked for: works whichever browser opened the email.
+    await page
+      .getByRole('textbox', { name: 'Code from the email' })
+      .fill(await signInCode(page, email));
+    await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+    return;
+  }
   const link = await magicLink(page, email);
   if (how === 'open') {
     // A link preview (press and hold on an iPhone) loads the page too: that
@@ -522,7 +541,7 @@ test('sign up, pair, compare safety codes, and sync plans both ways', async ({ b
   // A new device restores everything from the new phrase alone (H2).
   const fresh = await newPage(browser);
   await fresh.goto('/#start');
-  await signUp(fresh, samEmail);
+  await signUp(fresh, samEmail, 'code');
   await expect(fresh.getByRole('heading', { name: 'Welcome back' })).toBeVisible({
     timeout: 20_000,
   });
@@ -608,7 +627,7 @@ test('a passkey can sign in and unlock the keys, without a link or the phrase', 
     },
   });
   await page.goto('/#start');
-  await signUp(page, `kim-${Date.now()}@example.com`);
+  await signUp(page, `kim-${Date.now()}@example.com`, 'code');
   await page.getByRole('textbox', { name: 'Your first name' }).fill('Kim');
   await page.getByRole('button', { name: 'Create our space' }).click();
   await recoveryPhrase(page);
