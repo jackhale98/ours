@@ -45,10 +45,24 @@ export function EventRow({ row, date }: { row: Row; date: string }) {
       <span class="ev-time">
         {row.allDay ? (
           'All day'
+        ) : row.span && row.span.day > 1 ? (
+          // Began on an earlier day: what matters today is when it ends (P-11).
+          row.span.day < row.span.of ? (
+            'All day'
+          ) : (
+            <>
+              <span class="to">Until</span>
+              {fmtTime(row.end)}
+            </>
+          )
         ) : (
           <>
             {fmtTime(row.start)}
-            {row.end !== row.start && <span class="to">{fmtTime(row.end)}</span>}
+            {row.span ? (
+              <span class="to">{row.span.of === 2 ? 'to tomorrow' : 'onwards'}</span>
+            ) : (
+              row.end !== row.start && <span class="to">{fmtTime(row.end)}</span>
+            )}
           </>
         )}
       </span>
@@ -72,6 +86,11 @@ export function EventRow({ row, date }: { row: Row; date: string }) {
             {row.status === 'declined' && (
               <span class="tag no" aria-hidden="true">
                 {nameOf(p)} can’t make it
+              </span>
+            )}
+            {row.span && (row.allDay || row.span.of > 2) && (
+              <span>
+                Day {row.span.day} of {row.span.of}
               </span>
             )}
             {row.away && row.allDay && <span>Away</span>}
@@ -221,31 +240,43 @@ function SideCards() {
  * What the partner changed since this device last looked, so opening the
  * app after "Something changed" shows what it was.
  */
-function WhatsNew() {
+/** The partner's changes. Over the week and month grids it is one line until opened. */
+function WhatsNew({ compact = false }: { compact?: boolean }) {
   const hits = news.value;
   const [all, setAll] = useState(false);
+  // Derived, not initial state: the same instance serves agenda and calendar modes.
+  const [opened, setOpen] = useState(false);
+  const open = !compact || opened;
   if (!hits.length) return null;
   const shown = all ? hits : hits.slice(0, 4);
   return (
-    <section class="card news" aria-labelledby="news-h">
+    <section class={`card news${open ? '' : ' shut'}`} aria-labelledby="news-h">
       <div class="news-head">
         <h2 class="h3" id="news-h">
           New from {nameOf(partner.value)}
+          {!open && <span class="news-n"> · {hits.length}</span>}
         </h2>
+        {!open && (
+          <button type="button" class="linkbtn" onClick={() => setOpen(true)}>
+            Show
+          </button>
+        )}
         <button type="button" class="linkbtn" onClick={markSeen}>
           Got it
         </button>
       </div>
-      <div class="find-group">
-        <ul>
-          {shown.map((h) => (
-            <li key={h.id}>
-              <Result hit={h} />
-            </li>
-          ))}
-        </ul>
-      </div>
-      {hits.length > shown.length && (
+      {open && (
+        <div class="find-group">
+          <ul>
+            {shown.map((h) => (
+              <li key={h.id}>
+                <Result hit={h} />
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {open && hits.length > shown.length && (
         <button type="button" class="linkbtn" onClick={() => setAll(true)}>
           {hits.length - shown.length} more
         </button>
@@ -253,6 +284,11 @@ function WhatsNew() {
     </section>
   );
 }
+
+/** How many questions show in full above the agenda, and milestones before "more". */
+const ASKS_SHOWN = 2;
+const MILESTONES_SHOWN = 4;
+const allMilestones = signal(false);
 
 export function PlanView() {
   const t = today.value;
@@ -292,7 +328,7 @@ export function PlanView() {
     return (
       <>
         {header}
-        <WhatsNew />
+        <WhatsNew compact />
         {mode === 'week' ? <WeekView /> : <MonthView />}
         <MarkerKey names={names.value} />
       </>
@@ -309,7 +345,7 @@ export function PlanView() {
           {/* biome-ignore lint/a11y/noNoninteractiveTabindex: a horizontally scrolling region must be keyboard-focusable (WCAG 2.1.1, axe scrollable-region-focusable) */}
           <section class="cd-wrap" aria-label="Countdowns" tabIndex={0}>
             <ul class="cd">
-              {cds.map((c) => (
+              {(allMilestones.value ? cds : cds.slice(0, MILESTONES_SHOWN)).map((c) => (
                 <li key={c.id}>
                   <button type="button" class="cd-item" onClick={() => openEvent(c.id)}>
                     <span class="cd-n">{c.days}</span>
@@ -321,6 +357,24 @@ export function PlanView() {
                   </button>
                 </li>
               ))}
+              {cds.length > MILESTONES_SHOWN && (
+                <li>
+                  <button
+                    type="button"
+                    class="cd-item cd-more"
+                    aria-expanded={allMilestones.value}
+                    onClick={() => {
+                      allMilestones.value = !allMilestones.value;
+                    }}
+                  >
+                    <span class="cd-l">
+                      {allMilestones.value
+                        ? 'Fewer milestones'
+                        : `${cds.length - MILESTONES_SHOWN} more milestones`}
+                    </span>
+                  </button>
+                </li>
+              )}
               <li>
                 <button
                   type="button"
@@ -348,9 +402,21 @@ export function PlanView() {
           <SideCards />
         </div>
         <div class="plan-main">
-          {awaitingMe.value.map((e) => (
+          {/* A couple of questions in full, then one line: they don't push
+              today off the screen (review 0009, P-2). */}
+          {awaitingMe.value.slice(0, ASKS_SHOWN).map((e) => (
             <AskCard key={e.id} id={e.id} />
           ))}
+          {awaitingMe.value.length > ASKS_SHOWN && (
+            <a class="asks-more" href="#inbox">
+              <Icon name="inbox" size={16} />
+              <span>
+                {awaitingMe.value.length - ASKS_SHOWN} more{' '}
+                {awaitingMe.value.length - ASKS_SHOWN === 1 ? 'needs' : 'need'} your answer
+              </span>
+              <span class="free-cta">Go through</span>
+            </a>
+          )}
           <div class="agenda">
             {days.map((day, i) => (
               <>

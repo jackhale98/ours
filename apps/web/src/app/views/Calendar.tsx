@@ -12,12 +12,14 @@ import { nameOf, partner } from '../model';
 import { drawerOpen, focusDate, type PlanMode, planMode, setPlanMode } from '../planview';
 import {
   agendaFrom,
+  continues,
   type Day,
   dayNum,
   dow,
   fmtLong,
   fmtTime,
   monDay,
+  now,
   type Row,
   startOfWeek,
   today,
@@ -91,6 +93,20 @@ function dayLabel(day: Day, isToday: boolean): string {
   if (day.bothFree && day.date >= today.value) parts.push('both free this evening');
   return parts.join(', ');
 }
+
+/**
+ * Which plans a crowded month day shows first (review 0009, P-8): trips and
+ * all-day plans, one-off plans together, questions, one-off plans of one
+ * of you, imported calendars, then routines.
+ */
+function rank(r: Row): number {
+  if (r.allDay) return 0;
+  if (r.repeat) return 5;
+  if (r.origin === 'import') return 4;
+  if (r.status === 'proposed') return 2;
+  return r.owner === 'both' ? 1 : 3;
+}
+const byImportance = (a: Row, b: Row) => rank(a) - rank(b) || a.start.localeCompare(b.start);
 
 const markerMode = (r: Row) =>
   r.type === 'busy' ? ('busy' as const) : r.status !== 'confirmed' ? ('dash' as const) : undefined;
@@ -551,7 +567,7 @@ export function MonthView() {
                     {days.slice(w * 7, w * 7 + 7).map((day) => {
                       const out = monthOf(day.date) !== monthOf(sel);
                       const isSel = day.date === sel;
-                      const plans = day.rows.filter((r) => !r.free);
+                      const plans = day.rows.filter((r) => !r.free).sort(byImportance);
                       const away = plans.some((r) => r.away);
                       return (
                         <td key={day.date}>
@@ -575,9 +591,15 @@ export function MonthView() {
                             </span>
                             {wide.value && (
                               <span class="mtitles" aria-hidden="true">
-                                {plans.slice(0, titles).map((r) => (
-                                  <span key={r.key}>{r.title}</span>
-                                ))}
+                                {plans.slice(0, titles).map((r) => {
+                                  const mode = markerMode(r);
+                                  return (
+                                    <span key={r.key} class="mtitle">
+                                      <Marker owner={r.owner} {...(mode ? { mode } : {})} />
+                                      <span>{r.title}</span>
+                                    </span>
+                                  );
+                                })}
                               </span>
                             )}
                             <Markers rows={wide.value ? plans.slice(titles) : plans} />
@@ -612,6 +634,8 @@ interface Block {
   height: number;
   lane: number;
   lanes: number;
+  /** Starts before the hours shown (an overnight flight): drawn from the top. */
+  early: boolean;
 }
 
 /** Minutes after the day's midnight, clipped to the day (plans crossing midnight). */
@@ -626,7 +650,12 @@ function minutesIn(row: Row, date: string): { start: number; end: number } {
 }
 
 /** Side-by-side lanes for overlapping plans (at most 3; the rest are counted). */
-function layout(rows: Row[], date: string, fromHour: number): { blocks: Block[]; hidden: number } {
+function layout(
+  rows: Row[],
+  date: string,
+  fromHour: number,
+  toHour: number,
+): { blocks: Block[]; hidden: number } {
   const items = rows
     .map((row) => ({ row, ...minutesIn(row, date) }))
     .sort((a, b) => a.start - b.start || b.end - a.end);
@@ -648,13 +677,19 @@ function layout(rows: Row[], date: string, fromHour: number): { blocks: Block[];
       placed.push({ item, lane });
     }
     const lanes = Math.max(1, laneEnds.length);
+    // Plans outside the hours shown are clipped to them, not hidden (P-7).
+    const lo = fromHour * 60;
+    const hi = toHour * 60;
     for (const { item, lane } of placed) {
+      const start = Math.min(Math.max(item.start, lo), hi - 20);
+      const end = Math.max(Math.min(item.end, hi), start + 20);
       blocks.push({
         row: item.row,
-        top: ((item.start - fromHour * 60) / 60) * HOUR_PX,
-        height: ((item.end - item.start) / 60) * HOUR_PX,
+        top: ((start - lo) / 60) * HOUR_PX,
+        height: ((end - start) / 60) * HOUR_PX,
         lane,
         lanes,
+        early: item.start < lo,
       });
     }
     cluster = [];
@@ -670,24 +705,39 @@ function layout(rows: Row[], date: string, fromHour: number): { blocks: Block[];
 
 function blockLabel(r: Row): string {
   const who = r.type === 'busy' ? `${nameOf(r.owner === 'both' ? partner.value : r.owner)}: ` : '';
-  const when = r.allDay ? 'all day' : `${fmtTime(r.start)} to ${fmtTime(r.end)}`;
+  const when = r.allDay
+    ? 'all day'
+    : continues(r)
+      ? `until ${fmtTime(r.end)}`
+      : `${fmtTime(r.start)} to ${fmtTime(r.end)}`;
   const tentative = r.status === 'proposed' ? ', tentative' : '';
   return `${who}${r.title}, ${when}${tentative}`;
 }
 
-function WeekGrid({ days }: { days: Day[] }) {
+/** The value a share `q` of the way through sorted numbers (nearest rank). */
+const quantile = (sorted: number[], q: number) =>
+  sorted[Math.min(sorted.length - 1, Math.max(0, Math.round(q * (sorted.length - 1))))] ?? 0;
+
+function WeekGrid({ days, sel }: { days: Day[]; sel: string }) {
   const t = today.value;
   const timed = days.map((d) => d.rows.filter((r) => !r.allDay));
-  let from = 7;
-  let to = 23;
+  // The hours most plans fall in: one overnight flight doesn't stretch the
+  // grid to midnight; plans outside are clipped with "↑" (review 0009, P-7).
+  const starts: number[] = [];
+  const ends: number[] = [];
   for (const [i, rows] of timed.entries()) {
     for (const r of rows) {
       const { start, end } = minutesIn(r, days[i]?.date ?? '');
-      from = Math.min(from, Math.floor(start / 60));
-      to = Math.max(to, Math.ceil(end / 60));
+      starts.push(start);
+      ends.push(end);
     }
   }
-  to = Math.min(24, to);
+  starts.sort((a, b) => a - b);
+  ends.sort((a, b) => a - b);
+  const from = Math.max(0, Math.min(7, Math.floor(quantile(starts, 0.05) / 60)));
+  const to = Math.min(24, Math.max(23, Math.ceil(quantile(ends, 0.95) / 60)));
+  const nowMin = (now.value - toInstant(`${t}T00:00`, zone)) / 60_000;
+  const nowTop = ((nowMin - from * 60) / 60) * HOUR_PX;
   const hours = Array.from({ length: to - from }, (_, i) => from + i);
   const eveTop = ((17 - from) * 60 * HOUR_PX) / 60;
   const eveHeight = 5 * HOUR_PX;
@@ -695,10 +745,20 @@ function WeekGrid({ days }: { days: Day[] }) {
     <div class="wgrid" style={{ '--hours': hours.length } as Record<string, number>}>
       <div class="wg-head">
         <span />
+        {/* Each day opens in the panel below, with every plan listed (P-7). */}
         {days.map((d) => (
-          <span key={d.date} class={d.date === t ? 'today' : ''}>
+          <button
+            type="button"
+            key={d.date}
+            class={`wg-day${d.date === t ? ' today' : ''}`}
+            aria-pressed={d.date === sel}
+            aria-label={dayLabel(d, d.date === t)}
+            onClick={() => {
+              focusDate.value = d.date;
+            }}
+          >
             <b>{DOW_SHORT[dow(d.date)]}</b> {dayNum(d.date)}
-          </span>
+          </button>
         ))}
       </div>
       <div class="wg-allday">
@@ -734,7 +794,7 @@ function WeekGrid({ days }: { days: Day[] }) {
           ))}
         </div>
         {days.map((d, i) => {
-          const { blocks, hidden } = layout(timed[i] ?? [], d.date, from);
+          const { blocks, hidden } = layout(timed[i] ?? [], d.date, from, to);
           return (
             // biome-ignore lint/a11y/useKeyWithClickEvents: tapping empty time is a mouse shortcut; the "Add a plan on this day" button covers keyboard users
             // biome-ignore lint/a11y/noStaticElementInteractions: see above
@@ -772,11 +832,29 @@ function WeekGrid({ days }: { days: Day[] }) {
                   >
                     <Marker owner={b.row.owner} {...(mode ? { mode } : {})} />
                     <span class="wg-t">{b.row.title}</span>
-                    <span class="wg-time">{fmtTime(b.row.start)}</span>
+                    <span class="wg-time">
+                      {b.early ? '↑ ' : ''}
+                      {continues(b.row) ? `until ${fmtTime(b.row.end)}` : fmtTime(b.row.start)}
+                    </span>
                   </button>
                 );
               })}
-              {hidden > 0 && <span class="cal-more wg-hidden">+{hidden}</span>}
+              {d.date === t && nowTop >= 0 && nowTop <= hours.length * HOUR_PX && (
+                <span class="wg-now" style={{ top: `${nowTop}px` }} aria-hidden="true" />
+              )}
+              {hidden > 0 && (
+                <button
+                  type="button"
+                  class="cal-more wg-hidden"
+                  aria-label={`${hidden} more on ${fmtLong(d.date)}: show the day`}
+                  onClick={() => {
+                    focusDate.value = d.date;
+                    document.querySelector('.daypanel')?.scrollIntoView({ block: 'nearest' });
+                  }}
+                >
+                  +{hidden}
+                </button>
+              )}
             </div>
           );
         })}
@@ -856,7 +934,7 @@ export function WeekView() {
         <>
           <div class="slide-host">
             <div class="slide" ref={weekSlide}>
-              <WeekGrid days={days} />
+              <WeekGrid days={days} sel={sel} />
             </div>
           </div>
           {selDay && <DayPanel day={selDay} />}

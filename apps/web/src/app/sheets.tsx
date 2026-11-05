@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 /** Quick add and event details sheets. */
 
-import { parseQuickAdd } from '@ours/core/parse';
+import { parseQuickAdd, type Weekday } from '@ours/core/parse';
 import { addDays, addWallMinutes } from '@ours/core/time';
 import { signal } from '@preact/signals';
 import { useState } from 'preact/hooks';
@@ -28,6 +28,7 @@ import { type Draft, PlanForm, REPEAT_CHOICES } from './planform';
 import { ReminderPicker } from './reminderpicker';
 import { remindersOf, withDefaultReminders, withReminders } from './reminders';
 import {
+  DATE_ORDER,
   fmtTime,
   ownerLabel,
   planWhen,
@@ -35,6 +36,7 @@ import {
   relDay,
   repeatText,
   today,
+  weekStartsOn,
   whenText,
   zone,
 } from './select';
@@ -97,21 +99,50 @@ export function SheetHost() {
 
 const capitalise = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
+type Whose = 'me' | 'ours' | 'partner';
+const WHO_KEY = 'ours-qa-who';
+const lastWho = (): Whose | null => {
+  try {
+    const v = localStorage.getItem(WHO_KEY);
+    return v === 'me' || v === 'ours' || v === 'partner' ? v : null;
+  } catch {
+    return null;
+  }
+};
+const rememberWho = (w: Whose) => {
+  try {
+    localStorage.setItem(WHO_KEY, w);
+  } catch {
+    // private mode: nothing to remember
+  }
+};
+
 /* ---------- quick add ---------- */
 
 function QuickAdd({ preset }: { preset: QuickPreset }) {
   const me = viewer.value;
   const p = partner.value;
   const [text, setText] = useState(preset.text ?? '');
-  const [who, setWho] = useState<'me' | 'ours' | 'partner'>(preset.who ?? 'ours');
-  const [ask, setAsk] = useState(true);
+  // Whose: picked by hand, else "#private" makes it Mine, else the last choice (review 0009, P-9).
+  const [whoPick, setWho] = useState<Whose | null>(preset.who ?? null);
+  const [remembered] = useState<Whose>(() => lastWho() ?? 'ours');
+  const [askPick, setAsk] = useState<boolean | null>(null);
   const [priv, setPriv] = useState(false);
   const [dateOverride, setDate] = useState<string | null>(null);
   const [timeOverride, setTime] = useState<string | null>(null);
   const [repeatOverride, setRepeat] = useState<string | null>(null);
 
-  const parsed = parseQuickAdd(text, { today: today.value });
+  const parsed = parseQuickAdd(text, {
+    today: today.value,
+    dateOrder: DATE_ORDER,
+    weekStart: weekStartsOn.value as Weekday,
+  });
+  const who: Whose = whoPick ?? (parsed.private ? 'me' : remembered);
+  // A trailing "?" ("dinner fri?") always asks; otherwise asking is the default.
+  const ask = askPick ?? true;
   const date = dateOverride ?? parsed.date ?? preset.date ?? today.value;
+  // "sat-sun", "dec 3-10": the last day, unless the day was picked by hand.
+  const lastDay = !dateOverride && parsed.endDate && parsed.endDate > date ? parsed.endDate : null;
   const time = timeOverride ?? parsed.time ?? preset.time ?? '';
   // What was typed ("every saturday") sets the repeat until it is chosen by hand.
   const repeat = repeatOverride ?? parsed.rrule ?? '';
@@ -120,19 +151,25 @@ function QuickAdd({ preset }: { preset: QuickPreset }) {
     : !text.trim() && preset.placeholder
       ? preset.placeholder
       : '';
-  const proposing = who !== 'me' && ask;
+  const proposing = who !== 'me' && (ask || parsed.ask);
+  const startAt = time ? `${date}T${time}` : date;
+  const endAt = (minutes: number): string => {
+    if (!time) return addDays(lastDay ?? date, 1);
+    const typed = parsed.endTime && !timeOverride ? parsed.endTime : null;
+    if (lastDay) return `${lastDay}T${typed ?? time}`;
+    if (!typed) return addWallMinutes(startAt, minutes);
+    const end = `${date}T${typed}`;
+    return end > startAt ? end : `${addDays(date, 1)}T${typed}`;
+  };
   const isPrivate = who === 'me' && (priv || parsed.private);
 
   const submit = (e: Event) => {
     e.preventDefault();
     if (!title) return;
     const owner: Slot | 'both' = who === 'me' ? me : who === 'partner' ? p : 'both';
-    const start = time ? `${date}T${time}` : date;
-    let end = time ? addWallMinutes(start, preset.minutes ?? 60) : addDays(date, 1);
-    if (time && parsed.endTime && !timeOverride) {
-      end = `${date}T${parsed.endTime}`;
-      if (end <= start) end = `${addDays(date, 1)}T${parsed.endTime}`;
-    }
+    const start = startAt;
+    const end = endAt(preset.minutes ?? 60);
+    rememberWho(who);
     try {
       const draft: EventData = {
         title,
@@ -196,6 +233,7 @@ function QuickAdd({ preset }: { preset: QuickPreset }) {
               <span class="pchip">
                 <Icon name="cal" size={13} />
                 {relDay(date)}
+                {lastDay && ` – ${relDay(lastDay)}`}
               </span>
               <span class="pchip">
                 <Icon name="clock" size={13} />
@@ -301,7 +339,7 @@ function QuickAdd({ preset }: { preset: QuickPreset }) {
           />
         ) : (
           <Switch
-            checked={ask}
+            checked={ask || parsed.ask}
             onChange={setAsk}
             label={`Ask ${nameOf(p)} first`}
             hint="It stays tentative until they say yes."
@@ -315,17 +353,12 @@ function QuickAdd({ preset }: { preset: QuickPreset }) {
           class="linkbtn"
           onClick={() => {
             const owner: Slot | 'both' = who === 'me' ? me : who === 'partner' ? p : 'both';
-            const start = time ? `${date}T${time}` : date;
             openPlanForm(null, {
               title,
               owner,
               all_day: !time,
-              start,
-              end: time
-                ? parsed.endTime && !timeOverride
-                  ? `${date}T${parsed.endTime}`
-                  : addWallMinutes(start, 60)
-                : addDays(date, 1),
+              start: startAt,
+              end: endAt(60),
               location: parsed.place,
               rrule: repeat || null,
               privacy: isPrivate ? 'busy' : 'full',
@@ -573,7 +606,7 @@ function EventSheet({ id, occ }: { id: string; occ: string | null }) {
       {canDelete && (
         <div class="sh-foot">
           <button type="button" class="btn sm" onClick={() => openPlanForm(id)}>
-            Edit
+            {e.rrule ? 'Edit all days' : 'Edit'}
           </button>
           <button type="button" class="linkbtn danger" onClick={del}>
             {armed

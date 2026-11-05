@@ -191,6 +191,15 @@ export interface Row {
   occ: string | null;
   /** This day was moved on its own (from `occ`). */
   moved: boolean;
+  /** For a plan over several days: which day this is (1-based) and how many. */
+  span: { day: number; of: number } | null;
+}
+
+/** One row per day a plan touches, each knowing which day of the plan it is (P-11). */
+function perDay(o: Occurrence, row: Row): { day: string; row: Row }[] {
+  const days = daysTouched(o, zone);
+  if (days.length === 1) return [{ day: days[0] as string, row }];
+  return days.map((day, i) => ({ day, row: { ...row, span: { day: i + 1, of: days.length } } }));
 }
 
 /** One formatter for every row: making one per call was a large share of render time (P-1). */
@@ -272,8 +281,9 @@ function rowsFor(entry: Entry, from: number, to: number): { day: string; row: Ro
       occEnd: o.end,
       occ: d.rrule ? (o.movedFrom ?? o.localStart) : null,
       moved: !!o.movedFrom,
+      span: null,
     };
-    return daysTouched(o, zone).map((day) => ({ day, row: base }));
+    return perDay(o, base);
   });
 }
 
@@ -316,14 +326,19 @@ function importRows(
         moved: false,
         source: d.name ?? null,
         free: !!item.free,
+        span: null,
       };
-      return daysTouched(o, zone).map((day) => ({ day, row }));
+      return perDay(o, row);
     }),
   );
 }
 
+/** A timed plan that began on an earlier day ("Until 12:30 PM"): it comes before the day's own. */
+export const continues = (r: Row) => !r.allDay && !!r.span && r.span.day > 1;
+
 const sortRows = (a: Row, b: Row) =>
   Number(b.allDay) - Number(a.allDay) ||
+  Number(continues(b)) - Number(continues(a)) ||
   a.start.localeCompare(b.start) ||
   a.title.localeCompare(b.title);
 
@@ -358,6 +373,18 @@ export function agendaFrom(first: string, days: number): Day[] {
   while (agendaCache.size > 24) agendaCache.delete(agendaCache.keys().next().value as string);
   return result;
 }
+
+/** Whether this browser's locale writes numeric dates day first (14/11) or month first. */
+export const DATE_ORDER: 'MD' | 'DM' = (() => {
+  try {
+    const parts = new Intl.DateTimeFormat(undefined, { month: 'numeric', day: 'numeric' })
+      .formatToParts(new Date(2000, 10, 22))
+      .map((x) => x.type);
+    return parts.indexOf('day') < parts.indexOf('month') ? 'DM' : 'MD';
+  } catch {
+    return 'MD';
+  }
+})();
 
 /** First day of the week: shared setting, else the locale's convention (Sunday in the US). */
 export const weekStartsOn = computed<number>(() => {
@@ -414,6 +441,9 @@ function computeAgenda(first: string, days: number): Day[] {
   });
 }
 
+/** Rows that take up time: timed, not marked free in their calendar, not declined (P-12). */
+const blocksTime = (r: Row) => !r.allDay && !r.free && r.status !== 'declined';
+
 /**
  * An evening is "both free" when neither of you has anything between 17:00
  * and 22:00 and nobody is away that day (all-day events that are not
@@ -426,7 +456,7 @@ function isEveningFree(date: string, rows: Row[]): boolean {
     end: toInstant(`${date}T${EVENING.end}`, zone),
   };
   const busy = rows
-    .filter((r) => !r.allDay && r.status !== 'declined')
+    .filter(blocksTime)
     .map((r) => ({ start: r.occStart, end: Math.max(r.occEnd, r.occStart + 60_000) }));
   const free = freeWithin(window, busy);
   return free.length === 1 && free[0]?.start === window.start && free[0]?.end === window.end;
@@ -451,7 +481,7 @@ export function freeStretches(date: string): Interval[] {
   }
   if (start >= end) return [];
   const busy = day.rows
-    .filter((r) => !r.allDay && !r.free && r.status !== 'declined')
+    .filter(blocksTime)
     .map((r) => ({ start: r.occStart, end: Math.max(r.occEnd, r.occStart + 60_000) }));
   return freeWithin({ start, end }, busy).filter((w) => w.end - w.start >= 60 * 60_000);
 }
@@ -468,13 +498,26 @@ export function nextFreeEvening(): string {
 
 /* ---------- proposals and countdowns ---------- */
 
+/** Whether a plan's last day is today or later (all-day ends are exclusive). */
+export function stillAhead(e: Entry, t: string): boolean {
+  if (e.rec.kind !== 'event') return false;
+  const d = e.rec.data;
+  const last = d.all_day ? addDays(d.end.slice(0, 10), -1) : d.end.slice(0, 10);
+  return last >= t;
+}
+
+/**
+ * The partner's questions still to answer: not ones for dates that have
+ * passed (review 0009, P-2; Waiting on you already left those out).
+ */
 export const awaitingMe = computed(() =>
   byKind('event')
     .filter(
       (e) =>
         e.rec.kind === 'event' &&
         e.rec.data.status === 'proposed' &&
-        e.rec.data.proposed_by === partner.value,
+        e.rec.data.proposed_by === partner.value &&
+        (!!e.rec.data.rrule || stillAhead(e, today.value)),
     )
     .sort((a, b) =>
       a.rec.kind === 'event' && b.rec.kind === 'event'

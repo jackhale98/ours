@@ -4,6 +4,8 @@
  * starting points that switch on a set of them, and list operations.
  */
 import {
+  keyBetween,
+  keysBetween,
   LIST_FEATURES,
   type ListFeature,
   type ListKind,
@@ -625,4 +627,40 @@ export function completeItems(
         for (const u of undos.reverse()) u();
       }),
   };
+}
+
+/* ---------- order ---------- */
+
+/** Past this length a list's keys are renumbered (they grow as items go on top; L-14). */
+const LONG_KEY = 24;
+
+/**
+ * Spreads a list's keys evenly again, in one batch, keeping its order.
+ * Keys come back to two or three characters.
+ */
+export function renumber(listId: string): void {
+  const items = itemsOf(listId);
+  const keys = keysBetween(null, null, items.length);
+  bulk(() => {
+    items.forEach((item, i) => {
+      const key = keys[i];
+      if (key && key !== item.rec.data.sort_key) update<'item'>(item.id, { sort_key: key });
+    });
+  });
+}
+
+/**
+ * A key for a new item at the top of a list. Keys at the top halve each
+ * time, so after many adds they would pass the 200-character limit and
+ * adding would fail; the list is renumbered first when they get long.
+ */
+export function topKey(listId: string): string {
+  let first = itemsOf(listId)[0]?.rec.data.sort_key ?? null;
+  let key = keyBetween(null, first);
+  if (key.length > LONG_KEY) {
+    renumber(listId);
+    first = itemsOf(listId)[0]?.rec.data.sort_key ?? null;
+    key = keyBetween(null, first);
+  }
+  return key;
 }

@@ -879,6 +879,9 @@ textarea.txt {
 }
 
 .it-t {
+  /* Lets a long note end in "…" instead of widening the page (L-13). */
+  flex: 1;
+  min-width: 0;
   overflow-wrap: anywhere;
   transition: color 0.2s;
 }
@@ -1928,8 +1931,9 @@ dialog.sheet::backdrop {
 }
 /* Phones: the six weeks share the height left between the header and the drawer. */
 .month-wrap.phone .mstage {
+  /* Never below six 42px rows plus the weekday line. */
   --grid-h: max(
-    300px,
+    294px,
     calc(100dvh - var(--top, 300px) - 80px - 57px - env(safe-area-inset-bottom, 0px) - 8px)
   );
   height: var(--grid-h);
@@ -1979,6 +1983,22 @@ dialog.sheet::backdrop {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+/* Each title carries its marker: whose, waiting for a yes, private (P-8). */
+.mtitles .mtitle {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  min-width: 0;
+}
+.mtitles .mtitle .mk {
+  margin-top: 0;
+  transform: scale(0.8);
+  transform-origin: left center;
+  width: 18px;
+}
+.mtitles .mtitle .mk-ours {
+  width: 20px;
 }
 /* Both free this evening: a hollow ring (shape, not colour). */
 .mfree {
@@ -2054,13 +2074,26 @@ dialog.sheet::backdrop {
   display: grid;
   grid-template-columns: 56px repeat(7, minmax(0, 1fr));
 }
-.wg-head span {
+.wg-head span,
+.wg-day {
   padding: 8px 6px;
   font-size: 0.8125rem;
   color: var(--muted);
   border-bottom: 1px solid var(--line);
+  text-align: left;
 }
-.wg-head span.today {
+.wg-day {
+  min-height: 36px;
+  border-radius: 8px 8px 0 0;
+}
+.wg-day:hover {
+  background: var(--sunk);
+}
+.wg-day[aria-pressed="true"] {
+  box-shadow: inset 0 -3px 0 var(--ink);
+  color: var(--ink);
+}
+.wg-day.today {
   color: var(--ink);
 }
 .wg-head b {
@@ -2178,6 +2211,36 @@ dialog.sheet::backdrop {
   position: absolute;
   top: 2px;
   right: 2px;
+  z-index: 2;
+  min-width: 28px;
+  min-height: 24px;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+}
+.wg-hidden:hover {
+  color: var(--ink);
+}
+/* The time now, on today's column (P-7). */
+.wg-now {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: var(--danger, #c0392b);
+  z-index: 1;
+  pointer-events: none;
+}
+.wg-now::before {
+  content: "";
+  position: absolute;
+  left: -4px;
+  top: -3px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: inherit;
 }
 
 /* Countdown tiles are buttons now (open the plan); the last one adds a milestone. */
@@ -2894,6 +2957,19 @@ fieldset.reminders > legend {
   justify-content: space-between;
   gap: 12px;
 }
+/* Over the week and month grids: one line until opened, so the grid keeps its height. */
+.news.shut {
+  padding-block: 6px;
+  margin-bottom: 6px;
+}
+.news.shut .news-head h2 {
+  margin: 0;
+  margin-inline-end: auto;
+}
+.news-n {
+  color: var(--muted);
+  font-weight: 500;
+}
 @media (min-width: 880px) {
   main.v-search {
     max-width: 760px;
@@ -3205,6 +3281,11 @@ fieldset.reminders > legend {
   .ltabs-col {
     position: sticky;
     top: 24px;
+    /* Many lists: the column scrolls on its own, so every list stays in
+       reach while you're far down a long one (review 0008, L-2). */
+    max-height: calc(100dvh - 48px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
   }
   .ltabs-col .ltabs {
     position: static;
@@ -3219,6 +3300,11 @@ fieldset.reminders > legend {
 }
 .xviews .chip .n {
   color: var(--muted);
+}
+/* A pressed chip's count reads on its fill (L-15). */
+.xviews .chip[aria-pressed="true"] .n {
+  color: inherit;
+  opacity: 0.85;
 }
 .lfilters {
   margin: 4px 0 8px;
@@ -3469,4 +3555,37 @@ body:has(.bulkbar) .fab {
   object-fit: cover;
   border-radius: 14px;
   background: #000;
+}
+
+/* The open list's name and who sees it (review 0008, L-1). */
+.ltitle {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  margin-right: auto;
+}
+.ltitle h2 {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+/* "N more need your answer": one line instead of a stack of cards (P-2). */
+.asks-more {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 8px 14px;
+  margin-bottom: 12px;
+  border-radius: 14px;
+  background: var(--ours-soft);
+  color: var(--ink);
+  text-decoration: none;
+  font-weight: 600;
+}
+.cd-more .cd-l {
+  font-weight: 600;
 }

@@ -5,6 +5,7 @@ import { parseQuickAdd, type QuickAddContext, type QuickAddResult } from './quic
 type Expected = Partial<{
   title: string;
   date: string;
+  endDate: string;
   time: string;
   endTime: string;
   allDay: boolean;
@@ -23,6 +24,7 @@ function expand(e: Expected): Omit<QuickAddResult, 'tokens'> {
   return {
     title: e.title ?? '',
     date: e.date ?? null,
+    endDate: e.endDate ?? null,
     time: e.time ?? null,
     endTime: e.endTime ?? null,
     allDay: e.allDay ?? false,
@@ -153,7 +155,63 @@ const cases: [string, QuickAddContext, Expected][] = [
   ['trip apr 31', TUE, { title: 'trip apr 31' }],
   ['trip 2026-11-14', TUE, { title: 'trip', date: '2026-11-14', allDay: true }],
   ['trip 2026-02-30', TUE, { title: 'trip 2026-02-30' }],
-  ['trip 11/14', TUE, { title: 'trip 11/14' }],
+  ['trip 11/14', TUE, { title: 'trip', date: '2026-11-14', allDay: true }],
+  ['trip 14/11', { ...TUE, dateOrder: 'DM' }, { title: 'trip', date: '2026-11-14', allDay: true }],
+  ['trip 11/2', TUE, { title: 'trip', date: '2027-11-02', allDay: true }],
+  ['trip 1/5/27', TUE, { title: 'trip', date: '2027-01-05', allDay: true }],
+  ['trip 13/14', TUE, { title: 'trip 13/14' }],
+  ['split 1/2 the bill', TUE, { title: 'split the bill', date: '2027-01-02', allDay: true }],
+  ['dentist in 3 days', TUE, { title: 'dentist', date: '2026-11-06', allDay: true }],
+  ['dentist in 2 weeks 9am', TUE, { title: 'dentist', date: '2026-11-17', time: '09:00' }],
+  ['visit in a week', TUE, { title: 'visit', date: '2026-11-10', allDay: true }],
+  ['tidy next week', TUE, { title: 'tidy', date: '2026-11-09', allDay: true }],
+  ['tidy next week', SUN, { title: 'tidy', date: '2026-11-09', allDay: true }],
+  [
+    'camping sat-sun',
+    TUE,
+    { title: 'camping', date: '2026-11-07', endDate: '2026-11-08', allDay: true },
+  ],
+  [
+    'trip fri to mon',
+    TUE,
+    { title: 'trip', date: '2026-11-06', endDate: '2026-11-09', allDay: true },
+  ],
+  [
+    'holiday dec 3-10',
+    TUE,
+    { title: 'holiday', date: '2026-12-03', endDate: '2026-12-10', allDay: true },
+  ],
+  [
+    'holiday 3-10 dec',
+    TUE,
+    { title: 'holiday', date: '2026-12-03', endDate: '2026-12-10', allDay: true },
+  ],
+  [
+    'ski dec 28 - jan 3',
+    TUE,
+    { title: 'ski', date: '2026-12-28', endDate: '2027-01-03', allDay: true },
+  ],
+  ['lunch 12 for 2 hours', TUE, { title: 'lunch 12 for 2 hours' }],
+  ['lunch at 12 for 2 hours', TUE, { title: 'lunch', time: '12:00', endTime: '14:00' }],
+  ['call 3pm for 30 mins', TUE, { title: 'call', time: '15:00', endTime: '15:30' }],
+  ['walk 6pm for an hour', TUE, { title: 'walk', time: '18:00', endTime: '19:00' }],
+  ['nap 2pm for half an hour', TUE, { title: 'nap', time: '14:00', endTime: '14:30' }],
+  ['study for 2 hours', TUE, { title: 'study for 2 hours' }],
+  [
+    'rent on the 1st every month',
+    TUE,
+    { title: 'rent', date: '2026-12-01', rrule: 'FREQ=MONTHLY;BYMONTHDAY=1' },
+  ],
+  [
+    'bins every month on the 15th',
+    TUE,
+    { title: 'bins', date: '2026-11-15', rrule: 'FREQ=MONTHLY;BYMONTHDAY=15' },
+  ],
+  [
+    'pay monthly on the 3rd',
+    TUE,
+    { title: 'pay', date: '2026-11-03', rrule: 'FREQ=MONTHLY;BYMONTHDAY=3' },
+  ],
   ['trip nov 14 and dec 5', TUE, { title: 'trip and dec 5', date: '2026-11-14', allDay: true }],
   // times
   ['2pm', TUE, { time: '14:00' }],
@@ -167,7 +225,10 @@ const cases: [string, QuickAddContext, Expected][] = [
   ['call 12pm', TUE, { title: 'call', time: '12:00' }],
   ['call 11:45am', TUE, { title: 'call', time: '11:45' }],
   ['call 19:00', TUE, { title: 'call', time: '19:00' }],
-  ['call 7:05', TUE, { title: 'call', time: '07:05' }],
+  ['call 7:05', TUE, { title: 'call', time: '19:05' }],
+  ['call 07:05', TUE, { title: 'call', time: '07:05' }],
+  ['Haircut 2:30', TUE, { title: 'Haircut', time: '14:30' }],
+  ['Coffee 9:15', TUE, { title: 'Coffee', time: '09:15' }],
   ['call 13pm', TUE, { title: 'call 13pm' }],
   ['call 7:75pm', TUE, { title: 'call 7:75pm' }],
   ['call 25:00', TUE, { title: 'call 25:00' }],

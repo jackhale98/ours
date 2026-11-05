@@ -14,7 +14,7 @@ import { computed } from '@preact/signals';
 import { partnerMissing } from './invite';
 import { allLists, dueOf, featuresOf, type ItemEntry, itemsOf, type ListEntry } from './lists';
 import { byKind, type Entry, partner, viewer } from './model';
-import { awaitingMe, today } from './select';
+import { awaitingMe, stillAhead, today } from './select';
 
 export type Waiting =
   | { kind: 'invite'; id: string }
@@ -22,14 +22,7 @@ export type Waiting =
   | { kind: 'declined'; id: string; entry: Entry }
   | { kind: 'task'; id: string; item: ItemEntry; list: ListEntry };
 
-/** Whether an event's last day is today or later. */
-function upcoming(e: Entry, t: string): boolean {
-  if (e.rec.kind !== 'event') return false;
-  const d = e.rec.data;
-  // All-day ends are exclusive: a one-day plan on the 4th ends on the 5th.
-  const last = d.all_day ? addDays(d.end.slice(0, 10), -1) : d.end.slice(0, 10);
-  return last >= t;
-}
+const upcoming = stillAhead;
 
 /** Tasks worth raising: due by tomorrow (or overdue), mine or nobody's. */
 export function tasksFor(horizonDays: number): { item: ItemEntry; list: ListEntry }[] {

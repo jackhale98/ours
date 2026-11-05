@@ -3,7 +3,9 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import {
   createEvent,
   type EventData,
+  exceptionsLost,
   findEntry,
+  keptExceptions,
   loadEntries,
   setBackend,
   setException,
@@ -68,5 +70,48 @@ describe('one day of a repeating plan', () => {
     setException(id, '2026-11-02T08:00', null);
     const e = findEntry(id);
     expect(e?.rec.kind === 'event' && e.rec.data.except).toBeFalsy();
+  });
+});
+
+describe('keptExceptions', () => {
+  const skipped: EventData = {
+    ...weekly,
+    except: [
+      { at: '2026-11-09T08:00', to: null },
+      { at: '2026-11-16T08:00', to: { start: '2026-11-17T08:00', end: '2026-11-17T09:00' } },
+    ],
+  };
+
+  it('keeps changed days for edits that leave the days alone', () => {
+    expect(keptExceptions(skipped, { title: 'Physio (knee)', location: 'Clinic' })).toBe(
+      skipped.except,
+    );
+    expect(exceptionsLost(skipped, { notes: 'Bring the band' })).toBe(0);
+  });
+
+  it('moves the days to the new time when only the time changes', () => {
+    const kept = keptExceptions(skipped, { start: '2026-11-02T09:30', end: '2026-11-02T10:30' });
+    expect(kept.map((x) => x.at)).toEqual(['2026-11-09T09:30', '2026-11-16T09:30']);
+    // A day moved on its own keeps where it was moved to.
+    expect(kept[1]?.to?.start).toBe('2026-11-17T08:00');
+  });
+
+  it('drops them when the days change, and says how many', () => {
+    for (const patch of [
+      { start: '2026-11-03T08:00' },
+      { rrule: 'FREQ=DAILY' },
+      { rrule: null },
+      { all_day: true },
+      { tz: 'America/New_York' },
+      { tz: null },
+    ] satisfies Partial<EventData>[]) {
+      expect(keptExceptions(skipped, patch)).toEqual([]);
+      expect(exceptionsLost(skipped, patch)).toBe(2);
+    }
+  });
+
+  it('has nothing to lose without changed days', () => {
+    expect(keptExceptions(weekly, { rrule: null })).toEqual([]);
+    expect(exceptionsLost(weekly, { rrule: null })).toBe(0);
   });
 });

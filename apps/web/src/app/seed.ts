@@ -13,8 +13,10 @@ import {
   replaceAll,
   type Slot,
   setViewer,
+  store,
   update,
 } from './model';
+import { seenAt } from './news';
 import { dow, today, zone } from './select';
 
 export function seedDemo(): void {
@@ -26,6 +28,8 @@ function seedAll(): void {
   const t = today.value;
   const d = (n: number) => addDays(t, n);
   let lisbon = '';
+  // A few of Alex's changes count as new, so the demo shows "New from Alex" (review 0009, P-15).
+  const fromAlex: string[] = [];
   const as = (slot: Slot, fn: () => void) => {
     setViewer(slot);
     fn();
@@ -112,7 +116,9 @@ function seedAll(): void {
   as('b', () => {
     createEvent(ev('Late shift', 0, '15:00', 'b', { mins: 480 }));
     createEvent(ev('Yoga', 2, '07:30', 'b'));
-    createEvent(ev('Climbing', 3, '19:00', 'b', { location: 'Brooklyn Boulders', mins: 120 }));
+    fromAlex.push(
+      createEvent(ev('Climbing', 3, '19:00', 'b', { location: 'Brooklyn Boulders', mins: 120 })),
+    );
     createEvent(ev('Therapy', 2, '12:00', 'b', { privacy: 'busy' }));
     const parents = createEvent(
       ev('Dinner at my parents’', 5, '18:00', 'both', {
@@ -123,7 +129,7 @@ function seedAll(): void {
     );
     addComment(parents, 'Mom is making the lasagna. Can we do it?');
     const trip = { ...ev('Work trip · Chicago', 9, null, 'b', { away: true }), end: d(11) };
-    createEvent(trip);
+    fromAlex.push(createEvent(trip));
   });
 
   setViewer('a');
@@ -250,4 +256,18 @@ function seedAll(): void {
     note: 'Can we keep Sunday morning slow this week? I’ve been running on empty.',
   });
   setViewer('a');
+
+  const drive = store.value.entries.find(
+    (e) => e.rec.kind === 'comment' && e.rec.data.text.startsWith('I can drive'),
+  );
+  if (drive) fromAlex.push(drive.id);
+  const marked = new Set(fromAlex);
+  store.value = {
+    ...store.value,
+    entries: store.value.entries.map((e) => (marked.has(e.id) ? { ...e, by: 'b' } : e)),
+  };
+  const first = Math.min(
+    ...store.value.entries.filter((e) => marked.has(e.id)).map((e) => e.rec.updated_at),
+  );
+  if (seenAt.value >= first) seenAt.value = first - 1;
 }

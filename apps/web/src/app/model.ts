@@ -328,19 +328,49 @@ export function createEvent(data: EventData): string {
  * Changes a plan. A private plan's shared busy marker is kept in step (times,
  * repeat, away, whose), so the partner's "Busy" moves with it.
  */
+/**
+ * A series' skipped and moved days after an edit. They name days by their
+ * original start, so:
+ * - only the time of day changes: they follow it to the new time (review
+ *   0009, P-6: they used to come back silently);
+ * - the days themselves change (date, repeat, all day, zone): they named days
+ *   of the old pattern and are dropped; the form says so first
+ *   (`exceptionsLost`).
+ */
+type Except = NonNullable<EventData['except']>[number];
+export function keptExceptions(before: EventData, patch: Partial<EventData>): Except[] {
+  const list = before.except ?? [];
+  if (!list.length) return list;
+  // `in`, not `??`: an edit that sets the repeat or zone to null is a change.
+  const after = <K extends keyof EventData>(k: K): EventData[K] =>
+    k in patch ? (patch[k] as EventData[K]) : before[k];
+  const start = after('start');
+  const sameDays =
+    after('rrule') === before.rrule &&
+    after('all_day') === before.all_day &&
+    after('tz') === before.tz &&
+    start.slice(0, 10) === before.start.slice(0, 10);
+  if (!sameDays) return [];
+  if (start === before.start || before.all_day) return list;
+  const time = start.slice(10);
+  return list.map((x) => ({ ...x, at: x.at.slice(0, 10) + time }));
+}
+
+/** How many skipped or moved days an edit would bring back (the form warns). */
+export function exceptionsLost(before: EventData, patch: Partial<EventData>): number {
+  const list = before.except ?? [];
+  return list.length && !keptExceptions(before, patch).length ? list.length : 0;
+}
+
 export function updateEvent(id: string, patch: Partial<EventData>): void {
   const e = findEntry(id);
   if (e?.rec.kind !== 'event') return;
   const before = e.rec.data;
-  // Changing when the series happens clears its changed days: they named
-  // days of the old pattern.
-  const retimed =
-    ('start' in patch && patch.start !== before.start) ||
-    ('rrule' in patch && patch.rrule !== before.rrule) ||
-    ('all_day' in patch && patch.all_day !== before.all_day) ||
-    ('tz' in patch && patch.tz !== before.tz);
+  const keep = keptExceptions(before, patch);
   const full =
-    retimed && before.except?.length && !('except' in patch) ? { ...patch, except: [] } : patch;
+    before.except?.length && !('except' in patch) && keep !== before.except
+      ? { ...patch, except: keep }
+      : patch;
   bulk(() => {
     update<'event'>(id, full);
     const d = { ...e.rec.data, ...full } as EventData;

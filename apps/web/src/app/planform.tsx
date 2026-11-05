@@ -10,6 +10,7 @@ import { useState } from 'preact/hooks';
 import {
   createEvent,
   type EventData,
+  exceptionsLost,
   findEntry,
   nameOf,
   partner,
@@ -85,6 +86,8 @@ export function PlanForm({ id, draft }: { id: string | null; draft?: Draft }) {
     return allDay0 ? defs.all_day : defs.timed;
   });
   const [error, setError] = useState<string | null>(null);
+  /** Saving would bring back skipped or moved days: asked once (review 0009, P-6). */
+  const [lostOk, setLostOk] = useState(false);
 
   const custom = !!repeat && !REPEAT_CHOICES.some(([v]) => v === repeat);
 
@@ -125,6 +128,15 @@ export function PlanForm({ id, draft }: { id: string | null; draft?: Draft }) {
     const isPrivate = who === 'me' && priv;
     try {
       if (existing?.rec.kind === 'event') {
+        const lost = exceptionsLost(existing.rec.data, fields);
+        if (lost && !lostOk) {
+          setLostOk(true);
+          return setError(
+            `This changes which days the plan repeats on, so ${lost} skipped or moved ${
+              lost === 1 ? 'day comes' : 'days come'
+            } back. Save again to go ahead.`,
+          );
+        }
         let target = existing.id;
         if ((existing.rec.data.privacy === 'busy') !== isPrivate) {
           target = setEventPrivacy(existing.id, isPrivate);
@@ -172,6 +184,12 @@ export function PlanForm({ id, draft }: { id: string | null; draft?: Draft }) {
       <h2 id="pf-title" class="sr">
         {editing ? 'Edit plan' : 'New plan'}
       </h2>
+      {editing && base.rrule && (
+        <p class="note small">
+          This changes every day of this repeating plan. To change one day, use Move this day on
+          that day.
+        </p>
+      )}
       <form class="stack gap planform" onSubmit={save} noValidate>
         <div class="field">
           <label for="pf-name">What</label>

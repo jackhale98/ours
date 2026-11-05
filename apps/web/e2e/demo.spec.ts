@@ -204,7 +204,7 @@ test('a private plan is hidden from the partner but visible as Busy', async ({ p
 
 test('event sheet: notes and delete with undo', async ({ page }) => {
   await openDemo(page);
-  await page.getByRole('button', { name: /Dinner with Jordan/ }).click();
+  await page.getByRole('button', { name: /Ours: Dinner with Jordan/ }).click();
   const dialog = page.getByRole('dialog', { name: 'Dinner with Jordan & Priya' });
   await expect(dialog.getByText('I can drive if you grab the wine.')).toBeVisible();
   await dialog.getByRole('textbox', { name: 'Note' }).fill('Booked a table.');
@@ -212,14 +212,14 @@ test('event sheet: notes and delete with undo', async ({ page }) => {
   await expect(dialog.getByText('Booked a table.')).toBeVisible();
   await dialog.getByRole('button', { name: 'Delete plan' }).click();
   await dialog.getByRole('button', { name: 'Tap again to confirm' }).click();
-  await expect(page.getByRole('button', { name: /Dinner with Jordan/ })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: /Ours: Dinner with Jordan/ })).toHaveCount(0);
   await page.getByRole('button', { name: 'Undo' }).click();
-  await expect(page.getByRole('button', { name: /Dinner with Jordan/ })).toBeVisible();
+  await expect(page.getByRole('button', { name: /Ours: Dinner with Jordan/ })).toBeVisible();
 });
 
 test('escape closes a sheet and returns focus', async ({ page }) => {
   await openDemo(page);
-  const trigger = page.getByRole('button', { name: /Dinner with Jordan/ });
+  const trigger = page.getByRole('button', { name: /Ours: Dinner with Jordan/ });
   await trigger.click();
   await expect(page.getByRole('dialog')).toBeVisible();
   await page.keyboard.press('Escape');

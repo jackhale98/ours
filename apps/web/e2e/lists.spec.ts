@@ -61,7 +61,7 @@ test('a date-ideas list gets "pick one for us"', async ({ page }) => {
   const dialog = await newList(page, 'Date ideas', 'Rainy days');
   await dialog.getByRole('button', { name: 'Make list' }).click();
   await expect(page.getByRole('button', { name: 'Pick one for us' })).toBeDisabled();
-  await page.getByRole('textbox', { name: 'Add an idea' }).fill('Museum and noodles');
+  await page.getByRole('textbox', { name: 'Add to Rainy days' }).fill('Museum and noodles');
   await page.getByRole('button', { name: 'Add', exact: true }).click();
   await page.getByRole('button', { name: 'Pick one for us' }).click();
   await expect(page.getByRole('heading', { name: 'Museum and noodles' })).toBeVisible();

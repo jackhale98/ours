@@ -7,7 +7,6 @@
  * details.
  */
 import { parseQuickAdd } from '@ours/core/parse';
-import { keyBetween } from '@ours/core/schema';
 import { signal } from '@preact/signals';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { LENGTH_LABEL } from '../freetime';
@@ -50,10 +49,11 @@ import {
   setListPrivacy,
   startOver,
   toggleHeart,
+  topKey,
   updateItems,
 } from '../lists';
 import { nameOf, partner, put, remove, type Slot, settings, update, viewer } from '../model';
-import { fmtLong, nextFreeEvening, relDay, repeatText, today } from '../select';
+import { DATE_ORDER, fmtLong, nextFreeEvening, relDay, repeatText, today } from '../select';
 import { openEvent, openQuick } from '../sheets';
 import { CloseButton, colorVar, Icon, Sheet, Switch, toast } from '../ui';
 import { CrossViewPane, CrossViews, crossView } from './ListViews';
@@ -190,6 +190,33 @@ function itemSub(item: ItemEntry, f: ReadonlySet<Feature>): string[] {
   return out;
 }
 
+/**
+ * Every tick says so, with Undo; ticks in quick succession share one
+ * message and one undo, so a mis-tick in the shop is one tap to fix
+ * (review 0008, L-6).
+ */
+let tickRun: { names: string[]; undos: (() => void)[]; at: number } | null = null;
+function noteTick(name: string, undo: () => void, next?: string | null): void {
+  const now = Date.now();
+  if (!tickRun || now - tickRun.at > 5000) tickRun = { names: [], undos: [], at: now };
+  const run = tickRun;
+  run.names.push(name);
+  run.undos.push(undo);
+  run.at = now;
+  const message =
+    run.names.length > 1
+      ? `Ticked ${run.names.length} items.`
+      : next !== undefined
+        ? next
+          ? `Done. Next: ${relDay(next)}.`
+          : 'Done.'
+        : `Ticked “${name}”.`;
+  toast(message, () => {
+    for (const u of [...run.undos].reverse()) u();
+    if (tickRun === run) tickRun = null;
+  });
+}
+
 /** One item. `assign` shows who's on it even if the list doesn't (the check-in shares things out). */
 export function ItemRow({
   item,
@@ -254,11 +281,16 @@ export function ItemRow({
                   return;
                 }
                 const { undo, next } = completeItem(item);
-                if (f.has('did')) didIt(item);
-                if (d.repeat) {
-                  setDone(false);
-                  toast(next ? `Done. Next: ${relDay(next)}.` : 'Done.', undo);
-                }
+                const undid = f.has('did') ? didIt(item) : null;
+                if (d.repeat) setDone(false);
+                noteTick(
+                  d.text,
+                  () => {
+                    undid?.();
+                    undo();
+                  },
+                  d.repeat ? next : undefined,
+                );
               }, 420);
             }}
           />
@@ -347,10 +379,11 @@ function AddItem({ list, placeholder }: { list: ListEntry; placeholder: string }
     e.preventDefault();
     const v = text.trim();
     if (!v) return;
-    const first = itemsOf(list.id)[0];
     // "Take out the bins every monday", "Renew passport by mar 1": a due date
     // and repeat come from the words (only date and repeat phrases are taken out).
-    const parsed = f.has('due') ? parseQuickAdd(v, { today: today.value }) : null;
+    const parsed = f.has('due')
+      ? parseQuickAdd(v, { today: today.value, dateOrder: DATE_ORDER })
+      : null;
     const taken = parsed?.tokens.filter((t) => t.type === 'date' || t.type === 'repeat') ?? [];
     let name = v;
     for (const t of [...taken].sort((a, b) => b.start - a.start)) {
@@ -370,7 +403,7 @@ function AddItem({ list, placeholder }: { list: ListEntry; placeholder: string }
         done: false,
         assignee: null,
         due: parsed?.date ?? (repeat ? today.value : null),
-        sort_key: keyBetween(null, first?.rec.data.sort_key ?? null),
+        sort_key: topKey(list.id),
         ...(repeat ? { repeat } : {}),
         ...(f.has('sections') && section.trim() ? { section: section.trim().slice(0, 60) } : {}),
       },
@@ -390,7 +423,7 @@ function AddItem({ list, placeholder }: { list: ListEntry; placeholder: string }
         onInput={(e) => setText(e.currentTarget.value)}
         placeholder={placeholder}
         autocomplete="off"
-        aria-label={placeholder}
+        aria-label={`Add to ${list.rec.data.name}`}
       />
       {f.has('sections') && (
         <>
@@ -425,7 +458,8 @@ const placeholderFor = (list: ListEntry) => {
   if (list.rec.data.template === 'gifts' || list.rec.data.kind === 'gifts')
     return 'Add a gift idea';
   if (!f.has('tick') && f.has('plan')) return 'Add an idea';
-  return `Add to ${list.rec.data.name}`;
+  // The list's name is its heading now (review 0008, L-1).
+  return 'Add an item';
 };
 
 export function planIdea(text: string) {
@@ -578,7 +612,10 @@ function ListBody({ list }: { list: ListEntry }) {
   const f = featuresOf(list);
   const all = itemsOf(list.id);
   const open = applyFilters(f.has('tick') ? all.filter((i) => !i.rec.data.done) : all, f);
-  const done = f.has('tick') ? all.filter((i) => i.rec.data.done) : [];
+  // Most recently ticked first, so a mis-tick is at the top (L-6).
+  const done = f.has('tick')
+    ? all.filter((i) => i.rec.data.done).sort((a, b) => b.rec.updated_at - a.rec.updated_at)
+    : [];
   const priv = list.rec.data.private;
   const plan = planOf(list);
   const toGet = f.has('price')
@@ -1224,16 +1261,21 @@ export function ListsView() {
   const view = crossView.value;
   const cur = view ? undefined : (lists.find((l) => l.id === currentList.value) ?? lists[0]);
   const s = listSheet.value;
+  // Keep the open list's tab in view, however it was opened (search, a new
+  // list, a plan's checklist): the row can be far wider than the screen (L-1).
+  const curId = cur?.id;
+  useEffect(() => {
+    if (!curId) return;
+    document
+      .querySelector('.ltabs .ltab[aria-pressed="true"]')
+      ?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  }, [curId]);
   return (
     <>
       <header class="vhead">
         <div>
           <p class="eyebrow">
-            {cur
-              ? cur.rec.data.private
-                ? 'Just for you'
-                : `Shared with ${nameOf(partner.value)}`
-              : 'Lists'}
+            {lists.length} {lists.length === 1 ? 'list' : 'lists'}
           </p>
           <h1>Lists</h1>
         </div>
@@ -1289,7 +1331,19 @@ export function ListsView() {
             {cur ? (
               <>
                 <div class="listbar">
-                  <span class="small muted">{startLabel(cur)}</span>
+                  {/* The list's own name, and who sees it (review 0008, L-1). */}
+                  <div class="ltitle">
+                    <h2 class="h3" id="list-h">
+                      {cur.rec.data.private && <Icon name="lock" size={15} />}
+                      {cur.rec.data.name}
+                    </h2>
+                    <span class="small muted">
+                      {cur.rec.data.private
+                        ? 'Just for you'
+                        : `Shared with ${nameOf(partner.value)}`}{' '}
+                      · {startLabel(cur)}
+                    </span>
+                  </div>
                   {itemsOf(cur.id).length > 1 && (
                     <button
                       type="button"
