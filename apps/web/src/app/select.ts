@@ -193,12 +193,44 @@ export interface Row {
   moved: boolean;
 }
 
-function hhmm(instant: number): string {
-  return new Date(instant).toLocaleTimeString('en-GB', {
-    timeZone: zone,
-    hour: '2-digit',
-    minute: '2-digit',
-  });
+/** One formatter for every row: making one per call was a large share of render time (P-1). */
+const HHMM = new Intl.DateTimeFormat('en-GB', {
+  timeZone: zone,
+  hour: '2-digit',
+  minute: '2-digit',
+  hourCycle: 'h23',
+});
+export function hhmm(instant: number): string {
+  return HHMM.format(instant);
+}
+
+/**
+ * Whether a plan's dates could touch [first, end): a cheap check on the date
+ * text, with two days' slack for zones, before any zone conversion (P-1).
+ */
+function nearWindow(start: string, end: string, lo: string, hi: string): boolean {
+  return end.slice(0, 10) >= lo && start.slice(0, 10) <= hi;
+}
+
+/**
+ * Each plan's rows per window, kept with the record itself: a change to one
+ * plan recomputes that plan only (P-1). Keyed by window, viewer and the
+ * plan's note count, which rows show.
+ */
+type DayRow = { day: string; row: Row };
+const rowCache = new WeakMap<Entry, Map<string, DayRow[]>>();
+function cachedRows(entry: Entry, key: string, make: () => DayRow[]): DayRow[] {
+  let byKey = rowCache.get(entry);
+  if (!byKey) {
+    byKey = new Map();
+    rowCache.set(entry, byKey);
+  }
+  const hit = byKey.get(key);
+  if (hit) return hit;
+  const rows = make();
+  if (byKey.size > 8) byKey.delete(byKey.keys().next().value as string);
+  byKey.set(key, rows);
+  return rows;
 }
 
 function rowsFor(entry: Entry, from: number, to: number): { day: string; row: Row }[] {
@@ -209,6 +241,7 @@ function rowsFor(entry: Entry, from: number, to: number): { day: string; row: Ro
     return [];
   const d = r.data;
   const occs: Occurrence[] = expand(d, from, to, zone);
+  const comments = r.kind === 'event' ? commentsFor(entry.id).length : 0;
   return occs.flatMap((o) => {
     const base: Row = {
       origin: 'plan',
@@ -228,7 +261,7 @@ function rowsFor(entry: Entry, from: number, to: number): { day: string; row: Ro
       proposedBy: r.kind === 'event' ? r.data.proposed_by : null,
       location: r.kind === 'event' ? r.data.location : null,
       repeat: repeatText(d.rrule),
-      comments: r.kind === 'event' ? commentsFor(entry.id).length : 0,
+      comments,
       privacy: r.kind === 'event' ? r.data.privacy : 'busy',
       zoneNote:
         !d.all_day && d.tz && zoneDiffers(d.tz, zone, o.start)
@@ -244,10 +277,19 @@ function rowsFor(entry: Entry, from: number, to: number): { day: string; row: Ro
   });
 }
 
-function importRows(entry: SnapshotEntry, from: number, to: number): { day: string; row: Row }[] {
+function importRows(
+  entry: SnapshotEntry,
+  from: number,
+  to: number,
+  lo: string,
+  hi: string,
+): { day: string; row: Row }[] {
   const d = entry.rec.data;
   return d.items.flatMap((item, i) =>
-    expand({ ...item, rrule: null }, from, to, zone).flatMap((o) => {
+    (nearWindow(item.start, item.end, lo, hi)
+      ? expand({ ...item, rrule: null }, from, to, zone)
+      : []
+    ).flatMap((o) => {
       const row: Row = {
         origin: 'import',
         importer: d.importer,
@@ -291,6 +333,7 @@ export interface Day {
   bothFree: boolean;
 }
 
+/** The last few windows, oldest dropped first (it used to clear all at once). */
 const agendaCache = new Map<string, { data: unknown; days: Day[] }>();
 
 /** Days from today. Memoised on the store, viewer and date, so views can share it. */
@@ -303,10 +346,16 @@ export function agendaFrom(first: string, days: number): Day[] {
   const data = visible.value;
   const key = `${first}|${days}|${today.value}`;
   const hit = agendaCache.get(key);
-  if (hit && hit.data === data) return hit.days;
-  if (agendaCache.size > 12) agendaCache.clear();
+  if (hit && hit.data === data) {
+    // Most recently used last.
+    agendaCache.delete(key);
+    agendaCache.set(key, hit);
+    return hit.days;
+  }
   const result = computeAgenda(first, days);
+  agendaCache.delete(key);
   agendaCache.set(key, { data, days: result });
+  while (agendaCache.size > 24) agendaCache.delete(agendaCache.keys().next().value as string);
   return result;
 }
 
@@ -341,8 +390,23 @@ function computeAgenda(first: string, days: number): Day[] {
     list.push(row);
     byDay.set(day, list);
   };
-  for (const e of [...byKind('event'), ...byKind('busy_stub')]) rowsFor(e, from, to).forEach(add);
-  for (const s of visibleSnapshots()) importRows(s, from, to).forEach(add);
+  const endDay = addDays(first, days);
+  // The window's dates with two days' slack for zones, worked out once.
+  const lo = addDays(first, -2);
+  const hi = addDays(endDay, 2);
+  const who = viewer.value;
+  for (const e of [...byKind('event'), ...byKind('busy_stub')]) {
+    if (e.rec.kind !== 'event' && e.rec.kind !== 'busy_stub') continue;
+    const d = e.rec.data;
+    // Plans that don't repeat and are nowhere near: skipped without any zone work.
+    if (!d.rrule && !nearWindow(d.start, d.end, lo, hi)) continue;
+    const notes = e.rec.kind === 'event' ? commentsFor(e.id).length : 0;
+    cachedRows(e, `${from}|${to}|${who}|${notes}`, () => rowsFor(e, from, to)).forEach(add);
+  }
+  for (const s of visibleSnapshots())
+    cachedRows(s, `${from}|${to}|${first}|${endDay}`, () =>
+      importRows(s, from, to, lo, hi),
+    ).forEach(add);
   return Array.from({ length: days }, (_, i) => {
     const date = addDays(first, i);
     const rows = (byDay.get(date) ?? []).sort(sortRows);

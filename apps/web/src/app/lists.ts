@@ -13,7 +13,7 @@ import {
   uuidv7,
 } from '@ours/core/schema';
 import { addDays, nextDueDate } from '@ours/core/time';
-import { signal } from '@preact/signals';
+import { computed, signal } from '@preact/signals';
 import {
   bulk,
   byKind,
@@ -198,10 +198,15 @@ function defaultsFor(kind: ListKind): Feature[] {
   return ['tick', 'who', 'due'];
 }
 
-export function featuresOf(list: ListEntry): Set<Feature> {
+const featureCache = new WeakMap<ListEntry, ReadonlySet<Feature>>();
+/** A list's features; worked out once per version of the list (rows ask often). */
+export function featuresOf(list: ListEntry): ReadonlySet<Feature> {
+  const hit = featureCache.get(list);
+  if (hit) return hit;
   const f = new Set(list.rec.data.features ?? defaultsFor(list.rec.data.kind));
   // Who's on it only means something when the list is shared.
   if (list.rec.data.private) f.delete('who');
+  featureCache.set(list, f);
   return f;
 }
 export const has = (list: ListEntry, f: Feature) => featuresOf(list).has(f);
@@ -226,10 +231,48 @@ export function allLists(): ListEntry[] {
   return byKind('list') as ListEntry[];
 }
 
+/** In list order; the same on every device even if two keys tie (review 0008, L-14). */
+export const bySortKey = (a: ItemEntry, b: ItemEntry) =>
+  a.rec.data.sort_key < b.rec.data.sort_key
+    ? -1
+    : a.rec.data.sort_key > b.rec.data.sort_key
+      ? 1
+      : a.id < b.id
+        ? -1
+        : a.id > b.id
+          ? 1
+          : 0;
+
+/** Items by list, sorted once per change of the store (review 0008, L-5). */
+const itemIndex = computed(() => {
+  const lists = new Map<string, ItemEntry[]>();
+  for (const i of byKind('item') as ItemEntry[]) {
+    const list = lists.get(i.rec.data.list_id);
+    if (list) list.push(i);
+    else lists.set(i.rec.data.list_id, [i]);
+  }
+  for (const list of lists.values()) Object.freeze(list.sort(bySortKey));
+  return lists;
+});
+const NO_ITEMS: readonly ItemEntry[] = Object.freeze([]);
+
+/** Each list's section names, in the order they first appear (once per change). */
+const sectionIndex = computed(() => {
+  const out = new Map<string, readonly string[]>();
+  for (const [listId, items] of itemIndex.value) {
+    const names = new Set<string>();
+    for (const i of items) if (i.rec.data.section) names.add(i.rec.data.section);
+    out.set(listId, Object.freeze([...names]));
+  }
+  return out;
+});
+export function sectionsOf(listId: string): readonly string[] {
+  return sectionIndex.value.get(listId) ?? [];
+}
+
+/** A list's items in its order. Shared and frozen: copy before sorting. */
 export function itemsOf(listId: string): ItemEntry[] {
-  return (byKind('item') as ItemEntry[])
-    .filter((i) => i.rec.data.list_id === listId)
-    .sort((a, b) => (a.rec.data.sort_key < b.rec.data.sort_key ? -1 : 1));
+  return (itemIndex.value.get(listId) ?? NO_ITEMS) as ItemEntry[];
 }
 
 /** All items of a list, in every scope (for moves and deletes). */
@@ -404,8 +447,11 @@ export const SEASON_NAME: Record<Season, string> = {
 };
 
 /** Prices are kept in hundredths; shown in the person's own number format. */
-export const money = (cents: number) =>
-  (cents / 100).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const MONEY = new Intl.NumberFormat(undefined, {
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
+});
+export const money = (cents: number) => MONEY.format(cents / 100);
 
 /* ---------- plans' checklists ---------- */
 

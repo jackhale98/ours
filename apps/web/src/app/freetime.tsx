@@ -9,7 +9,7 @@ import { IDEA_LENGTHS, type IdeaLength } from '@ours/core/schema';
 import type { Interval } from '@ours/core/time';
 import { useState } from 'preact/hooks';
 import { type ItemEntry, ideaLists, itemsOf } from './lists';
-import { fmtLong, fmtTime, freeStretches, relDay, zone } from './select';
+import { fmtLong, fmtTime, freeStretches, hhmm, relDay } from './select';
 import { openQuick, sheet } from './sheets';
 import { CloseButton, Icon, Marker, Sheet } from './ui';
 
@@ -19,9 +19,6 @@ export const LENGTH_LABEL: Record<IdeaLength, string> = {
   half: 'Half a day',
   day: 'All day',
 };
-
-const hhmm = (ms: number) =>
-  new Date(ms).toLocaleTimeString('en-GB', { timeZone: zone, hour: '2-digit', minute: '2-digit' });
 
 function span(w: Interval): string {
   const mins = Math.round((w.end - w.start) / 60_000);

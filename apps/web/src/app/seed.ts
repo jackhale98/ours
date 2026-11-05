@@ -193,7 +193,9 @@ function seedAll(): void {
       text: 'Water the plants',
       done: false,
       assignee: null,
-      due: nextDay(3),
+      // Due today whatever the weekday, so the demo always has something
+      // waiting on you (its repeat picks the next Wednesday or Saturday).
+      due: t,
       sort_key: '02',
       repeat: 'FREQ=WEEKLY;BYDAY=WE,SA',
     },

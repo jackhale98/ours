@@ -811,6 +811,10 @@ textarea.txt {
   min-height: 54px;
   padding-block: 5px;
   border-bottom: 1px solid var(--line);
+  /* Long lists: rows off screen aren't laid out or painted until they come
+     near (review 0008, L-4). Find in page and screen readers still see them. */
+  content-visibility: auto;
+  contain-intrinsic-size: auto 55px;
 }
 
 .chk {
@@ -3374,7 +3378,7 @@ fieldset.reminders > legend {
 .it.selecting .chk {
   cursor: pointer;
 }
-.it.sel-on {
+.it.selecting:has(.box.sel.on) {
   background: var(--sunk);
 }
 .it.selecting .box.sel {

@@ -9,7 +9,7 @@
 import { parseQuickAdd } from '@ours/core/parse';
 import { keyBetween } from '@ours/core/schema';
 import { signal } from '@preact/signals';
-import { useRef, useState } from 'preact/hooks';
+import { useEffect, useRef, useState } from 'preact/hooks';
 import { LENGTH_LABEL } from '../freetime';
 import { BEFORE_CHOICES, itemSheet } from '../itemsheet';
 import {
@@ -44,6 +44,7 @@ import {
   savedStartingPoints,
   saveStartingPoint,
   seasonNow,
+  sectionsOf,
   setFeatures,
   setListCheckin,
   setListPrivacy,
@@ -61,15 +62,42 @@ const showDone = signal(false);
 const picked = signal<string | null>(null);
 const listSheet = signal<{ type: 'new' } | { type: 'settings'; id: string } | null>(null);
 /** Items picked to change together, in the list they belong to; null when not selecting. */
-const selection = signal<{ list: string; ids: Set<string> } | null>(null);
-const selecting = (listId: string) => selection.value?.list === listId;
+/*
+ * Which list is in select mode, and which of its items are picked, apart:
+ * picking an item redraws its checkbox and the bar, not the whole screen
+ * (review 0008, L-5).
+ */
+const selectList = signal<string | null>(null);
+const picks = signal<ReadonlySet<string>>(new Set());
+const selecting = (listId: string) => selectList.value === listId;
+function startSelecting(listId: string | null): void {
+  picks.value = new Set();
+  selectList.value = listId;
+}
 function toggleSelected(listId: string, id: string): void {
-  const cur = selection.value;
-  if (!cur || cur.list !== listId) return;
-  const ids = new Set(cur.ids);
+  if (selectList.value !== listId) return;
+  const ids = new Set(picks.value);
   if (ids.has(id)) ids.delete(id);
   else ids.add(id);
-  selection.value = { list: listId, ids };
+  picks.value = ids;
+}
+
+/** A row's "pick this" box: the only part of the row that reads the picks. */
+function PickBox({ id, listId, label }: { id: string; listId: string; label: string }) {
+  const on = picks.value.has(id);
+  return (
+    <>
+      <input
+        type="checkbox"
+        checked={on}
+        aria-label={`Select ${label}`}
+        onChange={() => toggleSelected(listId, id)}
+      />
+      <span class={`box sel${on ? ' on' : ''}`}>
+        <Icon name="check" size={15} />
+      </span>
+    </>
+  );
 }
 
 /** Filters on the list in view: what the two of you both want, soon, in season, favourites. */
@@ -139,7 +167,7 @@ const dayWord = (date: string) => {
 };
 
 /** The small line under an item: everything its list shows, in words. */
-function itemSub(item: ItemEntry, f: Set<Feature>): string[] {
+function itemSub(item: ItemEntry, f: ReadonlySet<Feature>): string[] {
   const d = item.rec.data;
   const out: string[] = [];
   if (f.has('qty') && d.qty) out.push(d.qty);
@@ -197,19 +225,11 @@ export function ItemRow({
   );
   if (chosen) {
     // Selecting: the whole row picks it; nothing else happens on a tap.
-    const on = !!selection.value?.ids.has(item.id);
     return (
-      <li class={`it selecting${done ? ' done' : ''}${on ? ' sel-on' : ''}`}>
+      <li class={`it selecting${done ? ' done' : ''}`}>
+        {/* biome-ignore lint/a11y/noLabelWithoutControl: PickBox renders the checkbox inside this label */}
         <label class="chk">
-          <input
-            type="checkbox"
-            checked={on}
-            aria-label={`Select ${d.text}`}
-            onChange={() => toggleSelected(list.id, item.id)}
-          />
-          <span class="box sel">
-            <Icon name="check" size={15} />
-          </span>
+          <PickBox id={item.id} listId={list.id} label={d.text} />
           {text}
         </label>
       </li>
@@ -322,13 +342,7 @@ function AddItem({ list, placeholder }: { list: ListEntry; placeholder: string }
   const [text, setText] = useState('');
   const [section, setSection] = useState('');
   const input = useRef<HTMLInputElement>(null);
-  const sections = [
-    ...new Set(
-      itemsOf(list.id)
-        .map((i) => i.rec.data.section)
-        .filter((s): s is string => !!s),
-    ),
-  ];
+  const sections = sectionsOf(list.id);
   const submit = (e: Event) => {
     e.preventDefault();
     const v = text.trim();
@@ -430,7 +444,25 @@ function bySection(items: ItemEntry[]): [string | null, ItemEntry[]][] {
   return [...(none ? [[null, none] as [null, ItemEntry[]]] : []), ...groups.entries()];
 }
 
-function Items({ items, list }: { items: ItemEntry[]; list: ListEntry }) {
+/**
+ * How many of a long list's rows to draw: the first screenful at once, then
+ * more each frame, so a list of hundreds opens without a pause (review 0008,
+ * L-4 and L-5). Everything is drawn within a few frames.
+ */
+const FIRST_ROWS = 60;
+function useProgressive(total: number): number {
+  const [limit, setLimit] = useState(FIRST_ROWS);
+  useEffect(() => {
+    if (limit >= total) return;
+    const frame = requestAnimationFrame(() => setLimit((l) => l + 120));
+    return () => cancelAnimationFrame(frame);
+  }, [limit, total]);
+  return limit;
+}
+
+function Items({ items: all, list }: { items: ItemEntry[]; list: ListEntry }) {
+  const limit = useProgressive(all.length);
+  const items = all.length > limit ? all.slice(0, limit) : all;
   if (!featuresOf(list).has('sections'))
     return (
       <ul class="items">
@@ -486,7 +518,7 @@ function Filters({ list }: { list: ListEntry }) {
   );
 }
 
-function applyFilters(items: ItemEntry[], f: Set<Feature>): ItemEntry[] {
+function applyFilters(items: ItemEntry[], f: ReadonlySet<Feature>): ItemEntry[] {
   const v = filters.value;
   const now = seasonNow();
   return items.filter((i) => {
@@ -633,7 +665,7 @@ function ListBody({ list }: { list: ListEntry }) {
 /** What can be done to the selected items, for the features the list has. */
 function BulkBar({ list, shown }: { list: ListEntry; shown: ItemEntry[] }) {
   const f = featuresOf(list);
-  const sel = selection.value;
+  const sel = selecting(list.id) ? { ids: picks.value } : null;
   const [panel, setPanel] = useState<'due' | 'who' | 'section' | null>(null);
   const [date, setDate] = useState(today.value);
   const [before, setBefore] = useState<number | null>(1);
@@ -648,18 +680,12 @@ function BulkBar({ list, shown }: { list: ListEntry; shown: ItemEntry[] }) {
   const me = viewer.value;
   const p = partner.value;
   const allShown = shown.length > 0 && shown.every((i) => sel.ids.has(i.id));
-  const sections = [
-    ...new Set(
-      itemsOf(list.id)
-        .map((i) => i.rec.data.section)
-        .filter((x): x is string => !!x),
-    ),
-  ];
+  const sections = sectionsOf(list.id);
   const things = (k: number) => `${k} ${k === 1 ? 'item' : 'items'}`;
   const done = (msg: string, r: { undo: () => void; changed: number }, exit = false) => {
     setPanel(null);
     setArmed(false);
-    if (exit) selection.value = null;
+    if (exit) startSelecting(null);
     toast(r.changed ? msg.replace('#', things(r.changed)) : 'Nothing to change.', r.undo);
   };
   const toggle = (which: 'due' | 'who' | 'section') => {
@@ -676,21 +702,12 @@ function BulkBar({ list, shown }: { list: ListEntry; shown: ItemEntry[] }) {
           type="button"
           class="linkbtn"
           onClick={() => {
-            selection.value = {
-              list: list.id,
-              ids: allShown ? new Set() : new Set(shown.map((i) => i.id)),
-            };
+            picks.value = allShown ? new Set() : new Set(shown.map((i) => i.id));
           }}
         >
           {allShown ? 'Select none' : 'Select all'}
         </button>
-        <button
-          type="button"
-          class="linkbtn"
-          onClick={() => {
-            selection.value = null;
-          }}
-        >
+        <button type="button" class="linkbtn" onClick={() => startSelecting(null)}>
           Done
         </button>
       </div>
@@ -1278,11 +1295,7 @@ export function ListsView() {
                       type="button"
                       class="linkbtn lselect"
                       aria-pressed={selecting(cur.id)}
-                      onClick={() => {
-                        selection.value = selecting(cur.id)
-                          ? null
-                          : { list: cur.id, ids: new Set() };
-                      }}
+                      onClick={() => startSelecting(selecting(cur.id) ? null : cur.id)}
                     >
                       <Icon name="check" size={15} />
                       {selecting(cur.id) ? 'Cancel' : 'Select'}

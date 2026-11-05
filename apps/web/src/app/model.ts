@@ -154,12 +154,38 @@ export const visible = computed(() => {
   });
 });
 
+/**
+ * Lookups built once per change of the store, not on every call (review
+ * 0008 L-5, 0009 P-1): records by kind, notes by plan. The arrays are frozen:
+ * callers share them, so they must copy before sorting.
+ */
+const EMPTY: readonly Entry[] = Object.freeze([]);
+const index = computed(() => {
+  const kinds = new Map<string, Entry[]>();
+  const comments = new Map<string, Entry[]>();
+  for (const e of visible.value) {
+    const list = kinds.get(e.rec.kind);
+    if (list) list.push(e);
+    else kinds.set(e.rec.kind, [e]);
+    if (e.rec.kind === 'comment') {
+      const parent = e.rec.data.parent_id;
+      const notes = comments.get(parent);
+      if (notes) notes.push(e);
+      else comments.set(parent, [e]);
+    }
+  }
+  for (const list of kinds.values()) Object.freeze(list);
+  for (const list of comments.values()) Object.freeze(list);
+  return { kinds, comments };
+});
+const byId = computed(() => new Map(store.value.entries.map((e) => [e.id, e])));
+
 export function byKind<K extends keyof KindData>(kind: K): Entry[] {
-  return visible.value.filter((e) => e.rec.kind === kind);
+  return (index.value.kinds.get(kind) ?? EMPTY) as Entry[];
 }
 
 export function findEntry(id: string): Entry | undefined {
-  return store.value.entries.find((e) => e.id === id);
+  return byId.value.get(id);
 }
 
 /* ---------- keys ---------- */
@@ -270,9 +296,7 @@ export type EventData = Data<'event'>;
 
 /** Comments attached to a record. */
 export function commentsFor(parentId: string): Entry[] {
-  return byKind('comment').filter(
-    (c) => c.rec.kind === 'comment' && c.rec.data.parent_id === parentId,
-  );
+  return (index.value.comments.get(parentId) ?? EMPTY) as Entry[];
 }
 
 /**

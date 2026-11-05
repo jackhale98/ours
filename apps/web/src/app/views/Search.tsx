@@ -4,13 +4,15 @@
  * open in place (a plan's sheet, an item's details), so the search stays put
  * for the next look.
  */
+
+import { dateIn } from '@ours/core/time';
 import { signal } from '@preact/signals';
 import { useEffect, useRef } from 'preact/hooks';
 import { itemSheet } from '../itemsheet';
 import { currentList, dueText } from '../lists';
 import { nameOf, partner } from '../model';
 import { type Hit, search } from '../search';
-import { agendaFrom, fmtLong, fmtTime, relDay, today, zone } from '../select';
+import { agendaFrom, fmtLong, fmtTime, hhmm, relDay, today, zone } from '../select';
 import { openEvent, openImport } from '../sheets';
 import { Icon } from '../ui';
 
@@ -27,13 +29,8 @@ const GROUPS: [Hit['kind'], string][] = [
 
 function when(ms: number | null): string {
   if (ms === null) return '';
-  const d = new Date(ms);
-  const date = d.toLocaleDateString('en-CA', { timeZone: zone });
-  const time = d.toLocaleTimeString('en-GB', {
-    timeZone: zone,
-    hour: '2-digit',
-    minute: '2-digit',
-  });
+  const date = dateIn(ms, zone);
+  const time = hhmm(ms);
   const day =
     Math.abs(Date.parse(date) - Date.parse(today.value)) < 7 * 86_400_000
       ? relDay(date)

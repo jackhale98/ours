@@ -6,7 +6,7 @@
  */
 import { IDEA_LENGTHS } from '@ours/core/schema';
 import { addDays } from '@ours/core/time';
-import { signal } from '@preact/signals';
+import { computed, signal } from '@preact/signals';
 import {
   allLists,
   bothWant,
@@ -30,29 +30,50 @@ const VIEWS: Record<CrossView, { label: string; empty: string }> = {
   both: { label: 'We both want', empty: 'Nothing you’ve both hearted yet.' },
 };
 
-/** The items a view shows, with their lists, in the order to show them. */
-export function viewItems(view: CrossView): { item: ItemEntry; list: ListEntry }[] {
-  const out: { item: ItemEntry; list: ListEntry; key: string }[] = [];
-  const t = today.value;
-  const week = addDays(t, 7);
+type ViewRow = { item: ItemEntry; list: ListEntry };
+
+/**
+ * Every view's items, in one pass over the lists, once per change of the
+ * store or the day (review 0008, L-5: it used to be four passes per render).
+ */
+const allViews = computed((): Record<CrossView, ViewRow[]> => {
+  const out: Record<CrossView, (ViewRow & { key: string })[]> = {
+    due: [],
+    mine: [],
+    short: [],
+    both: [],
+  };
+  const week = addDays(today.value, 7);
   const me = viewer.value;
   for (const list of allLists()) {
     const f = featuresOf(list);
+    const tick = f.has('tick');
     for (const item of itemsOf(list.id)) {
       const d = item.rec.data;
-      if (f.has('tick') && d.done) continue;
-      if (view === 'due') {
-        const due = f.has('due') && f.has('tick') ? dueOf(item) : null;
-        if (due && due <= week) out.push({ item, list, key: due });
-      } else if (view === 'mine') {
-        if (f.has('tick') && d.assignee === me) out.push({ item, list, key: dueOf(item) ?? '~' });
-      } else if (view === 'short') {
-        const fits = d.length ? IDEA_LENGTHS[d.length] <= IDEA_LENGTHS.evening : false;
-        if (!f.has('tick') && f.has('plan') && fits) out.push({ item, list, key: d.text });
-      } else if (f.has('hearts') && bothWant(item)) out.push({ item, list, key: d.text });
+      if (tick && d.done) continue;
+      if (tick && f.has('due')) {
+        const due = dueOf(item);
+        if (due && due <= week) out.due.push({ item, list, key: due });
+      }
+      if (tick && d.assignee === me) out.mine.push({ item, list, key: dueOf(item) ?? '~' });
+      const fits = d.length ? IDEA_LENGTHS[d.length] <= IDEA_LENGTHS.evening : false;
+      if (!tick && f.has('plan') && fits) out.short.push({ item, list, key: d.text });
+      if (f.has('hearts') && bothWant(item)) out.both.push({ item, list, key: d.text });
     }
   }
-  return out.sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
+  const sorted = (rows: (ViewRow & { key: string })[]) =>
+    rows.sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
+  return {
+    due: sorted(out.due),
+    mine: sorted(out.mine),
+    short: sorted(out.short),
+    both: sorted(out.both),
+  };
+});
+
+/** The items a view shows, with their lists, in the order to show them. */
+export function viewItems(view: CrossView): ViewRow[] {
+  return allViews.value[view];
 }
 
 export function CrossViews({ onPick }: { onPick: () => void }) {

@@ -15,12 +15,12 @@ import {
   didIt,
   featuresOf,
   type ItemEntry,
-  itemsOf,
   type ListEntry,
   money,
   planOf,
   react,
   SEASON_NAME,
+  sectionsOf,
 } from './lists';
 import { findEntry, nameOf, partner, remove, type Slot, update, viewer } from './model';
 import { REPEAT_CHOICES } from './planform';
@@ -91,13 +91,7 @@ function ItemSheet({ item, list }: { item: ItemEntry; list: ListEntry }) {
   const [armed, setArmed] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const custom = !!repeat && !REPEAT_CHOICES.some(([v]) => v === repeat);
-  const sections = [
-    ...new Set(
-      itemsOf(list.id)
-        .map((i) => i.rec.data.section)
-        .filter((s): s is string => !!s),
-    ),
-  ];
+  const sections = sectionsOf(list.id);
 
   const save = (e: Event) => {
     e.preventDefault();
