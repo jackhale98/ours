@@ -378,13 +378,19 @@ export const signInLink = signal<string | null>(null);
  * removes it from history and keeps it for `signInWithLink`. Works on page
  * load and when the link is opened in a tab where the app is already running.
  */
-export function takeSignInLink(): boolean {
+export function takeSignInLink(): 'none' | 'kept' | 'signed-in' {
   const token = /^#signin=([A-Za-z0-9_-]{43})$/.exec(location.hash)?.[1];
-  if (!token) return false;
+  if (!token) return 'none';
   history.replaceState(null, '', `${location.pathname}${location.search}#start`);
+  // Already signed in here: never offer to swap accounts underneath the
+  // running one (a shared device, or someone else's link). Sign out first.
+  if (account.value.status !== 'none') return 'signed-in';
   signInLink.value = token;
-  return true;
+  return 'kept';
 }
+
+export const ALREADY_SIGNED_IN =
+  'You’re already signed in on this device. To use another account, sign out in Settings first.';
 
 /** Signed in, but the account didn't finish loading (offline, say). */
 export class SignedInButNotLoaded extends Error {}
@@ -394,6 +400,8 @@ export function signInErrorText(err: unknown): string {
   if (err instanceof SignedInButNotLoaded)
     return 'You’re signed in, but your account didn’t finish loading. Reload the page to carry on.';
   // The server says whether the link was used, expired or not recognised.
+  if (err instanceof ApiError && err.code === 'signups_closed' && err.message === err.code)
+    return 'New accounts need an invite from your partner right now.';
   if (err instanceof ApiError && err.status === 0)
     return 'Couldn’t reach Ours. Check your connection and try again: the link still works.';
   if (err instanceof ApiError) return err.message;
@@ -554,6 +562,7 @@ export async function signOut(callServer = true): Promise<void> {
   stopNotifications();
   stopFeeds();
   setPendingInvite(null);
+  signInLink.value = null;
   if (callServer) await api('/auth/logout', { body: {} }).catch(() => {});
   engine?.stop();
   engine = null;

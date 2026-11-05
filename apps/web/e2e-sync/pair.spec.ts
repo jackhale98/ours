@@ -706,6 +706,11 @@ test('an invite survives the sign-in link opening in a new tab', async ({ browse
   await tab.getByRole('button', { name: 'Join' }).click();
   await recoveryPhrase(tab);
   await expect(tab.getByRole('heading', { name: 'Compare your safety code' })).toBeVisible();
+
+  // Someone else's link opened where Jo is signed in: no offer to swap accounts.
+  await jo.goto(link);
+  await expect(jo.getByText('You’re already signed in on this device.')).toBeVisible();
+  await expect(jo.getByRole('heading', { name: 'Sign in on this device' })).toHaveCount(0);
 });
 
 /** Pat makes a space and an invite; Lee signs up without it and makes their own. */

@@ -429,9 +429,16 @@ function Profile({ onCreated }: { onCreated: (joined: boolean) => void }) {
   const [name, setName] = useState('');
   const [busy, setBusy] = useState(false);
   const joining = !!pendingInvite();
+  const acct = account.value;
+  const signedInAs = 'session' in acct ? acct.session.user.email : null;
   return (
     <section class="card">
       <h2 class="h3">{joining ? 'Join the space' : 'Set up your space'}</h2>
+      {signedInAs && (
+        <p class="d">
+          Signed in as <b class="ink">{signedInAs}</b>.
+        </p>
+      )}
       <form
         class="stack gap"
         onSubmit={async (e) => {
@@ -673,7 +680,7 @@ export function StartView({ onFinished }: { onFinished: () => void }) {
         </div>
       </section>
     );
-  } else if (signInLink.value && state.status !== 'loading') {
+  } else if (signInLink.value && state.status === 'none') {
     body = <ConfirmSignIn />;
   } else if (state.status === 'loading') {
     body = <p class="nothing">Loading…</p>;

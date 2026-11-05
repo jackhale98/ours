@@ -200,7 +200,7 @@ auth.post('/email/verify', async (c) => {
       400,
       'link_invalid',
       seen?.used_at
-        ? 'That link was already used. Each one works once: ask for a new one here.'
+        ? 'That link was already used. Each one works once: if you didn’t get signed in, ask for a new one here.'
         : 'That link has expired. Ask for a new one here.',
     );
   }
@@ -217,7 +217,12 @@ auth.post('/email/verify', async (c) => {
       // The invite presented when the link was asked for; else (older
       // links) the one this device sends.
       const invite = row.invite_hash ?? (input.invite ? await hashToken(input.invite) : null);
-      if (!invite) throw new HttpError(403, 'signups_closed');
+      if (!invite)
+        throw new HttpError(
+          403,
+          'signups_closed',
+          'New accounts need an invite from your partner right now. Open their invite link, then ask for a new sign-in link.',
+        );
       const claimed = await c.env.DB.prepare(
         `UPDATE invites SET claimed_by = ?1
           WHERE id = ?2 AND kind = 'partner' AND used_at IS NULL AND expires_at > ?3 AND claimed_by IS NULL
@@ -225,7 +230,12 @@ auth.post('/email/verify', async (c) => {
       )
         .bind(id, invite, Date.now())
         .first();
-      if (!claimed) throw new HttpError(403, 'signups_closed');
+      if (!claimed)
+        throw new HttpError(
+          403,
+          'signups_closed',
+          'New accounts need an invite from your partner right now. Open their invite link, then ask for a new sign-in link.',
+        );
     }
     user = { id, email: row.email };
     await c.env.DB.prepare(

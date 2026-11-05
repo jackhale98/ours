@@ -2,6 +2,7 @@
 import { render } from 'preact';
 import '../styles/app.css';
 import {
+  ALREADY_SIGNED_IN,
   account,
   JoinInsteadError,
   joinInsteadOffer,
@@ -43,7 +44,9 @@ export async function mountApp(root: HTMLElement): Promise<void> {
     account.value = { status: 'none' };
   });
   // A magic link lands here as #signin=<token>: kept until a tap signs in.
-  if (takeSignInLink()) startRequested.value = true;
+  const signin = takeSignInLink();
+  if (signin === 'kept') startRequested.value = true;
+  else if (signin === 'signed-in') toast(ALREADY_SIGNED_IN);
 
   // A key update or device link opened on a device that is already set up.
   // Its keys are checked first; a link that changes the shared key then

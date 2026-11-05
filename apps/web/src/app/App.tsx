@@ -5,6 +5,7 @@ import { lazy, Suspense } from 'preact/compat';
 import { useEffect, useState } from 'preact/hooks';
 import { kvGet, kvSet } from '../account/db';
 import {
+  ALREADY_SIGNED_IN,
   account,
   declineJoinOffer,
   finishJoinedFlow,
@@ -506,7 +507,9 @@ export function App() {
     const onHash = () => {
       if (location.hash.startsWith('#signin=')) {
         // A magic link opened in this already-running tab: kept until a tap.
-        if (takeSignInLink()) startRequested.value = true;
+        const signin = takeSignInLink();
+        if (signin === 'kept') startRequested.value = true;
+        else if (signin === 'signed-in') toast(ALREADY_SIGNED_IN);
         return;
       }
       syncFromHash();
