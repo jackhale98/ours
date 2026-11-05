@@ -777,7 +777,7 @@ function Items({
 }
 
 /** Filter chips for the features a list has, applied to the list and to "pick one". */
-function Filters({ list }: { list: ListEntry }) {
+function Filters({ list, pool }: { list: ListEntry; pool?: ItemEntry[] }) {
   const f = featuresOf(list);
   const v = filters.value;
   const chips: [keyof typeof v, string][] = [];
@@ -785,24 +785,39 @@ function Filters({ list }: { list: ListEntry }) {
   if (f.has('when'))
     chips.push(['soon', 'Soon'], ['season', `Good in ${SEASON_NAME[seasonNow()].toLowerCase()}`]);
   if (f.has('did')) chips.push(['favs', 'Favourites']);
-  if (!chips.length) return null;
+  // "Pick one for us" leads the row (until a pick is showing): one row, not two.
+  const pickBtn = pool && !pool.some((i) => i.id === picked.value) && (
+    <button
+      type="button"
+      class="btn primary sm pickbtn"
+      onClick={() => shufflePick(pool)}
+      disabled={!pool.length}
+    >
+      <Icon name="shuffle" size={15} />
+      Pick one for us
+    </button>
+  );
+  if (!chips.length) return pickBtn ? <div class="ltoolbar">{pickBtn}</div> : null;
   return (
-    // biome-ignore lint/a11y/useSemanticElements: toggle-button group (aria-pressed), labelled
-    <div class="chips lfilters" role="group" aria-label="Show only">
-      {chips.map(([k, label]) => (
-        <button
-          type="button"
-          key={k}
-          class="chip"
-          aria-pressed={v[k]}
-          onClick={() => {
-            filters.value = { ...v, [k]: !v[k] };
-            picked.value = null;
-          }}
-        >
-          {label}
-        </button>
-      ))}
+    <div class="ltoolbar">
+      {pickBtn}
+      {/* biome-ignore lint/a11y/useSemanticElements: toggle-button group (aria-pressed), labelled */}
+      <div class="chips lfilters" role="group" aria-label="Show only">
+        {chips.map(([k, label]) => (
+          <button
+            type="button"
+            key={k}
+            class="chip"
+            aria-pressed={v[k]}
+            onClick={() => {
+              filters.value = { ...v, [k]: !v[k] };
+              picked.value = null;
+            }}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
     </div>
   );
 }
@@ -820,25 +835,21 @@ function applyFilters(items: ItemEntry[], f: ReadonlySet<Feature>): ItemEntry[] 
   });
 }
 
+/** Picks an idea at random from `pool`, never the same one twice in a row. */
+function shufflePick(pool: ItemEntry[]): void {
+  if (!pool.length) return;
+  let n: ItemEntry | undefined;
+  do n = pool[Math.floor(Math.random() * pool.length)];
+  while (pool.length > 1 && n?.id === picked.value);
+  picked.value = n?.id ?? null;
+}
+
+/** The pick, once made: plan it or pick another. The button to pick sits with the filters. */
 function Pick({ list, pool }: { list: ListEntry; pool: ItemEntry[] }) {
   const f = featuresOf(list);
   const pick = pool.find((i) => i.id === picked.value);
-  const shuffle = () => {
-    if (!pool.length) return;
-    let n: ItemEntry | undefined;
-    do n = pool[Math.floor(Math.random() * pool.length)];
-    while (pool.length > 1 && n?.id === picked.value);
-    picked.value = n?.id ?? null;
-  };
-  if (!pick)
-    return (
-      <div class="pickrow">
-        <button type="button" class="btn primary" onClick={shuffle} disabled={!pool.length}>
-          <Icon name="shuffle" size={16} />
-          Pick one for us
-        </button>
-      </div>
-    );
+  const shuffle = () => shufflePick(pool);
+  if (!pick) return null;
   return (
     <section class="picked" aria-live="polite" aria-labelledby="pick-title">
       <p class="eyebrow">Your pick</p>
@@ -971,7 +982,7 @@ function ListBody({ list }: { list: ListEntry }) {
         </p>
       )}
       {f.has('pick') && !selecting(list.id) && <Pick list={list} pool={open} />}
-      <Filters list={list} />
+      <Filters list={list} {...(f.has('pick') && !selecting(list.id) ? { pool: open } : {})} />
       {!selecting(list.id) && <AddItem list={list} placeholder={placeholderFor(list)} />}
       <ListTools list={list} count={everything.length} find={find} setFind={setFind} />
       <Items items={open} list={list} />

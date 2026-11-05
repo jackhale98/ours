@@ -204,10 +204,19 @@ test('filters, shortcuts and the agenda going further (review 0009, P-8, P-10, P
   await expect(page.getByRole('button', { name: 'Filtered (1)' })).toBeVisible();
   await page.getByRole('group', { name: 'Show' }).getByRole('button', { name: 'Routines' }).click();
 
-  // Jump ahead, then back to today.
-  await page.getByLabel('Go to').fill('2027-01-04');
-  await expect(page.getByRole('button', { name: 'Back to today' })).toBeVisible();
+  // The heading picks a day; then back to today.
+  await page
+    .getByRole('heading', { name: /This week/, level: 1 })
+    .getByRole('button')
+    .click();
+  const picker = page.getByRole('dialog', { name: 'Go to a day' });
+  await picker.getByRole('button', { name: 'Next month' }).click();
+  await picker.getByRole('button', { name: /^Wed, Dec 9/ }).click();
+  await expect(picker).toHaveCount(0);
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText(/Dec 9 – 15/);
+  await expect(page.locator('.day.today')).toHaveCount(0);
   await page.getByRole('button', { name: 'Back to today' }).click();
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText(/This week/);
   await expect(page.locator('.day.today')).toHaveCount(1);
 
   if (info.project.name.includes('mobile')) return;

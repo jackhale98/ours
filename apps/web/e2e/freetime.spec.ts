@@ -68,6 +68,10 @@ for (const scheme of ['light', 'dark'] as const) {
     await page.emulateMedia({ colorScheme: scheme });
     await page.locator('.agenda .free').first().click();
     await expect(page.getByRole('list', { name: 'Date ideas' })).toBeVisible();
+    // The sheet slides and fades in: check colours once it has arrived.
+    await page.waitForFunction(() =>
+      document.getAnimations().every((a) => a.playState !== 'running'),
+    );
     const results = await new AxeBuilder({ page }).withTags(TAGS).analyze();
     expect(results.violations.map((v) => `${v.id}: ${v.nodes[0]?.html}`)).toEqual([]);
   });

@@ -25,6 +25,7 @@ import {
   type Row,
   routineWhileAway,
   shownDays,
+  startOfWeek,
   today,
   whenText,
 } from '../select';
@@ -38,11 +39,119 @@ import {
   openPlanForm,
   SuggestTime,
 } from '../sheets';
-import { Icon, Marker, MarkerKey } from '../ui';
+import { CloseButton, Icon, Marker, MarkerKey, Sheet } from '../ui';
 import { MonthView, ViewSwitch, WeekView } from './Calendar';
 import { Result } from './Search';
 
+/** "Dec 9 – 15", or "Dec 28 – Jan 3" across months: short enough for the heading. */
+function shortRange(from: string): string {
+  const to = addDays(from, 6);
+  return from.slice(0, 7) === to.slice(0, 7)
+    ? `${monDay(from)} – ${Number(to.slice(8))}`
+    : `${monDay(from)} – ${monDay(to)}`;
+}
+
+/** "Next week", "In 5 weeks", "2 weeks ago": how far the agenda is from today. */
+function weeksAway(today: string, from: string): string {
+  const days = Math.round((Date.parse(from) - Date.parse(today)) / 86_400_000);
+  const w = Math.round(days / 7);
+  if (days > 0 && days < 7) return `In ${days} ${days === 1 ? 'day' : 'days'}`;
+  if (days < 0 && days > -7) return `${-days} ${days === -1 ? 'day' : 'days'} ago`;
+  if (w === 1) return 'Next week';
+  if (w === -1) return 'Last week';
+  return w > 0 ? `In ${w} weeks` : `${-w} weeks ago`;
+}
+
 const filtersOpen = signal(false);
+const pickerOpen = signal(false);
+
+const MONTH_NAMES = [
+  'January',
+  'February',
+  'March',
+  'April',
+  'May',
+  'June',
+  'July',
+  'August',
+  'September',
+  'October',
+  'November',
+  'December',
+];
+
+/**
+ * A small month to pick a day from, opened from the agenda's heading. Days
+ * with plans have a dot; today is marked; the day showing is chosen.
+ */
+function DatePicker({
+  value,
+  onPick,
+  onClose,
+}: {
+  value: string;
+  onPick: (date: string) => void;
+  onClose: () => void;
+}) {
+  const t = today.value;
+  const [month, setMonth] = useState(value.slice(0, 7));
+  const [y, m] = month.split('-').map(Number) as [number, number];
+  const first = `${month}-01`;
+  const start = startOfWeek(first);
+  const grid = agendaFrom(start, 42);
+  const step = (n: number) => {
+    const d = new Date(Date.UTC(y, m - 1 + n, 1));
+    setMonth(d.toISOString().slice(0, 7));
+  };
+  const weekdays = grid.slice(0, 7).map((d) => dowShort(d.date).slice(0, 2));
+  return (
+    <Sheet labelledBy="dp-title" onClose={onClose}>
+      <div class="sh-head">
+        <h2 id="dp-title">Go to a day</h2>
+        <CloseButton onClose={onClose} />
+      </div>
+      <div class="dp-head">
+        <button type="button" class="iconbtn" aria-label="Previous month" onClick={() => step(-1)}>
+          <Icon name="prev" size={18} />
+        </button>
+        <h3 class="dp-month" aria-live="polite">
+          {MONTH_NAMES[m - 1]} {y}
+        </h3>
+        <button type="button" class="iconbtn" aria-label="Next month" onClick={() => step(1)}>
+          <Icon name="next" size={18} />
+        </button>
+      </div>
+      {/* biome-ignore lint/a11y/useSemanticElements: a labelled group of day buttons laid out as a grid; fieldset breaks the grid */}
+      <div class="dp-grid" role="group" aria-labelledby="dp-title">
+        {weekdays.map((w, i) => (
+          <span class="dp-dow" aria-hidden="true" key={`w${i}`}>
+            {w}
+          </span>
+        ))}
+        {grid.map((d) => {
+          const out = !d.date.startsWith(month);
+          return (
+            <button
+              type="button"
+              key={d.date}
+              class={`dp-day${out ? ' out' : ''}${d.date === t ? ' today' : ''}`}
+              aria-pressed={d.date === value}
+              aria-current={d.date === t ? 'date' : undefined}
+              aria-label={`${fmtLong(d.date)}${d.rows.length ? `, ${d.rows.length} planned` : ''}`}
+              onClick={() => onPick(d.date)}
+            >
+              {Number(d.date.slice(8))}
+              {d.rows.length > 0 && <span class="dp-dot" aria-hidden="true" />}
+            </button>
+          );
+        })}
+      </div>
+      <button type="button" class="btn" onClick={() => onPick(t)}>
+        Today
+      </button>
+    </Sheet>
+  );
+}
 
 /** Shows or hides the view filters; says how many things are left out. */
 function FilterButton() {
@@ -408,6 +517,8 @@ const allMilestones = signal(false);
 export function PlanView() {
   const t = today.value;
   const mode = planMode.value;
+  const from = agendaStart.value ?? t;
+  const away = from !== t;
   const header = (
     <>
       {mode === 'agenda' ? (
@@ -415,9 +526,43 @@ export function PlanView() {
           <header class="vhead">
             <div>
               <p class="eyebrow">
-                {monDay(t)} – {monDay(addDays(t, 6))}
+                {away ? weeksAway(t, from) : `${monDay(from)} – ${monDay(addDays(from, 6))}`}
+                {away && (
+                  <>
+                    {' · '}
+                    <button
+                      type="button"
+                      class="linkbtn back-today"
+                      onClick={() => {
+                        agendaStart.value = null;
+                        weeks.value = 1;
+                      }}
+                    >
+                      Back to today
+                    </button>
+                  </>
+                )}
               </p>
-              <h1>This week</h1>
+              <div class="dpick-row">
+                {/* The heading picks the day the agenda starts on (review 0009, P-10). */}
+                <h1>
+                  <button
+                    type="button"
+                    class="dpick"
+                    aria-haspopup="dialog"
+                    aria-describedby="dpick-d"
+                    onClick={() => {
+                      pickerOpen.value = true;
+                    }}
+                  >
+                    {away ? shortRange(from) : 'This week'}
+                    <Icon name="down" size={22} />
+                  </button>
+                </h1>
+                <span class="sr" id="dpick-d">
+                  Choose a day to start from
+                </span>
+              </div>
             </div>
             <a class="enc" href="#settings">
               <Icon name="lock" size={14} />
@@ -443,6 +588,19 @@ export function PlanView() {
         </header>
       )}
       {mode !== 'agenda' && <Filters />}
+      {pickerOpen.value && (
+        <DatePicker
+          value={from}
+          onPick={(d) => {
+            agendaStart.value = d === t ? null : d;
+            weeks.value = 1;
+            pickerOpen.value = false;
+          }}
+          onClose={() => {
+            pickerOpen.value = false;
+          }}
+        />
+      )}
     </>
   );
   if (mode !== 'agenda') {
@@ -455,7 +613,6 @@ export function PlanView() {
       </>
     );
   }
-  const from = agendaStart.value ?? t;
   const days = shownDays(agendaFrom(from, 7 * weeks.value), hidden.value);
   const cds = countdowns.value;
   return (
@@ -539,46 +696,18 @@ export function PlanView() {
               <span class="free-cta">Go through</span>
             </a>
           )}
-          <div class="agenda-nav">
+          <div class="agenda">
             <button
               type="button"
-              class="btn sm ghost"
+              class="linkbtn earlier"
               onClick={() => {
                 agendaStart.value = addDays(from, -7);
                 weeks.value = Math.min(MAX_WEEKS, weeks.value + 1);
               }}
             >
-              <Icon name="up" size={15} />
-              Earlier
+              <Icon name="up" size={14} />
+              Show earlier days
             </button>
-            <label class="agenda-jump">
-              <span class="small muted">Go to</span>
-              <input
-                class="txt sm"
-                type="date"
-                value={from}
-                onChange={(e) => {
-                  const v = e.currentTarget.value;
-                  if (!v) return;
-                  agendaStart.value = v === t ? null : v;
-                  weeks.value = 1;
-                }}
-              />
-            </label>
-            {from !== t && (
-              <button
-                type="button"
-                class="linkbtn"
-                onClick={() => {
-                  agendaStart.value = null;
-                  weeks.value = 1;
-                }}
-              >
-                Back to today
-              </button>
-            )}
-          </div>
-          <div class="agenda">
             {days.map((day, i) => {
               const isToday = day.date === t;
               // Routines fold away on a full day (P-10); clashes and away days stay shown.
