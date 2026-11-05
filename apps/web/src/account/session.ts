@@ -367,19 +367,53 @@ export const syncNow = () => engine?.sync();
 /* ---------- sign-in ---------- */
 
 /**
- * If the address is a magic link (#signin=<token>), reads the token once,
- * removes it from history and signs in. Works on page load and when the link
- * is opened in a tab where the app is already running.
+ * A sign-in link waiting for a tap. Opening the page never uses the link by
+ * itself: link previews (press and hold on an iPhone) and email link checkers
+ * load pages too, and would use up a link that works only once.
  */
-export async function consumeSignInLink(): Promise<'none' | 'ok' | 'failed'> {
+export const signInLink = signal<string | null>(null);
+
+/**
+ * If the address is a magic link (#signin=<token>), reads the token once,
+ * removes it from history and keeps it for `signInWithLink`. Works on page
+ * load and when the link is opened in a tab where the app is already running.
+ */
+export function takeSignInLink(): boolean {
   const token = /^#signin=([A-Za-z0-9_-]{43})$/.exec(location.hash)?.[1];
-  if (!token) return 'none';
+  if (!token) return false;
   history.replaceState(null, '', `${location.pathname}${location.search}#start`);
+  signInLink.value = token;
+  return true;
+}
+
+/** Signed in, but the account didn't finish loading (offline, say). */
+export class SignedInButNotLoaded extends Error {}
+
+/** What to tell someone whose sign-in link didn't work, by what actually went wrong. */
+export function signInErrorText(err: unknown): string {
+  if (err instanceof SignedInButNotLoaded)
+    return 'You’re signed in, but your account didn’t finish loading. Reload the page to carry on.';
+  // The server says whether the link was used, expired or not recognised.
+  if (err instanceof ApiError && err.status === 0)
+    return 'Couldn’t reach Ours. Check your connection and try again: the link still works.';
+  if (err instanceof ApiError) return err.message;
+  return 'Something went wrong. Try again.';
+}
+
+/** Signs in with the waiting link (after a tap). Throws with a reason. */
+export async function signInWithLink(): Promise<void> {
+  const token = signInLink.value;
+  if (!token) return;
   try {
     await verifyEmail(token);
-    return 'ok';
-  } catch {
-    return 'failed';
+    signInLink.value = null;
+  } catch (err) {
+    // Offline, rate limited or a server hiccup: the link may still work, so
+    // keep it for another tap. Refused (used, expired, closed): drop it.
+    const retry =
+      err instanceof ApiError && (err.status === 0 || err.status === 429 || err.status >= 500);
+    if (!retry) signInLink.value = null;
+    throw err;
   }
 }
 
@@ -423,7 +457,12 @@ export async function verifyEmail(token: string): Promise<{ newUser: boolean }> 
   claimKeptInvite(res.user.email);
   await kvSet('session', session);
   setToken(session.token);
-  await refresh(session);
+  try {
+    await refresh(session);
+  } catch {
+    // The link worked and the session is kept: a reload finishes this.
+    throw new SignedInButNotLoaded();
+  }
   return { newUser: res.new_user };
 }
 

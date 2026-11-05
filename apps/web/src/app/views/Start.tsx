@@ -27,6 +27,9 @@ import {
   restoreFromPhrase,
   saveBackup,
   setPendingInvite,
+  signInErrorText,
+  signInLink,
+  signInWithLink,
   signInWithPasskey,
   startEmail,
   unlockThisDevice,
@@ -56,14 +59,66 @@ function Busy({ busy, children }: { busy: boolean; children: preact.ComponentChi
 const PASTE_HINT =
   'On an iPhone or iPad with Ours on the Home Screen, links open in Safari instead. Press and hold the link, choose Copy, then paste it here.';
 
+/**
+ * A sign-in link that was opened: one tap to use it. Opening the page alone
+ * never does, so a link preview or an email link checker can't use it up.
+ */
+function ConfirmSignIn() {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  return (
+    <section class="card">
+      <h2 class="h3">Sign in on this device</h2>
+      <p class="d">Your sign-in link is ready. It works once.</p>
+      {error && (
+        <p class="d" role="alert">
+          {error}
+        </p>
+      )}
+      <div class="btnrow">
+        <button
+          type="button"
+          class="btn primary"
+          data-autofocus
+          disabled={busy}
+          onClick={async () => {
+            setBusy(true);
+            setError(null);
+            try {
+              await signInWithLink();
+            } catch (err) {
+              const text = signInErrorText(err);
+              // Still usable (offline, say): stay here to try again.
+              if (signInLink.value) setError(text);
+              else toast(text);
+            } finally {
+              setBusy(false);
+            }
+          }}
+        >
+          <Busy busy={busy}>Sign in</Busy>
+        </button>
+        <button
+          type="button"
+          class="btn ghost"
+          disabled={busy}
+          onClick={() => (signInLink.value = null)}
+        >
+          Not now
+        </button>
+      </div>
+    </section>
+  );
+}
+
 function SignIn() {
   const [, setInviteAdded] = useState(0);
   const useLink = async (link: PastedLink) => {
     if (link.kind === 'signin') {
       try {
         await verifyEmail(link.token);
-      } catch {
-        toast('That sign-in link has expired or was already used. Ask for a new one.');
+      } catch (err) {
+        toast(signInErrorText(err));
       }
       return;
     }
@@ -618,6 +673,8 @@ export function StartView({ onFinished }: { onFinished: () => void }) {
         </div>
       </section>
     );
+  } else if (signInLink.value && state.status !== 'loading') {
+    body = <ConfirmSignIn />;
   } else if (state.status === 'loading') {
     body = <p class="nothing">Loading…</p>;
   } else if (state.status === 'none') {

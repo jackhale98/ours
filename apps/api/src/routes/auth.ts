@@ -191,7 +191,19 @@ auth.post('/email/verify', async (c) => {
   )
     .bind(Date.now(), await hashToken(input.token))
     .first<{ email: string; invite_hash: string | null }>();
-  if (!row) throw new HttpError(400, 'link_invalid', 'That link has expired or was already used.');
+  if (!row) {
+    // Say which, to help whoever holds the link (only they can ask about it).
+    const seen = await c.env.DB.prepare('SELECT used_at FROM email_tokens WHERE token_hash = ?')
+      .bind(await hashToken(input.token))
+      .first<{ used_at: number | null }>();
+    throw new HttpError(
+      400,
+      'link_invalid',
+      seen?.used_at
+        ? 'That link was already used. Each one works once: ask for a new one here.'
+        : 'That link has expired. Ask for a new one here.',
+    );
+  }
 
   let user = await c.env.DB.prepare('SELECT id, email FROM users WHERE email = ?')
     .bind(row.email)

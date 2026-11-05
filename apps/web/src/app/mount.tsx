@@ -3,7 +3,6 @@ import { render } from 'preact';
 import '../styles/app.css';
 import {
   account,
-  consumeSignInLink,
   JoinInsteadError,
   joinInsteadOffer,
   keyLinkOffer,
@@ -12,6 +11,7 @@ import {
   pendingInvite,
   restore,
   setPendingInvite,
+  takeSignInLink,
 } from '../account/session';
 import { App, startRequested } from './App';
 import { store } from './model';
@@ -42,12 +42,8 @@ export async function mountApp(root: HTMLElement): Promise<void> {
   await restore().catch(() => {
     account.value = { status: 'none' };
   });
-  // A magic link lands here as #signin=<token>.
-  const signin = await consumeSignInLink();
-  if (signin !== 'none') {
-    if (signin === 'failed') toast('That sign-in link has expired or was already used.');
-    startRequested.value = true;
-  }
+  // A magic link lands here as #signin=<token>: kept until a tap signs in.
+  if (takeSignInLink()) startRequested.value = true;
 
   // A key update or device link opened on a device that is already set up.
   // Its keys are checked first; a link that changes the shared key then

@@ -6,7 +6,6 @@ import { useEffect, useState } from 'preact/hooks';
 import { kvGet, kvSet } from '../account/db';
 import {
   account,
-  consumeSignInLink,
   declineJoinOffer,
   finishJoinedFlow,
   joinedWithAccount,
@@ -21,6 +20,7 @@ import {
   rotationLeft,
   setPendingInvite,
   syncNow,
+  takeSignInLink,
 } from '../account/session';
 import { heldForUpdate, needsNewKeys, syncStatus } from '../account/sync';
 import { LogoMark } from '../Logo';
@@ -505,11 +505,8 @@ export function App() {
     afterAdd.value = () => go('plan');
     const onHash = () => {
       if (location.hash.startsWith('#signin=')) {
-        // A magic link opened in this already-running tab.
-        void consumeSignInLink().then((r) => {
-          if (r === 'failed') toast('That sign-in link has expired or was already used.');
-          startRequested.value = true;
-        });
+        // A magic link opened in this already-running tab: kept until a tap.
+        if (takeSignInLink()) startRequested.value = true;
         return;
       }
       syncFromHash();

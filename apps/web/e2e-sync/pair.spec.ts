@@ -34,7 +34,16 @@ async function signUp(page: Page, email: string, how: 'open' | 'paste' = 'open')
   await expect(page.getByRole('heading', { name: 'Check your email' })).toBeVisible();
   const link = await magicLink(page, email);
   if (how === 'open') {
+    // A link preview (press and hold on an iPhone) loads the page too: that
+    // alone mustn't use up the link.
+    const preview = await page.context().browser()?.newPage();
+    if (preview) {
+      await preview.goto(link);
+      await expect(preview.getByRole('heading', { name: 'Sign in on this device' })).toBeVisible();
+      await preview.close();
+    }
     await page.goto(link);
+    await page.getByRole('button', { name: 'Sign in', exact: true }).click();
     return;
   }
   // An iPhone Home Screen app can't open the link: it's copied and pasted instead.
@@ -691,6 +700,7 @@ test('an invite survives the sign-in link opening in a new tab', async ({ browse
   const link = await magicLink(kim, kimEmail);
   const tab = await kim.context().newPage();
   await tab.goto(link);
+  await tab.getByRole('button', { name: 'Sign in', exact: true }).click();
   await expect(tab.getByRole('heading', { name: 'Join the space' })).toBeVisible();
   await tab.getByRole('textbox', { name: 'Your first name' }).fill('Kim');
   await tab.getByRole('button', { name: 'Join' }).click();

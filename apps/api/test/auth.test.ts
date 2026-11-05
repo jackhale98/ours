@@ -43,15 +43,17 @@ describe('email sign-in', () => {
     await call('/auth/email/start', { body: { email, accept_terms: true } });
     const token = /#signin=([A-Za-z0-9_-]{43})/.exec((await nextMail(before))?.text ?? '')?.[1];
     expect((await call('/auth/email/verify', { body: { token } })).status).toBe(200);
-    expect((await call('/auth/email/verify', { body: { token } })).json.error).toBe('link_invalid');
+    const again = await call('/auth/email/verify', { body: { token } });
+    expect(again.json.error).toBe('link_invalid');
+    expect(again.json.message).toMatch(/already used/);
 
     const before2 = outbox.length;
     await call('/auth/email/start', { body: { email } });
     const t2 = /#signin=([A-Za-z0-9_-]{43})/.exec((await nextMail(before2))?.text ?? '')?.[1];
     await env.DB.prepare('UPDATE email_tokens SET expires_at = 1 WHERE used_at IS NULL').run();
-    expect((await call('/auth/email/verify', { body: { token: t2 } })).json.error).toBe(
-      'link_invalid',
-    );
+    const late = await call('/auth/email/verify', { body: { token: t2 } });
+    expect(late.json.error).toBe('link_invalid');
+    expect(late.json.message).toMatch(/expired/);
   });
 
   it('rejects malformed input', async () => {
