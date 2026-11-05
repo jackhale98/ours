@@ -1,0 +1,5 @@
+# Ours: the site and its legal pages may be indexed. Everything in the app
+# is on the device and encrypted; there is nothing else to crawl.
+User-agent: *
+Allow: /
+Sitemap: https://ourplanner.app/sitemap.xml

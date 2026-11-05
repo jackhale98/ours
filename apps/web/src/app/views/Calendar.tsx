@@ -905,6 +905,7 @@ function WeekGrid({ days, sel }: { days: Day[]; sel: string }) {
                       width: `${100 / b.lanes}%`,
                     }}
                     aria-label={blockLabel(b.row)}
+                    title={blockLabel(b.row)}
                     onClick={() => openEvent(b.row.id, b.row.occ)}
                   >
                     <Marker owner={b.row.owner} {...(mode ? { mode } : {})} />
