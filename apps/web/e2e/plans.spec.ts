@@ -306,3 +306,29 @@ test('moving a shared plan asks; "can’t make it" puts it back (review 0009, P-
   await sheet.getByRole('button', { name: 'Edit' }).click();
   await expect(form(page).getByLabel('Start time')).toHaveValue(was);
 });
+
+test('the page behind an open sheet doesn’t scroll, and is where it was after', async ({
+  page,
+}, info) => {
+  await page.goto('/#plan');
+  await page.getByRole('button', { name: 'Show next week' }).click();
+  const row = page.locator('.ev').nth(3);
+  await row.scrollIntoViewIfNeeded();
+  const before = await page.evaluate(() => window.scrollY);
+  expect(before).toBeGreaterThan(0);
+  await row.click();
+  const sheet = page.getByRole('dialog');
+  await expect(sheet).toBeVisible();
+  await expect(page.locator('html')).toHaveClass(/locked/);
+  // Phones in WebKit have no mouse wheel; elsewhere, wheel over the page.
+  if (!(info.project.name.includes('webkit') && info.project.name.includes('mobile'))) {
+    await page.mouse.move(5, 5);
+    await page.mouse.wheel(0, 600);
+    await page.waitForTimeout(200);
+  }
+  expect(await page.evaluate(() => window.scrollY)).toBe(before);
+  await page.keyboard.press('Escape');
+  await expect(sheet).toHaveCount(0);
+  await expect(page.locator('html')).not.toHaveClass(/locked/);
+  expect(await page.evaluate(() => window.scrollY)).toBe(before);
+});

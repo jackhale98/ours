@@ -190,6 +190,30 @@ if (typeof document !== 'undefined') {
 const FOCUSABLE =
   'button:not([disabled]), [href], input:not([disabled]), textarea, select, [tabindex]:not([tabindex="-1"])';
 
+/*
+ * While a sheet is open the page behind it stays put. A modal <dialog> makes
+ * the page inert but doesn't stop it scrolling. The page's overflow is
+ * hidden (it stays exactly where it was, nothing moves), and on iPhones,
+ * which scroll it anyway on a drag, a drag that starts outside the open sheet
+ * is stopped; the sheet's own scrolling never chains to the page
+ * (overscroll-behavior). Counted, so sheets opened from sheets nest.
+ */
+let scrollLocks = 0;
+const stopOutside = (e: TouchEvent) => {
+  if (!(e.target instanceof Element) || !e.target.closest('dialog[open]')) e.preventDefault();
+};
+function lockScroll(): void {
+  if (scrollLocks++ > 0) return;
+  document.documentElement.classList.add('locked');
+  document.addEventListener('touchmove', stopOutside, { passive: false });
+}
+function unlockScroll(): void {
+  if (--scrollLocks > 0) return;
+  scrollLocks = 0;
+  document.documentElement.classList.remove('locked');
+  document.removeEventListener('touchmove', stopOutside);
+}
+
 export function Sheet({
   labelledBy,
   onClose,
@@ -209,6 +233,7 @@ export function Sheet({
     const active = document.activeElement as HTMLElement | null;
     const opener = active && active !== document.body ? active : lastPressed;
     if (dialog && !dialog.open) dialog.showModal();
+    lockScroll();
     // Always start focus inside the sheet: the marked field, else the first control.
     const first =
       dialog?.querySelector<HTMLElement>('[data-autofocus]') ??
@@ -227,6 +252,7 @@ export function Sheet({
       document.removeEventListener('keydown', onKey);
       // Close the modal first: while it is open the rest of the page is inert and can't take focus.
       if (dialog?.open) dialog.close();
+      unlockScroll();
       if (opener?.isConnected) opener.focus({ preventScroll: true });
     };
   }, []);

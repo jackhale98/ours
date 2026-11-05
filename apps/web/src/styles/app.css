@@ -3943,3 +3943,11 @@ kbd {
   height: 2px;
   opacity: 0.4;
 }
+/* A sheet scrolls on its own; reaching its end never scrolls the page behind. */
+html.locked,
+html.locked body {
+  overflow: hidden;
+}
+dialog.sheet {
+  overscroll-behavior: contain;
+}
