@@ -214,6 +214,19 @@ function unlockScroll(): void {
   document.removeEventListener('touchmove', stopOutside);
 }
 
+/**
+ * Whether opening a sheet should put the cursor in its text field. Not on
+ * touch screens when the sheet is for looking or changing details: the
+ * keyboard would cover it. Sheets for typing (quick add, new list) always do.
+ */
+export const typeFirst = () => {
+  try {
+    return !matchMedia('(pointer: coarse)').matches;
+  } catch {
+    return true;
+  }
+};
+
 export function Sheet({
   labelledBy,
   onClose,

@@ -52,3 +52,17 @@ test('landing sells the app first, then explains privacy', async ({ page }) => {
   await ctas.last().click();
   await expect(page.getByRole('heading', { name: 'This week', exact: true })).toBeVisible();
 });
+
+test('settings has parts, each with its own address', async ({ page }) => {
+  await page.goto('/#settings/reminders');
+  const tabs = page.getByRole('navigation', { name: 'Settings' });
+  await expect(tabs.getByRole('link', { name: 'Reminders' })).toHaveAttribute(
+    'aria-current',
+    'page',
+  );
+  await expect(page.getByRole('heading', { name: 'Default reminders' })).toBeVisible();
+  await tabs.getByRole('link', { name: 'Account' }).click();
+  await expect(page).toHaveURL(/#settings\/account$/);
+  await expect(page.getByRole('link', { name: 'Privacy policy' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Default reminders' })).toHaveCount(0);
+});

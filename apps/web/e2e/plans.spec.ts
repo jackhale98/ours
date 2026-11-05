@@ -125,6 +125,10 @@ test('changing a private plan’s time moves the partner’s “Busy” too', as
     .filter({ visible: true })
     .getByRole('link', { name: 'Settings' })
     .click();
+  await page
+    .getByRole('navigation', { name: 'Settings' })
+    .getByRole('link', { name: 'You two' })
+    .click();
   await page.getByRole('group', { name: 'View as' }).getByRole('button', { name: 'Alex' }).click();
   await page
     .getByRole('navigation', { name: 'Main' })
@@ -289,6 +293,10 @@ test('moving a shared plan asks; "can’t make it" puts it back (review 0009, P-
     .getByRole('navigation', { name: 'Main' })
     .filter({ visible: true })
     .getByRole('link', { name: 'Settings' })
+    .click();
+  await page
+    .getByRole('navigation', { name: 'Settings' })
+    .getByRole('link', { name: 'You two' })
     .click();
   await page.getByRole('group', { name: 'View as' }).getByRole('button', { name: 'Alex' }).click();
   await page

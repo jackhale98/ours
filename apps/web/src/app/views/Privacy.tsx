@@ -17,6 +17,7 @@ import {
 /** Key rotation UI (ADR 0013): off until security review 0005's findings are fixed. */
 
 import { PartnerInviteCard } from '../invite';
+import { SETTINGS_SECTIONS, settingsSection } from '../settingsnav';
 import { VersionCard } from '../version';
 import { CalendarsCard } from './Calendars';
 import { DataCard } from './DataCard';
@@ -30,6 +31,7 @@ export function PrivacyView() {
   const me = viewer.value;
   const n = names.value;
   const demo = mode.value === 'demo';
+  const part = settingsSection.value;
   const code = demo ? safetyCode(SPACE_ID, 1, spaceKey()) : currentSafetyCode();
   const themes: [ThemePref, string][] = [
     ['system', 'System'],
@@ -47,167 +49,194 @@ export function PrivacyView() {
           <h1>Settings</h1>
         </div>
       </header>
+      {/* Parts of Settings, each with its own address, so a setting is a tap away. */}
+      <nav class="subtabs" aria-label="Settings">
+        {SETTINGS_SECTIONS.map(([k, label]) => (
+          <a
+            key={k}
+            href={`#settings/${k}`}
+            class="chip"
+            aria-current={part === k ? 'page' : undefined}
+          >
+            {label}
+          </a>
+        ))}
+      </nav>
       <div class="cards">
-        <section class="card">
-          <div class="status">
-            <span class="shield" aria-hidden="true">
-              <Icon name="shield" size={22} />
-            </span>
-            <div class="stack">
-              <h2 class="h3">End-to-end encrypted</h2>
-              <p class="d">
-                Plans, lists and notes are encrypted on your devices before they sync. The server
-                stores scrambled data it can’t read. It does see your email address, when things
-                change, and when a reminder should fire, but not what it says.
-              </p>
-              <p class="fp">
-                Safety code <span class="code">{code}</span>
-              </p>
-              <p class="d small">
-                Compare this with {n[me === 'a' ? 'b' : 'a']}’s phone in person. If the numbers
-                match, nobody swapped your invite link.
-              </p>
-              <p class="d small">
-                <a href={`${REPO}/blob/main/docs/THREAT_MODEL.md`}>What is and isn’t protected</a>
-              </p>
-            </div>
-          </div>
-        </section>
-
-        {demo ? (
-          <section class="card" aria-labelledby="dev-h">
-            <h2 class="h3" id="dev-h">
-              Devices with the key
-            </h2>
-            <ul class="devs">
-              <li>
-                <Icon name="phone" />
-                <span>{n[me]}’s phone</span>
-                <span class="when">This device</span>
-              </li>
-              <li>
-                <Icon name="laptop" />
-                <span>{n[me]}’s laptop</span>
-                <span class="when">2 hours ago</span>
-              </li>
-              <li>
-                <Icon name="phone" />
-                <span>{n[me === 'a' ? 'b' : 'a']}’s phone</span>
-                <span class="when">Active now</span>
-              </li>
-            </ul>
-            <p class="d small">
-              Sample devices. With an account you can see and remove your real ones here.
-            </p>
-          </section>
-        ) : (
+        {part === 'privacy' && (
           <>
-            <PartnerInviteCard />
-            <DevicesCard />
-            <PasskeysCard />
-            <SecureCard />
-            <NotificationsCard />
+            <section class="card">
+              <div class="status">
+                <span class="shield" aria-hidden="true">
+                  <Icon name="shield" size={22} />
+                </span>
+                <div class="stack">
+                  <h2 class="h3">End-to-end encrypted</h2>
+                  <p class="d">
+                    Plans, lists and notes are encrypted on your devices before they sync. The
+                    server stores scrambled data it can’t read. It does see your email address, when
+                    things change, and when a reminder should fire, but not what it says.
+                  </p>
+                  <p class="fp">
+                    Safety code <span class="code">{code}</span>
+                  </p>
+                  <p class="d small">
+                    Compare this with {n[me === 'a' ? 'b' : 'a']}’s phone in person. If the numbers
+                    match, nobody swapped your invite link.
+                  </p>
+                  <p class="d small">
+                    <a href={`${REPO}/blob/main/docs/THREAT_MODEL.md`}>
+                      What is and isn’t protected
+                    </a>
+                  </p>
+                </div>
+              </div>
+            </section>
+
+            {demo ? (
+              <section class="card" aria-labelledby="dev-h">
+                <h2 class="h3" id="dev-h">
+                  Devices with the key
+                </h2>
+                <ul class="devs">
+                  <li>
+                    <Icon name="phone" />
+                    <span>{n[me]}’s phone</span>
+                    <span class="when">This device</span>
+                  </li>
+                  <li>
+                    <Icon name="laptop" />
+                    <span>{n[me]}’s laptop</span>
+                    <span class="when">2 hours ago</span>
+                  </li>
+                  <li>
+                    <Icon name="phone" />
+                    <span>{n[me === 'a' ? 'b' : 'a']}’s phone</span>
+                    <span class="when">Active now</span>
+                  </li>
+                </ul>
+                <p class="d small">
+                  Sample devices. With an account you can see and remove your real ones here.
+                </p>
+              </section>
+            ) : (
+              <>
+                <DevicesCard />
+                <PasskeysCard />
+                <SecureCard />
+              </>
+            )}
+            {demo ? (
+              <section class="card" aria-labelledby="rec-h">
+                <h2 class="h3" id="rec-h">
+                  Recovery phrase
+                </h2>
+                <p class="d">
+                  When you set up, you write down 12 words. If you lose all your devices, they’re
+                  the only way back to your private plans and lists. {n[me === 'a' ? 'b' : 'a']} can
+                  always re-invite you to shared plans. We never store the words, so we can’t show
+                  them again, but you can make a new phrase from any of your devices.
+                </p>
+                {example.value && (
+                  <ol class="words" aria-label="Example recovery phrase">
+                    {example.value.map((w, i) => (
+                      <li key={`${i}-${w}`}>{w}</li>
+                    ))}
+                  </ol>
+                )}
+                <div class="btnrow">
+                  <button
+                    type="button"
+                    class="btn sm"
+                    onClick={() => {
+                      example.value = example.value ? null : generateRecoveryPhrase();
+                    }}
+                  >
+                    <Icon name="eye" size={15} />
+                    {example.value ? 'Hide example' : 'Show an example phrase'}
+                  </button>
+                </div>
+              </section>
+            ) : (
+              <RecoveryCard />
+            )}
           </>
         )}
-
-        <CalendarsCard />
-
-        {demo ? (
-          <section class="card" aria-labelledby="rec-h">
-            <h2 class="h3" id="rec-h">
-              Recovery phrase
-            </h2>
-            <p class="d">
-              When you set up, you write down 12 words. If you lose all your devices, they’re the
-              only way back to your private plans and lists. {n[me === 'a' ? 'b' : 'a']} can always
-              re-invite you to shared plans. We never store the words, so we can’t show them again,
-              but you can make a new phrase from any of your devices.
-            </p>
-            {example.value && (
-              <ol class="words" aria-label="Example recovery phrase">
-                {example.value.map((w, i) => (
-                  <li key={`${i}-${w}`}>{w}</li>
-                ))}
-              </ol>
+        {part === 'reminders' && (
+          <>
+            {!demo && <NotificationsCard />}
+            <RemindersCard />
+            <EveningCard />
+          </>
+        )}
+        {part === 'calendars' && <CalendarsCard />}
+        {part === 'together' && (
+          <>
+            {!demo && <PartnerInviteCard />}
+            {demo && (
+              <section class="card" aria-labelledby="as-h">
+                <h2 class="h3" id="as-h">
+                  See it as {n[me === 'a' ? 'b' : 'a']}
+                </h2>
+                <p class="d">
+                  Switch sides to check what your partner sees. Private plans turn into “Busy” and
+                  personal lists disappear. (In the demo you can switch fully; on a real device this
+                  is a preview of your own data.)
+                </p>
+                {/* biome-ignore lint/a11y/useSemanticElements: toggle-button group (aria-pressed), labelled; fieldset/legend breaks the segmented layout */}
+                <div class="seg two" role="group" aria-label="View as">
+                  {(['a', 'b'] as const).map((slot) => (
+                    <button
+                      type="button"
+                      key={slot}
+                      aria-pressed={slot === me}
+                      onClick={() => {
+                        setViewer(slot);
+                        toast(`Now viewing as ${n[slot]}.`);
+                      }}
+                    >
+                      <Avatar slot={slot} small />
+                      {n[slot]}
+                    </button>
+                  ))}
+                </div>
+              </section>
             )}
-            <div class="btnrow">
-              <button
-                type="button"
-                class="btn sm"
-                onClick={() => {
-                  example.value = example.value ? null : generateRecoveryPhrase();
-                }}
-              >
-                <Icon name="eye" size={15} />
-                {example.value ? 'Hide example' : 'Show an example phrase'}
-              </button>
-            </div>
-          </section>
-        ) : (
-          <RecoveryCard />
-        )}
 
-        {demo && (
-          <section class="card" aria-labelledby="as-h">
-            <h2 class="h3" id="as-h">
-              See it as {n[me === 'a' ? 'b' : 'a']}
-            </h2>
-            <p class="d">
-              Switch sides to check what your partner sees. Private plans turn into “Busy” and
-              personal lists disappear. (In the demo you can switch fully; on a real device this is
-              a preview of your own data.)
+            <section class="card" aria-labelledby="theme-h">
+              <h2 class="h3" id="theme-h">
+                Appearance
+              </h2>
+              {/* biome-ignore lint/a11y/useSemanticElements: toggle-button group (aria-pressed), labelled; fieldset/legend breaks the segmented layout */}
+              <div class="seg" role="group" aria-labelledby="theme-h">
+                {themes.map(([value, label]) => (
+                  <button
+                    type="button"
+                    key={value}
+                    aria-pressed={theme.value === value}
+                    onClick={() => setTheme(value)}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+              <PersonLook />
+            </section>
+          </>
+        )}
+        {part === 'account' && (
+          <>
+            <DataCard />
+            {!demo && <AccountCard />}
+            <VersionCard />
+            <p class="legal-links">
+              <a href={`${import.meta.env.BASE_URL}legal/privacy/`}>Privacy policy</a>
+              <a href={`${import.meta.env.BASE_URL}legal/terms/`}>Terms</a>
+              <a href={`${import.meta.env.BASE_URL}legal/accessibility/`}>Accessibility</a>
+              <a href={REPO}>Source code</a>
             </p>
-            {/* biome-ignore lint/a11y/useSemanticElements: toggle-button group (aria-pressed), labelled; fieldset/legend breaks the segmented layout */}
-            <div class="seg two" role="group" aria-label="View as">
-              {(['a', 'b'] as const).map((slot) => (
-                <button
-                  type="button"
-                  key={slot}
-                  aria-pressed={slot === me}
-                  onClick={() => {
-                    setViewer(slot);
-                    toast(`Now viewing as ${n[slot]}.`);
-                  }}
-                >
-                  <Avatar slot={slot} small />
-                  {n[slot]}
-                </button>
-              ))}
-            </div>
-          </section>
+          </>
         )}
-
-        <section class="card" aria-labelledby="theme-h">
-          <h2 class="h3" id="theme-h">
-            Appearance
-          </h2>
-          {/* biome-ignore lint/a11y/useSemanticElements: toggle-button group (aria-pressed), labelled; fieldset/legend breaks the segmented layout */}
-          <div class="seg" role="group" aria-labelledby="theme-h">
-            {themes.map(([value, label]) => (
-              <button
-                type="button"
-                key={value}
-                aria-pressed={theme.value === value}
-                onClick={() => setTheme(value)}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-          <PersonLook />
-        </section>
-
-        <RemindersCard />
-        <EveningCard />
-        <DataCard />
-        {!demo && <AccountCard />}
-        <VersionCard />
-        <p class="legal-links">
-          <a href={`${import.meta.env.BASE_URL}legal/privacy/`}>Privacy policy</a>
-          <a href={`${import.meta.env.BASE_URL}legal/terms/`}>Terms</a>
-          <a href={`${import.meta.env.BASE_URL}legal/accessibility/`}>Accessibility</a>
-          <a href={REPO}>Source code</a>
-        </p>
       </div>
     </>
   );

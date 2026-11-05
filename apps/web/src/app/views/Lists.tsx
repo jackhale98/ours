@@ -86,7 +86,7 @@ import {
 } from '../model';
 import { DATE_ORDER, fmtLong, nextFreeEvening, relDay, repeatText, today } from '../select';
 import { openEvent, openQuick } from '../sheets';
-import { CloseButton, colorVar, Icon, Sheet, Switch, toast } from '../ui';
+import { CloseButton, colorVar, Icon, Sheet, Switch, toast, typeFirst } from '../ui';
 import { CrossViewPane, CrossViews, crossView } from './ListViews';
 
 const showDone = signal(false);
@@ -1625,7 +1625,7 @@ function ListSettingsSheet({ id }: { id: string }) {
           <label for="le-name">Name</label>
           <input
             id="le-name"
-            data-autofocus
+            data-autofocus={typeFirst() || undefined}
             class="txt"
             type="text"
             value={name}
@@ -1906,7 +1906,7 @@ function ListSwitcher({ current }: { current: string | null }) {
         </div>
         {all.length > 8 && !ordering && (
           <input
-            data-autofocus
+            data-autofocus={typeFirst() || undefined}
             class="txt"
             type="search"
             value={q}

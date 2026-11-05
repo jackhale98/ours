@@ -32,6 +32,7 @@ import { activeLists, allLists, currentList } from './lists';
 import { findEntry, mode, nameOf, names, partner, viewer } from './model';
 import { drawerOpen, focusDate, type PlanMode, planHash, planMode, setPlanMode } from './planview';
 import { now } from './select';
+import { isSettingsSection, settingsSection } from './settingsnav';
 import { accept, afterAdd, openEvent, openPlanForm, openQuick, SheetHost, sheet } from './sheets';
 import { Avatar, CloseButton, Icon, type IconName, Sheet, ToastHost, toast } from './ui';
 import { UpdateBanner } from './version';
@@ -156,8 +157,11 @@ function syncFromHash() {
     return;
   }
   if (h === 'plan') setPlanMode('agenda', false);
-  // The tab was called Privacy: its old address still opens it.
-  if (h === 'privacy') {
+  // A part of Settings (#settings/reminders); the tab was called Privacy,
+  // and its old address still opens it.
+  const part = /^settings\/([a-z]+)$/.exec(h)?.[1];
+  if (h === 'privacy' || (part && isSettingsSection(part))) {
+    settingsSection.value = part && isSettingsSection(part) ? part : 'privacy';
     tab.value = 'settings';
     startRequested.value = false;
     return;
@@ -479,7 +483,7 @@ function PhraseBanner() {
         <Icon name="lock" size={16} />
         <span>
           The keys didn’t change, but your new recovery phrase was saved: keep it, it’s now the one
-          that restores your keys. <a href="#settings">Details in Settings</a>.
+          that restores your keys. <a href="#settings/privacy">Details in Settings</a>.
         </span>
       </div>
     );
@@ -489,7 +493,7 @@ function PhraseBanner() {
       <Icon name="lock" size={16} />
       <span>
         Your keys changed, so your recovery phrase can’t restore them.{' '}
-        <a href="#settings">Make a new phrase in Settings</a>.
+        <a href="#settings/privacy">Make a new phrase in Settings</a>.
       </span>
     </div>
   );

@@ -19,7 +19,12 @@ const nav = (page: Page, name: string) =>
     .click();
 
 async function addSample(page: Page, share: 'Everything' | 'Just busy') {
+  // The old address still opens Settings.
   await page.goto('/#privacy');
+  await page
+    .getByRole('navigation', { name: 'Settings' })
+    .getByRole('link', { name: 'Calendars' })
+    .click();
   await page.getByText('Add a calendar').click();
   const form = page.locator('details.addcal');
   await form
@@ -39,7 +44,15 @@ test('import a calendar shared as busy-only: I see details, my partner sees Busy
   await expect(page.getByRole('button', { name: /Team standup/ }).first()).toBeVisible();
 
   await nav(page, 'Settings');
+  await page
+    .getByRole('navigation', { name: 'Settings' })
+    .getByRole('link', { name: 'You two' })
+    .click();
   await page.getByRole('group', { name: 'View as' }).getByRole('button', { name: 'Alex' }).click();
+  await page
+    .getByRole('navigation', { name: 'Settings' })
+    .getByRole('link', { name: 'Calendars' })
+    .click();
   await expect(page.getByText(/shared by Sam · busy times only/)).toBeVisible();
   await nav(page, 'Plan');
   await expect(page.getByText('Team standup')).toHaveCount(0);
@@ -48,6 +61,10 @@ test('import a calendar shared as busy-only: I see details, my partner sees Busy
 
 test('import a calendar shared in full: my partner sees titles', async ({ page }) => {
   await addSample(page, 'Everything');
+  await page
+    .getByRole('navigation', { name: 'Settings' })
+    .getByRole('link', { name: 'You two' })
+    .click();
   await page.getByRole('group', { name: 'View as' }).getByRole('button', { name: 'Alex' }).click();
   await nav(page, 'Plan');
   await expect(page.getByRole('button', { name: /Team standup/ }).first()).toBeVisible();
@@ -74,6 +91,10 @@ test('the feed leaves out calendars I imported, and changing the share updates i
   });
   await expect(feed.getByText(/Leaves out Work/)).toBeVisible();
   // As Alex, Sam's work calendar is not Alex's own, so it isn't left out.
+  await page
+    .getByRole('navigation', { name: 'Settings' })
+    .getByRole('link', { name: 'You two' })
+    .click();
   await page.getByRole('group', { name: 'View as' }).getByRole('button', { name: 'Alex' }).click();
   await expect(feed.getByText(/Leaves out/)).toHaveCount(0);
 });
@@ -109,7 +130,7 @@ test('each person picks a colour and a shape, and everything follows', async ({ 
   // Both circles by default, so the key doesn't mention shapes.
   await expect(page.getByText('Alex’s plan', { exact: true })).toBeVisible();
 
-  await page.goto('/#settings');
+  await page.goto('/#settings/together');
   const alex = page.getByRole('group', { name: 'Alex’s shape' });
   await alex.getByRole('button', { name: 'Square' }).click();
   await expect(alex.getByRole('button', { name: 'Square' })).toHaveAttribute(
@@ -146,7 +167,7 @@ test('each person picks a colour and a shape, and everything follows', async ({ 
 });
 
 test('colours that colour blindness could confuse suggest different shapes', async ({ page }) => {
-  await page.goto('/#settings');
+  await page.goto('/#settings/together');
   await page
     .getByRole('radiogroup', { name: 'Sam’s colour' })
     .getByTitle('Green', { exact: true })

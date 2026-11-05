@@ -73,6 +73,10 @@ test('declining a proposal hides it for me and shows the answer to my partner', 
   await expect(page.locator('.ask')).toHaveCount(0);
   // Switch to the partner who asked: the plan is still there, marked declined.
   await nav(page, 'Settings');
+  await page
+    .getByRole('navigation', { name: 'Settings' })
+    .getByRole('link', { name: 'You two' })
+    .click();
   await page.getByRole('group', { name: 'View as' }).getByRole('button', { name: 'Alex' }).click();
   await nav(page, 'Plan');
   const row = page.locator('.ev.is-declined').first();
@@ -166,7 +170,7 @@ test('all-day plans: a reminder some days before, at a chosen time', async ({ pa
 });
 
 test('default reminders apply to new plans', async ({ page }) => {
-  await openDemo(page, 'privacy');
+  await openDemo(page, 'settings/reminders');
   const timed = page.getByRole('group', { name: 'Plans with a time' });
   await timed.getByRole('button', { name: 'Add a reminder' }).click();
   await timed.getByRole('button', { name: '30 minutes before' }).click();
@@ -196,6 +200,10 @@ test('a private plan is hidden from the partner but visible as Busy', async ({ p
   await expect(page.getByRole('button', { name: /Surprise planning/ })).toBeVisible();
 
   await nav(page, 'Settings');
+  await page
+    .getByRole('navigation', { name: 'Settings' })
+    .getByRole('link', { name: 'You two' })
+    .click();
   await page.getByRole('group', { name: 'View as' }).getByRole('button', { name: 'Alex' }).click();
   await nav(page, 'Plan');
   await expect(page.getByText('Surprise planning')).toHaveCount(0);
@@ -239,6 +247,10 @@ test('lists: add, assign, check off; private list is hidden from the partner', a
 
   await expect(page.getByRole('button', { name: /Gift ideas/ })).toBeVisible();
   await nav(page, 'Settings');
+  await page
+    .getByRole('navigation', { name: 'Settings' })
+    .getByRole('link', { name: 'You two' })
+    .click();
   await page.getByRole('group', { name: 'View as' }).getByRole('button', { name: 'Alex' }).click();
   await nav(page, 'Lists');
   await expect(page.getByRole('button', { name: /Gift ideas/ })).toHaveCount(0);
@@ -274,7 +286,7 @@ test('check-in: finish after four steps', async ({ page }) => {
 });
 
 test('theme override applies', async ({ page }) => {
-  await openDemo(page, 'privacy');
+  await openDemo(page, 'settings/together');
   await page
     .getByRole('group', { name: 'Appearance' })
     .getByRole('button', { name: 'Dark' })

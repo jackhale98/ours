@@ -4057,3 +4057,29 @@ dialog.sheet {
     overflow: visible;
   }
 }
+
+/* Settings: its parts as a row of tabs (scrolls sideways on phones). */
+.subtabs {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  overscroll-behavior-x: contain;
+  margin-bottom: 16px;
+  padding-block: 2px;
+}
+.subtabs::-webkit-scrollbar {
+  display: none;
+}
+.subtabs .chip {
+  flex: none;
+  min-height: 40px;
+  padding: 0 16px;
+  color: var(--ink);
+  text-decoration: none;
+}
+.subtabs .chip[aria-current="page"] {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: var(--paper);
+}

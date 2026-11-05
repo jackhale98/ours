@@ -51,6 +51,10 @@ test('gift lists are private by default and hidden from the partner', async ({ p
   await dialog.getByRole('button', { name: 'Make list' }).click();
   await expect(page.getByRole('button', { name: /Private: Birthday/ })).toBeVisible();
   await nav(page, 'Settings');
+  await page
+    .getByRole('navigation', { name: 'Settings' })
+    .getByRole('link', { name: 'You two' })
+    .click();
   await page.getByRole('group', { name: 'View as' }).getByRole('button', { name: 'Alex' }).click();
   await nav(page, 'Lists');
   await expect(page.getByRole('button', { name: /Birthday/ })).toHaveCount(0);
@@ -214,7 +218,9 @@ test('a plan’s checklist, due in the days before it', async ({ page }) => {
   await page.locator('.note button', { hasText: 'Lisbon trip' }).click();
   const plan = page.getByRole('dialog', { name: 'Lisbon trip' });
   await expect(plan.getByRole('button', { name: /For Lisbon/ })).toBeVisible();
-  await plan.getByRole('button', { name: 'Add a checklist' }).click();
+  // It has one: another can be added, new or one you already have.
+  await plan.getByRole('button', { name: 'Add another list' }).click();
+  await plan.getByRole('button', { name: 'Nothing yet' }).click();
   await expect(page.getByRole('button', { name: /For Lisbon trip/, pressed: true })).toBeVisible();
 });
 
@@ -414,8 +420,29 @@ test('a plan’s new checklist can start from the last trip’s (review 0008, L-
   await page.goto('/#plan');
   await page.getByRole('button', { name: /Ours: Dinner with Jordan/ }).click();
   const plan = page.getByRole('dialog', { name: 'Dinner with Jordan & Priya' });
-  await plan.getByRole('button', { name: 'Add a checklist' }).click();
+  await plan.getByRole('button', { name: 'Add a list' }).click();
   await plan.getByRole('button', { name: 'Last time: For Lisbon' }).click();
   await expect(page.getByRole('button', { name: /^For Dinner with Jordan/ }).first()).toBeVisible();
   await expect(page.locator('.it', { hasText: 'Passports' })).toHaveCount(1);
+});
+
+test('a plan can take a list you already have, and more than one', async ({ page }, info) => {
+  await page.goto('/#plan');
+  await page.getByRole('button', { name: /Ours: Dinner with Jordan/ }).click();
+  const plan = page.getByRole('dialog', { name: 'Dinner with Jordan & Priya' });
+  await plan.getByRole('button', { name: 'Add a list' }).click();
+  await plan.getByLabel('Or a list you already have').selectOption({ label: 'Groceries' });
+  await expect(page.locator('.toast-host')).toContainText('“Groceries” is on this plan now');
+  await expect(plan.getByRole('button', { name: /^Groceries/ })).toBeVisible();
+  await plan.getByRole('button', { name: 'Add another list' }).click();
+  await plan.getByLabel('Or a list you already have').selectOption({ label: 'Home' });
+  await expect(plan.getByRole('button', { name: /^Home/ })).toBeVisible();
+
+  // On a phone, an item's details open without the keyboard.
+  if (!info.project.name.includes('mobile')) return;
+  await page.keyboard.press('Escape');
+  await page.goto('/#lists');
+  await page.getByRole('button', { name: 'Details: Oat milk' }).click();
+  await expect(page.getByRole('dialog', { name: 'Oat milk' })).toBeVisible();
+  await expect(page.getByRole('textbox', { name: 'What' })).not.toBeFocused();
 });

@@ -564,7 +564,7 @@ export function PlanView() {
                 </span>
               </div>
             </div>
-            <a class="enc" href="#settings">
+            <a class="enc" href="#settings/privacy">
               <Icon name="lock" size={14} />
               Encrypted
             </a>
@@ -581,7 +581,7 @@ export function PlanView() {
           <h1 class="sr">{mode === 'week' ? 'Week' : 'Month'}</h1>
           <ViewSwitch />
           <FilterButton />
-          <a class="enc" href="#settings" aria-label="Encrypted">
+          <a class="enc" href="#settings/privacy" aria-label="Encrypted">
             <Icon name="lock" size={14} />
             <span class="enc-t">Encrypted</span>
           </a>

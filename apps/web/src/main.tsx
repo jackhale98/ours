@@ -18,6 +18,7 @@ const APP_ROUTES = new Set([
 const isAppRoute = () =>
   APP_ROUTES.has(location.hash.slice(1)) ||
   /^#plan[/&]/.test(location.hash) ||
+  /^#settings\//.test(location.hash) ||
   location.hash.startsWith('#signin=');
 
 applyTheme();

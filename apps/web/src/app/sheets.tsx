@@ -8,6 +8,7 @@ import { useState } from 'preact/hooks';
 import { AddToCalendar } from './addtocal';
 import { FreeTimeSheet } from './freetime';
 import {
+  activeLists,
   copyList,
   countOf,
   createList,
@@ -18,6 +19,7 @@ import {
   STARTING_POINTS,
   type StartingPoint,
   savedStartingPoints,
+  setListPlan,
 } from './lists';
 import {
   addComment,
@@ -897,6 +899,19 @@ function PlanChecklists({ id, e }: { id: string; e: EventData }) {
     .filter((l) => l.rec.data.private === priv)
     .slice(0, 2);
   const saved = savedStartingPoints().filter((sp) => sp.listId);
+  // Lists you have that aren't for a plan yet: a menu for the dinner, a packing list.
+  const attachable = activeLists().filter((l) => !l.rec.data.plan_id);
+  const attach = (listId: string) => {
+    const l = attachable.find((x) => x.id === listId);
+    if (!l) return;
+    setListPlan(l.id, id);
+    setChoosing(false);
+    toast(
+      l.rec.data.private && !priv
+        ? `“${l.rec.data.name}” is on this plan, still just for you.`
+        : `“${l.rec.data.name}” is on this plan now.`,
+    );
+  };
   const make = (from: { copy: ListEntry } | { start: StartingPoint } | null) => {
     const name = `For ${e.title}`.slice(0, 100);
     let listId: string | null;
@@ -934,7 +949,7 @@ function PlanChecklists({ id, e }: { id: string; e: EventData }) {
       })}
       {choosing ? (
         <div class="stack gap">
-          <p class="small muted">Start the checklist from:</p>
+          <p class="small muted">A new checklist from:</p>
           <div class="btnrow">
             <button type="button" class="btn sm" onClick={() => make(null)}>
               Nothing yet
@@ -952,14 +967,38 @@ function PlanChecklists({ id, e }: { id: string; e: EventData }) {
               </button>
             ))}
           </div>
+          {attachable.length > 0 && (
+            <div class="field">
+              <label for={`attach-${id}`}>Or a list you already have</label>
+              <select
+                id={`attach-${id}`}
+                class="txt"
+                value=""
+                onChange={(e) => attach(e.currentTarget.value)}
+              >
+                <option value="">Choose a list</option>
+                {attachable.map((l) => (
+                  <option key={l.id} value={l.id}>
+                    {l.rec.data.private ? `${l.rec.data.name} (just you)` : l.rec.data.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+          <button type="button" class="linkbtn" onClick={() => setChoosing(false)}>
+            Cancel
+          </button>
         </div>
       ) : (
         <button
           type="button"
           class="linkbtn"
-          onClick={() => (earlier.length || saved.length ? setChoosing(true) : make(null))}
+          onClick={() =>
+            earlier.length || saved.length || attachable.length ? setChoosing(true) : make(null)
+          }
         >
-          Add a checklist
+          <Icon name="plus" size={15} />
+          {lists.length ? 'Add another list' : 'Add a list'}
         </button>
       )}
     </div>

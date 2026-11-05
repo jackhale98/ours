@@ -34,7 +34,7 @@ import { findEntry, nameOf, partner, remove, type Slot, update, viewer } from '.
 import { REPEAT_CHOICES } from './planform';
 import { fmtLong, nextFreeEvening, relDay, repeatText, today } from './select';
 import { openEvent, openQuick } from './sheets';
-import { CloseButton, Icon, Marker, Sheet, Switch, toast } from './ui';
+import { CloseButton, Icon, Marker, Sheet, Switch, toast, typeFirst } from './ui';
 
 export const itemSheet = signal<string | null>(null);
 const close = () => {
@@ -177,7 +177,7 @@ function ItemSheet({ item, list }: { item: ItemEntry; list: ListEntry }) {
           <input
             id="is-name"
             class="txt"
-            data-autofocus
+            data-autofocus={typeFirst() || undefined}
             value={text}
             maxLength={500}
             onInput={(e) => setText(e.currentTarget.value)}

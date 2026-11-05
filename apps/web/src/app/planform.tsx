@@ -24,7 +24,7 @@ import { ReminderPicker } from './reminderpicker';
 import { defaultReminders, remindersOf, withReminders } from './reminders';
 import { repeatText, today, weekStartsOn, zone } from './select';
 import { afterAdd, sheet } from './sheets';
-import { CloseButton, Marker, Sheet, Switch, toast } from './ui';
+import { CloseButton, Marker, Sheet, Switch, toast, typeFirst } from './ui';
 
 export type Draft = Partial<EventData>;
 
@@ -300,7 +300,7 @@ export function PlanForm({ id, draft }: { id: string | null; draft?: Draft }) {
             value={title}
             maxLength={200}
             required
-            data-autofocus
+            data-autofocus={!editing || typeFirst() || undefined}
             onInput={(e) => setTitle(e.currentTarget.value)}
             autocomplete="off"
           />
