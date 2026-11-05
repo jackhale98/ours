@@ -325,3 +325,24 @@ test('check-in: each count opens the plans behind it', async ({ page }) => {
   await counts.getByRole('button', { name: /Alex/ }).click();
   await expect(list).toHaveCount(0);
 });
+
+test('quick add says it reads plain words, with examples to try', async ({ page }) => {
+  await openDemo(page);
+  await page.keyboard.press('n');
+  const dialog = page.getByRole('dialog', { name: 'New plan' });
+  await expect(dialog).toContainText('Type it the way you’d say it');
+  await dialog
+    .getByRole('group', { name: 'Try one' })
+    .getByRole('button', { name: 'Camping sat-sun' })
+    .click();
+  await expect(page.getByRole('textbox', { name: 'What’s the plan?' })).toHaveValue(
+    'Camping sat-sun',
+  );
+  await expect(dialog.locator('.qa-hint')).toContainText('Saturday');
+  await page.keyboard.press('Escape');
+  // A list's add box says what it reads too, once you're in it.
+  await page.goto('/#lists');
+  await page.getByRole('button', { name: /^Home/ }).first().click();
+  await page.getByRole('textbox', { name: 'Add to Home' }).focus();
+  await expect(page.locator('.add-try')).toContainText('bins every monday');
+});

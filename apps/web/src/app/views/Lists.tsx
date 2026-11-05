@@ -418,9 +418,18 @@ function AddItem({ list, placeholder }: { list: ListEntry; placeholder: string }
   const f = featuresOf(list);
   const [text, setText] = useState('');
   const [section, setSection] = useState('');
+  const [focused, setFocused] = useState(false);
   const input = useRef<HTMLInputElement>(null);
   const sections = sectionsOf(list.id);
   const line = text.trim() ? readLine(text.trim(), list) : null;
+  // What this list reads from the words, shown while the box is empty and in use.
+  const tries = [
+    ...(f.has('due') ? ['bins every monday', 'renew passport by mar 1'] : []),
+    ...(f.has('qty') ? ['2 x milk'] : []),
+    ...(f.has('who') && f.has('tick') && !list.rec.data.private
+      ? [`call the plumber @${nameOf(partner.value)}`]
+      : []),
+  ].slice(0, 3);
   const ideas = line ? suggestItems(list.id, line.text).filter((i) => i.rec.data.done) : [];
   const bringBack = (
     item: ItemEntry,
@@ -486,10 +495,12 @@ function AddItem({ list, placeholder }: { list: ListEntry; placeholder: string }
           value={text}
           maxLength={500}
           onInput={(e) => setText(e.currentTarget.value)}
+          onFocus={() => setFocused(true)}
+          onBlur={() => setFocused(false)}
           placeholder={placeholder}
           autocomplete="off"
           aria-label={`Add to ${list.rec.data.name}`}
-          aria-describedby={`add-hint-${list.id}`}
+          aria-describedby={`add-hint-${list.id} add-try-${list.id}`}
           aria-keyshortcuts="n a"
         />
         {f.has('sections') && (
@@ -517,6 +528,12 @@ function AddItem({ list, placeholder }: { list: ListEntry; placeholder: string }
           Add
         </button>
       </form>
+      {/* Floats under the box: showing or hiding it never moves the list. */}
+      {focused && !text.trim() && tries.length > 0 && (
+        <p class="add-try small" id={`add-try-${list.id}`}>
+          Type it as you’d say it: {tries.map((x) => `“${x}”`).join(', ')}
+        </p>
+      )}
       <div class="add-hint" id={`add-hint-${list.id}`} aria-live="polite">
         {chips.map((c) => (
           <span class="pchip" key={c}>

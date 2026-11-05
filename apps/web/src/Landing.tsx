@@ -15,6 +15,7 @@ type Who = 'a' | 'b' | 'both';
 const ICONS = {
   cal: '<rect x="3.5" y="5" width="17" height="15.5" rx="2.5"/><path d="M3.5 10h17M8.5 3v4M15.5 3v4"/>',
   chat: '<path d="M4.5 5.5h15v10h-9.5l-5.5 4z"/>',
+  type: '<path d="M5 6.5V5h14v1.5M12 5v14M9 19h6"/>',
   list: '<path d="M9.5 6.5h10.5M9.5 12h10.5M9.5 17.5h10.5"/><path d="M4 6.5l1.2 1.2L7.2 5.5M4 12l1.2 1.2L7.2 11"/><circle cx="5.5" cy="17.5" r="1.2"/>',
   link: '<path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/>',
   inbox:
@@ -439,6 +440,10 @@ export function Landing() {
               <Feature icon="cal" title="Both your weeks at once">
                 Agenda, week and month views show whose plan is whose at a glance, and point out the
                 evenings you’re both free.
+              </Feature>
+              <Feature icon="type" title="Type it the way you’d say it">
+                “Dinner fri 7:30pm @ Vic’s”, “gym every mon & thu 7am”, “bins every monday”: the
+                day, time, place and repeat are picked out for you, plans and to-dos alike.
               </Feature>
               <Feature icon="chat" title="Ask, don’t assume">
                 Propose a plan and it stays tentative until your partner says yes. One tap to

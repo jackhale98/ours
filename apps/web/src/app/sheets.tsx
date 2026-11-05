@@ -205,6 +205,41 @@ function SkipWhileAway({ id, e }: { id: string; e: EventData }) {
 
 /* ---------- quick add ---------- */
 
+/** Things to try in quick add: tapping one fills the box, so you see what it picks out. */
+const QA_EXAMPLES = [
+  'Dinner fri 7:30pm @ Vic’s',
+  'Gym every mon & thu 7am',
+  'Camping sat-sun',
+  'Call Mum 3pm for 30 mins',
+  'Brunch sun 11am?',
+];
+
+/** "Type it the way you'd say it", shown: examples to tap, and what it understands. */
+function TypeHelp({ onTry }: { onTry: (example: string) => void }) {
+  return (
+    <div class="typehelp">
+      {/* biome-ignore lint/a11y/useSemanticElements: a labelled row of example buttons */}
+      <div class="chips" role="group" aria-label="Try one">
+        {QA_EXAMPLES.map((x) => (
+          <button type="button" class="chip" key={x} onClick={() => onTry(x)}>
+            {x}
+          </button>
+        ))}
+      </div>
+      <details>
+        <summary class="small">What it understands</summary>
+        <ul class="small muted">
+          <li>Days: today, tomorrow, fri, next week, in 3 days, nov 14, 11/14</li>
+          <li>Times: 7pm, 7:30, at 7, 7–9pm, from 6 to 8, for 2 hours</li>
+          <li>Several days: sat-sun, fri to mon, dec 3-10</li>
+          <li>Repeats: every day, every mon & thu, weekdays, monthly on the 1st</li>
+          <li>Place: @ Vic’s · Just you: #private · Ask your partner: end with ?</li>
+        </ul>
+      </details>
+    </div>
+  );
+}
+
 function QuickAdd({ preset }: { preset: QuickPreset }) {
   const me = viewer.value;
   const p = partner.value;
@@ -369,9 +404,17 @@ function QuickAdd({ preset }: { preset: QuickPreset }) {
               )}
             </>
           ) : (
-            'Type it the way you’d say it. Try “tomorrow 8am” or “sat @ the park”.'
+            'Type it the way you’d say it: the day, time, place and repeat are picked out.'
           )}
         </p>
+        {!text.trim() && (
+          <TypeHelp
+            onTry={(example) => {
+              setText(example);
+              document.querySelector<HTMLInputElement>('.qa-main')?.focus();
+            }}
+          />
+        )}
         <div class="row2">
           <div class="field">
             <label for="qa-date">Day</label>

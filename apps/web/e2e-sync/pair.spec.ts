@@ -204,7 +204,7 @@ test('sign up, pair, compare safety codes, and sync plans both ways', async ({ b
   }
 
   // Alex turns on notifications on their device.
-  await alex.goto('/#privacy');
+  await alex.goto('/#settings/reminders');
   const toggle = alex.getByRole('switch', { name: 'Notifications on this device' });
   await toggle.click();
   await expect(alex.locator('.toast-host')).toContainText('Notifications on.');
@@ -290,7 +290,7 @@ test('sign up, pair, compare safety codes, and sync plans both ways', async ({ b
     ]);
 
   // Privacy says why the last notification only said "Something changed".
-  await alex.goto('/#privacy');
+  await alex.goto('/#settings/reminders');
   await expect(alex.locator('section[aria-labelledby="notif-h"]')).toContainText('arrived twice', {
     timeout: 10_000,
   });
@@ -349,7 +349,7 @@ test('sign up, pair, compare safety codes, and sync plans both ways', async ({ b
   }
 
   // The busy-time feed: Sam turns it on and a calendar app can read it.
-  await sam.goto('/#privacy');
+  await sam.goto('/#settings/calendars');
   await sam.getByRole('button', { name: 'Turn on the feed' }).click();
   const feedUrl =
     (await sam.locator('section[aria-labelledby="feed-h"] .url code').textContent()) ?? '';
@@ -387,7 +387,7 @@ test('sign up, pair, compare safety codes, and sync plans both ways', async ({ b
   // Key rotation (ADR 0013, review 0005): Sam secures the space after losing
   // a device. The new phrase is saved before anything changes on the server.
   const oldCode = await sam.evaluate(() => document.querySelector('.code')?.textContent ?? null);
-  await sam.goto('/#privacy');
+  await sam.goto('/#settings/privacy');
   const secure = sam.locator('section[aria-labelledby="secure-h"]');
   await secure.getByRole('button', { name: 'Make new keys' }).click();
   await secure.getByRole('button', { name: 'Yes, make new keys' }).click();
@@ -525,9 +525,9 @@ test('sign up, pair, compare safety codes, and sync plans both ways', async ({ b
   await fresh.context().close();
 
   // Both see the same new safety code; Sam stops being offered the link (M3).
-  await alex.goto('/#privacy');
+  await alex.goto('/#settings/privacy');
   expect(await alex.locator('.code').first().textContent()).toBe(newCode);
-  await sam.goto('/#privacy');
+  await sam.goto('/#settings/privacy');
   await sam.reload();
   await expect(secure.getByRole('button', { name: 'Make key update link' })).toHaveCount(0, {
     timeout: 20_000,
@@ -550,7 +550,7 @@ test('a partner invite can be made again later, from Privacy or Waiting on you',
   await expect(jo.getByRole('heading', { name: 'This week', exact: true })).toBeVisible();
 
   // Nobody has joined: Privacy offers a fresh link, which replaces the first.
-  await jo.goto('/#privacy');
+  await jo.goto('/#settings/together');
   const card = jo.locator('section.card', { hasText: 'Invite your partner' });
   await card.getByRole('button', { name: 'Make an invite link' }).click();
   const second = (await card.locator('.url code').textContent()) ?? '';
@@ -612,7 +612,7 @@ test('a passkey can sign in and unlock the keys, without a link or the phrase', 
   await expect(page.locator('.rail .demo')).toHaveText('Synced', { timeout: 20_000 });
 
   // Turn on unlocking with the passkey, after reading what it means.
-  await page.goto('/#privacy');
+  await page.goto('/#settings/privacy');
   const card = page.locator('section[aria-labelledby="pk-h"]');
   await expect(card).toContainText('signs in');
   // Nothing from the passkey's unlock secret is sent when setting it up either.
@@ -897,7 +897,7 @@ test('a new device scans the device link’s code with its camera', async ({ bro
   await recoveryPhrase(jo);
   await jo.getByRole('button', { name: 'Do this later' }).click();
   await jo.getByRole('button', { name: 'Not now' }).click();
-  await jo.goto('/#privacy');
+  await jo.goto('/#settings/privacy');
   await jo.getByRole('button', { name: 'Link a new device' }).click();
   const card = jo.locator('section', { has: jo.getByRole('button', { name: 'Copy' }) }).first();
   await expect(card.getByRole('img', { name: 'QR code of the device link' })).toBeVisible();
