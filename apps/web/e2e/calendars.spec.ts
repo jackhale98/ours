@@ -119,10 +119,8 @@ test('each person picks a colour and a shape, and everything follows', async ({ 
   // Who's on a list item: a circle for both, until a shape is picked.
   await page.goto('/#lists');
   await page.getByRole('button', { name: /^Home/ }).first().click();
-  const badge = page
-    .getByRole('button', { name: /^Alex is on it/ })
-    .first()
-    .locator('span');
+  // Alex is slot b in the demo.
+  const badge = page.locator('.who span.b').first();
   await expect(badge).toHaveCSS('border-radius', '50%');
 
   await page.goto('/#plan');

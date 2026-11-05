@@ -143,27 +143,38 @@ const filters = signal<{ both: boolean; soon: boolean; season: boolean; favs: bo
   favs: false,
 });
 
+/**
+ * Who's on it: the person's initial, and a native dropdown over it to choose
+ * (nobody, me, or my partner), so phones show their own picker.
+ */
 function AssignButton({ item }: { item: ItemEntry }) {
   const me = viewer.value;
   const p = partner.value;
-  const who = item.rec.data.assignee;
-  const order: (Slot | null)[] = [null, me, p];
-  const next = order[(order.indexOf(who === 'both' ? null : who) + 1) % order.length] ?? null;
-  const label = who && who !== 'both' ? `${nameOf(who)} is on it. Change` : 'No one yet. Assign';
+  const raw = item.rec.data.assignee;
+  const who = raw && raw !== 'both' ? raw : null;
   return (
-    <button
-      type="button"
-      class={`who${who && who !== 'both' ? '' : ' none'}`}
-      aria-label={`${label}: ${item.rec.data.text}`}
-      onClick={() => update<'item'>(item.id, { assignee: next })}
-    >
+    <span class={`who${who ? '' : ' none'}`}>
       <span
-        class={who && who !== 'both' ? who : undefined}
-        style={who && who !== 'both' ? { '--c': colorVar(who) } : undefined}
+        class={who ?? undefined}
+        style={who ? { '--c': colorVar(who) } : undefined}
+        aria-hidden="true"
       >
-        {who && who !== 'both' ? nameOf(who).charAt(0) : '+'}
+        {who ? nameOf(who).charAt(0) : '+'}
       </span>
-    </button>
+      <select
+        class="who-pick"
+        value={who ?? ''}
+        aria-label={`Who’s on it: ${item.rec.data.text}`}
+        onChange={(e) => {
+          const v = e.currentTarget.value;
+          update<'item'>(item.id, { assignee: v === me || v === p ? (v as Slot) : null });
+        }}
+      >
+        <option value="">Nobody yet</option>
+        <option value={me}>Me ({nameOf(me)})</option>
+        <option value={p}>{nameOf(p)}</option>
+      </select>
+    </span>
   );
 }
 

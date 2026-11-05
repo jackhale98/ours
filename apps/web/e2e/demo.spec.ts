@@ -240,8 +240,11 @@ test('lists: add, assign, check off; private list is hidden from the partner', a
   await page.getByRole('textbox', { name: 'Add to Groceries' }).fill('Basil');
   await page.getByRole('button', { name: 'Add', exact: true }).click();
   const row = page.getByRole('listitem').filter({ hasText: 'Basil' });
-  await row.getByRole('button', { name: /No one yet/ }).click();
-  await expect(row.getByRole('button', { name: /Sam is on it/ })).toBeVisible();
+  // Who's on it: a dropdown, not a cycle.
+  const who = row.getByRole('combobox', { name: /Who’s on it/ });
+  await expect(who).toHaveValue('');
+  await who.selectOption({ label: 'Me (Sam)' });
+  await expect(who).toHaveValue('a');
   await row.getByRole('checkbox').check();
   await expect(page.getByRole('button', { name: /Show done · 2/ })).toBeVisible();
 

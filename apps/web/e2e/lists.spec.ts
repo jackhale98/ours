@@ -323,7 +323,7 @@ test('select several items and change them together, with undo', async ({ page }
   await expect(page.locator('.it', { hasText: 'Post office' })).toHaveCount(0);
   await expect(page.locator('.it', { hasText: 'Pharmacy' })).toBeVisible();
   await page.getByRole('button', { name: /Show done · 2/ }).click();
-  await expect(page.getByRole('button', { name: /is on it\. Change: Post office/ })).toBeVisible();
+  await expect(page.getByRole('combobox', { name: 'Who’s on it: Post office' })).toBeVisible();
 });
 
 test('the check-in shows free evenings even without a list of date ideas', async ({ page }) => {
