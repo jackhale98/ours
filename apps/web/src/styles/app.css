@@ -3589,3 +3589,183 @@ body:has(.bulkbar) .fab {
 .cd-more .cd-l {
   font-weight: 600;
 }
+
+/* ---------- list switcher (review 0008, L-1, L-2) ---------- */
+/* The list's name opens every list. */
+.lswitch {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  padding: 2px 6px;
+  margin-inline-start: -6px;
+  border-radius: 8px;
+  font: inherit;
+  color: inherit;
+  text-align: start;
+}
+.lswitch:hover {
+  background: var(--sunk);
+}
+.lswitch .ic:last-child {
+  flex: none;
+  color: var(--muted);
+}
+.sw-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.sw-group > summary {
+  cursor: pointer;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+}
+.sw-group .xviews {
+  flex-wrap: wrap;
+}
+.sw-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.sw-li {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.sw-row {
+  flex: 1;
+  min-width: 0;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  font-weight: 600;
+  text-align: start;
+}
+.sw-row:hover {
+  background: var(--sunk);
+}
+.sw-row[aria-current="true"] {
+  background: var(--sunk);
+  box-shadow: inset 3px 0 0 var(--ours);
+}
+.sw-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sw-row .n {
+  color: var(--muted);
+  font-weight: 500;
+}
+.sw-tools {
+  display: flex;
+}
+.sw-tools .iconbtn[aria-pressed="true"] {
+  color: var(--ours);
+}
+.sw-tools .iconbtn:disabled {
+  opacity: 0.35;
+}
+
+/* ---------- list order, find, sections (review 0008, L-4, L-7) ---------- */
+.txt.sm {
+  height: 38px;
+  /* 16px: smaller makes phones zoom in when it's focused. */
+  font-size: 1rem;
+}
+.ltools {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.ltools > .txt {
+  flex: 1 1 180px;
+  min-width: 0;
+}
+.ltools-order {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-inline-start: auto;
+}
+.ltools-order select {
+  width: auto;
+}
+.isec-h {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.isec-h .n {
+  font-weight: 500;
+  color: var(--muted);
+  letter-spacing: 0;
+}
+.isec-h.late {
+  color: var(--danger, var(--ink));
+}
+.isec-fold {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  padding-inline-end: 6px;
+  font: inherit;
+  color: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+}
+/* The add box stays in reach far down a long list (L-4). */
+.listcard > .additem-wrap {
+  position: sticky;
+  top: 0;
+  z-index: 4;
+  padding-block: 6px;
+  background: var(--paper);
+}
+.additem-wrap .additem {
+  margin-block: 0;
+}
+/* What the add box understood, and done items it can bring back (L-8). */
+.add-hint {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.add-hint:not(:empty) {
+  margin-top: 6px;
+}
+.add-hint .chip.sm {
+  min-height: 36px;
+  padding: 4px 12px;
+  font-size: 0.9rem;
+}
+.itemplace {
+  margin-top: 12px;
+}
+/* An idea's name opens its details: one line per idea on a phone (L-11). */
+.it-open {
+  display: flex;
+  min-height: 44px;
+  align-items: center;
+  padding: 6px 0;
+  font: inherit;
+  color: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+.ideaacts {
+  margin-bottom: 12px;
+}

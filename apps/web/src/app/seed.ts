@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 /** Demo sample data, relative to today (after docs/prototype.html). */
 import { generateKey, toBase64Url } from '@ours/core/crypto';
-import { type ItemData, keyBetween, type ListData } from '@ours/core/schema';
+import { type ItemData, keyBetween, keysBetween, type ListData } from '@ours/core/schema';
 import { addDays, addWallMinutes, startOfWeek } from '@ours/core/time';
 import { STARTING_POINTS } from './lists';
 import {
@@ -256,6 +256,13 @@ function seedAll(): void {
     note: 'Can we keep Sunday morning slow this week? I’ve been running on empty.',
   });
   setViewer('a');
+
+  // The lists in the order they were made, the same on every load.
+  const made = store.value.entries.filter((e) => e.rec.kind === 'list');
+  const keys = keysBetween(null, null, made.length);
+  made.forEach((l, i) => {
+    update<'list'>(l.id, { sort_key: keys[i] as string });
+  });
 
   const drive = store.value.entries.find(
     (e) => e.rec.kind === 'comment' && e.rec.data.text.startsWith('I can drive'),

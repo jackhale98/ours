@@ -4,13 +4,23 @@
  * next. "Skip for now" moves on without answering; the full list underneath
  * jumps to any item. Each answer is undoable from its toast.
  */
+
+import type { Reaction } from '@ours/core/schema';
 import { addDays } from '@ours/core/time';
 import { useEffect, useRef, useState } from 'preact/hooks';
-import { type Waiting, waiting } from '../inbox';
+import { putRecallAside, type Waiting, waiting } from '../inbox';
 import { PartnerInvite } from '../invite';
 import { itemSheet } from '../itemsheet';
-import { completeItem, dueText } from '../lists';
-import { commentsFor, deleteEvent, nameOf, partner, update, viewer } from '../model';
+import {
+  completeItem,
+  completeItems,
+  currentList,
+  didIt,
+  dueText,
+  type ItemEntry,
+  react,
+} from '../lists';
+import { commentsFor, deleteEvent, findEntry, nameOf, partner, update, viewer } from '../model';
 import { noticeProposal } from '../notices';
 import { relDay, repeatText, today, whenText } from '../select';
 import { accept, decline, openEvent } from '../sheets';
@@ -34,6 +44,19 @@ function summary(w: Waiting): { title: string; why: string } {
       why: `${dueText(d.due ?? today.value).text}${d.assignee ? '' : ' · nobody’s on it'}`,
     };
   }
+  if (w.kind === 'overdue')
+    return {
+      title: `${w.items.length} overdue on ${w.list.rec.data.name}`,
+      why: w.items
+        .slice(0, 3)
+        .map((i) => i.rec.data.text)
+        .join(', '),
+    };
+  if (w.kind === 'recall')
+    return {
+      title: `How was “${w.item.rec.data.text}”?`,
+      why: `You planned it · ${relDay(w.date)}`,
+    };
   if (w.entry.rec.kind !== 'event') return { title: '', why: '' };
   const d = w.entry.rec.data;
   return {
@@ -56,6 +79,8 @@ function Current({ w, headRef }: { w: Waiting; headRef: { current: HTMLHeadingEl
       </>
     );
   }
+  if (w.kind === 'overdue') return <Overdue w={w} headRef={headRef} />;
+  if (w.kind === 'recall') return <Recall w={w} headRef={headRef} />;
   if (w.kind === 'task') {
     const d = w.item.rec.data;
     const due = dueText(d.due ?? today.value);
@@ -213,6 +238,99 @@ function Current({ w, headRef }: { w: Waiting; headRef: { current: HTMLHeadingEl
   );
 }
 
+type Head = { current: HTMLHeadingElement | null };
+
+/** Several overdue on one list: open the list, or tick them all off (L-12). */
+function Overdue({ w, headRef }: { w: Extract<Waiting, { kind: 'overdue' }>; headRef: Head }) {
+  const shown = w.items.slice(0, 6);
+  return (
+    <>
+      <p class="eyebrow late">Overdue · {w.list.rec.data.name}</p>
+      <h2 class="h3" id="wo-title" tabIndex={-1} ref={headRef}>
+        {w.items.length} overdue on {w.list.rec.data.name}
+      </h2>
+      <ul class="wo-items">
+        {shown.map((i) => (
+          <li key={i.id}>
+            {i.rec.data.text}
+            <span class="small muted"> · {dueText(i.rec.data.due ?? today.value).text}</span>
+          </li>
+        ))}
+        {w.items.length > shown.length && (
+          <li class="small muted">and {w.items.length - shown.length} more</li>
+        )}
+      </ul>
+      <div class="ask-actions">
+        <button
+          type="button"
+          class="btn primary"
+          onClick={() => {
+            currentList.value = w.list.id;
+            location.hash = 'lists';
+          }}
+        >
+          Open the list
+        </button>
+        <button
+          type="button"
+          class="btn"
+          onClick={() => {
+            const r = completeItems(
+              w.items.map((i) => i.id),
+              false,
+            );
+            toast(`Ticked off ${r.changed}.`, r.undo);
+          }}
+        >
+          <Icon name="check" size={16} />
+          All done
+        </button>
+      </div>
+    </>
+  );
+}
+
+const REACTIONS: [Reaction, string][] = [
+  ['loved', 'Loved it'],
+  ['good', 'Good'],
+  ['meh', 'Meh'],
+];
+
+/** A planned idea has happened: how was it? Noted as a memory on the idea (L-10). */
+function Recall({ w, headRef }: { w: Extract<Waiting, { kind: 'recall' }>; headRef: Head }) {
+  const me = viewer.value;
+  const d = w.item.rec.data;
+  const say = (r: Reaction) => {
+    const undo = didIt(w.item, w.date);
+    const fresh = findEntry(w.item.id) as ItemEntry | undefined;
+    const at = (fresh?.rec.data.did ?? []).length - 1;
+    if (fresh && at >= 0) react(fresh, at, me, r);
+    toast(`Saved to “${d.text}”.`, undo);
+  };
+  return (
+    <>
+      <p class="eyebrow">You planned it · {relDay(w.date)}</p>
+      <h2 class="h3" id="wo-title" tabIndex={-1} ref={headRef}>
+        How was “{d.text}”?
+      </h2>
+      <div class="ask-actions">
+        {REACTIONS.map(([r, label]) => (
+          <button type="button" class="btn" key={r} onClick={() => say(r)}>
+            {label}
+          </button>
+        ))}
+        <button
+          type="button"
+          class="btn ghost"
+          onClick={() => toast('Put aside.', putRecallAside(`${w.item.id}:${w.date}`))}
+        >
+          We didn’t go
+        </button>
+      </div>
+    </>
+  );
+}
+
 export function InboxView() {
   const all = waiting.value;
   const [pickedId, setPickedId] = useState<string | null>(null);
@@ -286,13 +404,15 @@ export function InboxView() {
                     >
                       <Icon
                         name={
-                          w.kind === 'task'
+                          w.kind === 'task' || w.kind === 'overdue'
                             ? 'list'
-                            : w.kind === 'ask'
-                              ? 'chat'
-                              : w.kind === 'invite'
-                                ? 'send'
-                                : 'x'
+                            : w.kind === 'recall'
+                              ? 'heart'
+                              : w.kind === 'ask'
+                                ? 'chat'
+                                : w.kind === 'invite'
+                                  ? 'send'
+                                  : 'x'
                         }
                         size={16}
                       />

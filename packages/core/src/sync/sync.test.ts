@@ -3,7 +3,7 @@ import * as v from 'valibot';
 import { describe, expect, it } from 'vitest';
 import { toBase64Url } from '../crypto/bytes';
 import { uuidv7 } from '../schema/ids';
-import type { DecodedRecord, ItemData } from '../schema/records';
+import type { DecodedRecord, ItemData, ListData } from '../schema/records';
 import { compareWrites, nextTimestamp } from './clock';
 import { mergeRecord } from './merge';
 import { PullQuery, PushRequest } from './protocol';
@@ -127,6 +127,69 @@ describe('mergeRecord', () => {
     expect(out.record.data).toMatchObject({ done: true, text: 'Oat milk' });
     expect(out.record.updated_at).toBe(5000);
     expect(out.record.device_id).toBe('dev-me');
+  });
+
+  it('merges lists field by field: a rename on one phone and a pin on the other', () => {
+    const list = (
+      data: Partial<ListData>,
+      updated_at: number,
+      device_id: string,
+    ): DecodedRecord => ({
+      kind: 'list',
+      deleted: false,
+      data: { name: 'Groceries', kind: 'shopping', private: false, ...data },
+      updated_at,
+      device_id,
+    });
+    const base = list({ sections: ['Produce'] }, 1, 'x');
+    const local = list({ sections: ['Produce'], pinned: true }, 3, 'me');
+    const remote = list({ sections: ['Produce', 'Dairy'], name: 'Big shop' }, 2, 'them');
+    const out = mergeRecord(base, local, remote, true, writer);
+    expect(out.action).toBe('merged');
+    expect(out.record.data).toMatchObject({
+      name: 'Big shop',
+      pinned: true,
+      sections: ['Produce', 'Dairy'],
+    });
+  });
+
+  it('keeps a deleted list deleted when the other side only moved or pinned it', () => {
+    const list = (
+      data: Partial<ListData>,
+      updated_at: number,
+      device_id: string,
+    ): DecodedRecord => ({
+      kind: 'list',
+      deleted: false,
+      data: { name: 'Gifts', kind: 'gifts', private: false, ...data },
+      updated_at,
+      device_id,
+    });
+    const gone = (updated_at: number, device_id: string): DecodedRecord => ({
+      kind: 'list',
+      deleted: true,
+      data: null,
+      updated_at,
+      device_id,
+    });
+    const base = list({}, 1, 'x');
+    // Deleted here first; the other phone's later reorder doesn't bring it back.
+    expect(
+      mergeRecord(
+        base,
+        list({ sort_key: 'V', pinned: true }, 3, 'me'),
+        gone(2, 'them'),
+        true,
+        writer,
+      ).action,
+    ).toBe('take-remote');
+    expect(
+      mergeRecord(base, gone(2, 'me'), list({ sort_key: 'V' }, 3, 'them'), true, writer).action,
+    ).toBe('keep-local');
+    // A real edit (a rename) that is later still wins, as before.
+    expect(
+      mergeRecord(base, gone(2, 'me'), list({ name: 'Presents' }, 3, 'them'), true, writer).action,
+    ).toBe('take-remote');
   });
 
   it('stamps merged results after both inputs even with a slow clock', () => {

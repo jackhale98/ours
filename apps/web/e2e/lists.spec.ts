@@ -24,7 +24,7 @@ async function newList(page: Page, start: string, name?: string) {
     .getByRole('group', { name: 'Start from' })
     .getByRole('button', { name: new RegExp(`^${start}`) })
     .click();
-  if (name) await dialog.getByRole('textbox', { name: 'Name' }).fill(name);
+  if (name) await dialog.getByRole('textbox', { name: 'Name', exact: true }).fill(name);
   return dialog;
 }
 
@@ -70,7 +70,7 @@ test('a date-ideas list gets "pick one for us"', async ({ page }) => {
 test('settings: rename, switch features, make private, delete with undo', async ({ page }) => {
   await page.goto('/#lists');
   const dialog = await settingsOf(page, 'Groceries');
-  await dialog.getByRole('textbox', { name: 'Name' }).fill('Food shop');
+  await dialog.getByRole('textbox', { name: 'Name', exact: true }).fill('Food shop');
   // Prices: each item gets one, and the list a total.
   await dialog.getByRole('switch', { name: /^Prices/ }).check();
   await dialog.getByRole('switch', { name: /Just for me/ }).check();
@@ -88,7 +88,7 @@ test('settings: rename, switch features, make private, delete with undo', async 
   await again.getByRole('button', { name: 'Tap again to delete' }).click();
   await expect(page.getByRole('button', { name: /Food shop/ })).toHaveCount(0);
   await page.getByRole('button', { name: 'Undo' }).click();
-  await expect(page.getByRole('button', { name: /Food shop/ })).toBeVisible();
+  await expect(page.getByRole('button', { name: /^Private: Food shop/ })).toBeVisible();
 });
 
 test('any shared list can be part of the weekly check-in', async ({ page }) => {
@@ -187,11 +187,10 @@ test('we both want, we did it, and favourites', async ({ page }) => {
   await walk.getByRole('button', { name: /I’d like this/ }).click();
   await expect(walk).toHaveClass(/agreed/);
 
-  // We did it, then how it was, and a favourite.
-  await walk.getByRole('button', { name: /We did it/ }).click();
-  await expect(walk).toContainText('Did it today');
+  // We did it (in the idea's details: rows stay one line), how it was, a favourite.
   await page.getByRole('button', { name: 'Details: Night walk and dumplings' }).click();
   const sheet = page.getByRole('dialog', { name: 'Night walk and dumplings' });
+  await sheet.getByRole('button', { name: 'We did it' }).click();
   await sheet.getByRole('button', { name: 'Loved it' }).click();
   await sheet.getByRole('switch', { name: /Do it again/ }).check();
   await sheet.getByRole('button', { name: 'Save' }).click();
@@ -200,6 +199,7 @@ test('we both want, we did it, and favourites', async ({ page }) => {
     .getByRole('button', { name: 'Favourites' })
     .click();
   await expect(page.locator('.items .it')).toHaveCount(2);
+  await expect(walk).toContainText('Did it today');
 });
 
 test('a plan’s checklist, due in the days before it', async ({ page }) => {
@@ -339,4 +339,47 @@ test('the check-in shows free evenings even without a list of date ideas', async
   await page.getByRole('button', { name: /^Ask Alex · / }).click();
   await nav(page, 'Plan');
   await expect(page.getByRole('button', { name: /Dinner out/ }).first()).toBeVisible();
+});
+
+test('switch lists, pin one, move an item and bring a done one back (review 0008)', async ({
+  page,
+}) => {
+  await page.goto('/#lists');
+  // The list's name opens every list, grouped.
+  await page.locator('.lswitch').click();
+  const sw = page.getByRole('dialog', { name: 'Your lists' });
+  await expect(sw.getByRole('heading', { name: 'Just for you' })).toBeVisible();
+  await sw.getByRole('button', { name: 'Change the order or pin lists' }).click();
+  await sw.getByRole('button', { name: 'Pin Date ideas' }).click();
+  await sw.getByRole('button', { name: 'Done' }).click();
+  await sw.getByRole('button', { name: /^Groceries/ }).click();
+  await expect(page.getByRole('dialog', { name: 'Your lists' })).toHaveCount(0);
+  await expect(page.locator('.ltabs .ltab').first()).toContainText('Date ideas');
+
+  // Move Oat milk to Home from its details, then undo.
+  await page.getByRole('button', { name: 'Details: Oat milk' }).click();
+  const item = page.getByRole('dialog', { name: 'Oat milk' });
+  await item.getByLabel('List', { exact: true }).selectOption({ label: 'Home' });
+  await expect(page.locator('.toast-host')).toContainText('Moved to “Home”');
+  await expect(page.locator('.it', { hasText: 'Oat milk' })).toHaveCount(0);
+  await page.locator('.toast-host').getByRole('button', { name: 'Undo' }).click();
+  await expect(page.locator('.it', { hasText: 'Oat milk' })).toHaveCount(1);
+
+  // Sections keep their order as items are added.
+  const order = () => page.locator('.isec-fold').allInnerTexts();
+  const before = (await order()).map((t) => t.split('\n')[0]);
+  await page.getByRole('textbox', { name: 'Add to Groceries' }).fill('Peas');
+  await page.getByRole('combobox', { name: 'Section' }).fill('Frozen');
+  await page.getByRole('button', { name: 'Add', exact: true }).click();
+  const after = (await order()).map((t) => t.split('\n')[0]);
+  expect(after.slice(0, before.length)).toEqual(before);
+  expect(after.at(-1)?.toLowerCase()).toContain('frozen');
+
+  // Typing a done item's name brings it back instead of adding a copy.
+  await page.locator('.it', { hasText: 'Peas' }).getByRole('checkbox').check();
+  await expect(page.locator('.items .it', { hasText: 'Peas' })).toHaveCount(0);
+  await page.getByRole('textbox', { name: 'Add to Groceries' }).fill('peas');
+  await page.getByRole('button', { name: 'Add', exact: true }).click();
+  await expect(page.locator('.toast-host')).toContainText('Brought back “Peas”');
+  await expect(page.locator('.items .it', { hasText: 'Peas' })).toHaveCount(1);
 });

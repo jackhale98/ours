@@ -152,6 +152,7 @@ export function PlanForm({ id, draft }: { id: string | null; draft?: Draft }) {
           proposed_by: proposing ? me : null,
           privacy: isPrivate ? 'busy' : 'full',
           stub_id: null,
+          ...(base.from_item ? { from_item: base.from_item } : {}),
         });
         if (proposing) noticeProposal(newId);
         close();

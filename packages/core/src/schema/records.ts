@@ -142,6 +142,8 @@ export const EventData = v.pipe(
      * before 9 AM on the day), up to three; a single number or null also parse.
      */
     remind: v.optional(v.strictObject({ a: PersonReminders, b: PersonReminders })),
+    /** The idea it was planned from (a list item), so the idea shows it's planned. */
+    from_item: v.optional(v.nullable(RefId)),
   }),
   v.check((e) => isValidWhen(e), WHEN_MESSAGE),
 );
@@ -225,6 +227,24 @@ export const ListData = v.strictObject({
   template: v.optional(v.picklist(LIST_TEMPLATES)),
   /** A checklist for this plan (packing, getting ready). */
   plan_id: v.optional(v.nullable(RefId)),
+  /*
+   * Fields added later are optional, so lists written without them stay
+   * readable by older versions of the app. An older app that meets one with
+   * them keeps its own copy and reads it again once it updates
+   * (src/account/sync.ts), so nothing is overwritten meanwhile.
+   */
+  /** Where it sits among the lists (absent: after those that have one, oldest first). */
+  sort_key: v.optional(v.custom<string>(isSortKey, 'Invalid sort key')),
+  /** Kept at the top of the lists. */
+  pinned: v.optional(v.boolean()),
+  /** Put away: out of the switcher, the check-in and the views across lists; still searchable. */
+  archived: v.optional(v.boolean()),
+  /** Section names in their order (store aisles, days of a trip). */
+  sections: v.optional(v.pipe(v.array(NonEmpty(60)), v.maxLength(60))),
+  /** How its items are ordered: its own order, by due date, by who, A to Z or newest first. */
+  order: v.optional(v.picklist(['own', 'due', 'who', 'az', 'recent'])),
+  /** Holds a saved starting point's items: never shown as a list of its own. */
+  stash: v.optional(v.boolean()),
 });
 
 /** How "we did it" was, for each of you. */
@@ -386,6 +406,8 @@ export const SettingsData = v.strictObject({
     v.strictObject({ a: v.optional(v.boolean()), b: v.optional(v.boolean()) }),
   ),
   /** Starting points the two of you saved from your own lists. */
+  /** When "both free this evening" looks (shift workers' evenings differ). */
+  evening: v.optional(v.strictObject({ start: HHmm, end: HHmm })),
   list_templates: v.optional(
     v.pipe(
       v.array(
@@ -394,6 +416,8 @@ export const SettingsData = v.strictObject({
           name: NonEmpty(40),
           features: Features,
           private: v.boolean(),
+          /** The hidden list holding its items, when it was saved with them. */
+          list_id: v.optional(RefId),
         }),
       ),
       v.maxLength(12),

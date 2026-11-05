@@ -7,11 +7,14 @@
  * details.
  */
 import { parseQuickAdd } from '@ours/core/parse';
+import { addDays } from '@ours/core/time';
 import { signal } from '@preact/signals';
+import { Fragment } from 'preact';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { LENGTH_LABEL } from '../freetime';
 import { BEFORE_CHOICES, itemSheet } from '../itemsheet';
 import {
+  activeLists,
   allLists,
   bothWant,
   completeItem,
@@ -32,22 +35,36 @@ import {
   type ItemEntry,
   inCheckin,
   itemsOf,
+  keepSection,
   type ListEntry,
+  type ListOrder,
   lastDid,
   money,
+  moveItems,
+  moveList,
+  moveSection,
+  movesScope,
+  orderOf,
+  planForIdea,
   planOf,
+  readItemText,
   renameList,
+  renameSection,
   SEASON_NAME,
   STARTING_POINTS,
   type StartingPoint,
+  sameItem,
   savedStartingPoints,
   saveStartingPoint,
   seasonNow,
   sectionsOf,
+  setArchived,
   setFeatures,
   setListCheckin,
   setListPrivacy,
+  setPinned,
   startOver,
+  suggestItems,
   toggleHeart,
   topKey,
   updateItems,
@@ -60,7 +77,9 @@ import { CrossViewPane, CrossViews, crossView } from './ListViews';
 
 const showDone = signal(false);
 const picked = signal<string | null>(null);
-const listSheet = signal<{ type: 'new' } | { type: 'settings'; id: string } | null>(null);
+const listSheet = signal<
+  { type: 'new' } | { type: 'settings'; id: string } | { type: 'switch' } | null
+>(null);
 /** Items picked to change together, in the list they belong to; null when not selecting. */
 /*
  * Which list is in select mode, and which of its items are picked, apart:
@@ -182,6 +201,11 @@ function itemSub(item: ItemEntry, f: ReadonlySet<Feature>): string[] {
     if (d.season?.length) out.push(d.season.map((s) => SEASON_NAME[s]).join(', '));
   }
   if (f.has('price') && d.price != null) out.push(money(d.price));
+  if (f.has('plan') && !f.has('tick')) {
+    // So the other one doesn't plan it again (L-10).
+    const plan = planForIdea(item.id);
+    if (plan && !plan.past) out.push(`Planned · ${relDay(plan.date)}`);
+  }
   if (f.has('did')) {
     const last = lastDid(item);
     const n = d.did?.length ?? 0;
@@ -300,7 +324,16 @@ export function ItemRow({
           {text}
         </label>
       ) : (
-        <span class="grow">{text}</span>
+        // An idea's row is one line: its name opens what you can do with it (L-11).
+        <button
+          type="button"
+          class="grow it-open"
+          onClick={() => {
+            itemSheet.value = item.id;
+          }}
+        >
+          {text}
+        </button>
       )}
       <span class="it-acts">
         {f.has('hearts') && <Hearts item={item} />}
@@ -318,29 +351,6 @@ export function ItemRow({
         {(assign || (f.has('who') && f.has('tick'))) && item.scope === 'space' && (
           <AssignButton item={item} />
         )}
-        {f.has('did') && !f.has('tick') && (
-          <button
-            type="button"
-            class="btn sm"
-            aria-label={`We did it: ${d.text}`}
-            onClick={() => {
-              const undo = didIt(item);
-              toast(`Noted. How was “${d.text}”? Say in its details.`, undo);
-            }}
-          >
-            We did it
-          </button>
-        )}
-        {f.has('plan') && !f.has('tick') && (
-          <button
-            type="button"
-            class="btn sm"
-            aria-label={`Plan it: ${d.text}`}
-            onClick={() => planIdea(d.text)}
-          >
-            Plan it
-          </button>
-        )}
         <button
           type="button"
           class="iconbtn it-more"
@@ -351,22 +361,42 @@ export function ItemRow({
         >
           <Icon name="next" size={16} />
         </button>
-        {!f.has('tick') && (
-          <button
-            type="button"
-            class="iconbtn"
-            aria-label={`Remove ${d.text}`}
-            onClick={() => {
-              if (picked.value === item.id) picked.value = null;
-              toast(`Removed “${d.text}”.`, remove([item.id]));
-            }}
-          >
-            <Icon name="x" size={16} />
-          </button>
-        )}
       </span>
     </li>
   );
+}
+
+/** Reads a typed line: a due date and repeat (lists with dates), how many and who (L-8). */
+function readLine(v: string, list: ListEntry) {
+  const f = featuresOf(list);
+  // "Take out the bins every monday", "Renew passport by mar 1": a due date
+  // and repeat come from the words (only date and repeat phrases are taken out).
+  const parsed = f.has('due')
+    ? parseQuickAdd(v, { today: today.value, dateOrder: DATE_ORDER })
+    : null;
+  const taken = parsed?.tokens.filter((t) => t.type === 'date' || t.type === 'repeat') ?? [];
+  let name = v;
+  for (const t of [...taken].sort((a, b) => b.start - a.start)) {
+    name = name.slice(0, t.start) + name.slice(t.end);
+  }
+  name =
+    name
+      .replace(/\s+(by|on|due)\s*$/i, '')
+      .replace(/\s+/g, ' ')
+      .trim() || v;
+  const repeat = parsed?.rrule ?? null;
+  const me = viewer.value;
+  const read = readItemText(taken.length ? name : v, {
+    qty: f.has('qty'),
+    who: f.has('who') && f.has('tick') && !list.rec.data.private,
+    me,
+    names: { a: nameOf('a'), b: nameOf('b') },
+  });
+  return {
+    ...read,
+    repeat,
+    due: parsed?.date ?? (repeat ? today.value : null),
+  };
 }
 
 function AddItem({ list, placeholder }: { list: ListEntry; placeholder: string }) {
@@ -375,81 +405,116 @@ function AddItem({ list, placeholder }: { list: ListEntry; placeholder: string }
   const [section, setSection] = useState('');
   const input = useRef<HTMLInputElement>(null);
   const sections = sectionsOf(list.id);
+  const line = text.trim() ? readLine(text.trim(), list) : null;
+  const ideas = line ? suggestItems(list.id, line.text).filter((i) => i.rec.data.done) : [];
+  const bringBack = (
+    item: ItemEntry,
+    extra: { qty?: string | null; assignee?: Slot | null } = {},
+  ) => {
+    const r = updateItems([item.id], () => ({
+      done: false,
+      ...(extra.qty ? { qty: extra.qty } : {}),
+      ...(extra.assignee ? { assignee: extra.assignee } : {}),
+    }));
+    toast(`Brought back “${item.rec.data.text}”.`, r.undo);
+    setText('');
+    input.current?.focus();
+  };
   const submit = (e: Event) => {
     e.preventDefault();
     const v = text.trim();
-    if (!v) return;
-    // "Take out the bins every monday", "Renew passport by mar 1": a due date
-    // and repeat come from the words (only date and repeat phrases are taken out).
-    const parsed = f.has('due')
-      ? parseQuickAdd(v, { today: today.value, dateOrder: DATE_ORDER })
-      : null;
-    const taken = parsed?.tokens.filter((t) => t.type === 'date' || t.type === 'repeat') ?? [];
-    let name = v;
-    for (const t of [...taken].sort((a, b) => b.start - a.start)) {
-      name = name.slice(0, t.start) + name.slice(t.end);
+    if (!v || !line) return;
+    // The same thing again: a done one comes back, an open one isn't doubled.
+    const same = sameItem(list.id, line.text);
+    if (same?.rec.data.done) return bringBack(same, line);
+    if (same && f.has('tick')) {
+      toast(`“${same.rec.data.text}” is already on the list.`);
+      setText('');
+      return;
     }
-    name =
-      name
-        .replace(/\s+(by|on|due)\s*$/i, '')
-        .replace(/\s+/g, ' ')
-        .trim() || v;
-    const repeat = parsed?.rrule ?? null;
     put(
       'item',
       {
         list_id: list.id,
-        text: taken.length ? name : v,
+        text: line.text,
         done: false,
-        assignee: null,
-        due: parsed?.date ?? (repeat ? today.value : null),
+        assignee: line.assignee,
+        due: line.due,
         sort_key: topKey(list.id),
-        ...(repeat ? { repeat } : {}),
+        ...(line.repeat ? { repeat: line.repeat } : {}),
+        ...(line.qty ? { qty: line.qty.slice(0, 30) } : {}),
         ...(f.has('sections') && section.trim() ? { section: section.trim().slice(0, 60) } : {}),
       },
       { scope: list.scope, owner: list.owner },
     );
+    if (f.has('sections')) keepSection(list.id, section.trim().slice(0, 60));
     setText('');
     input.current?.focus();
   };
+  const chips =
+    line && line.text !== text.trim()
+      ? [
+          line.due && relDay(line.due),
+          line.repeat && repeatText(line.repeat),
+          line.qty && `How many: ${line.qty}`,
+          line.assignee &&
+            (line.assignee === viewer.value ? 'On me' : `On ${nameOf(line.assignee)}`),
+        ].filter((x): x is string => !!x)
+      : [];
   return (
-    <form class={`additem${f.has('sections') ? ' with-section' : ''}`} onSubmit={submit}>
-      <input
-        ref={input}
-        class="txt"
-        type="text"
-        value={text}
-        maxLength={500}
-        onInput={(e) => setText(e.currentTarget.value)}
-        placeholder={placeholder}
-        autocomplete="off"
-        aria-label={`Add to ${list.rec.data.name}`}
-      />
-      {f.has('sections') && (
-        <>
-          <input
-            class="txt sec"
-            type="text"
-            value={section}
-            maxLength={60}
-            list={`sec-${list.id}`}
-            onInput={(e) => setSection(e.currentTarget.value)}
-            placeholder="Section"
-            aria-label="Section"
-            autocomplete="off"
-          />
-          <datalist id={`sec-${list.id}`}>
-            {sections.map((s) => (
-              <option key={s} value={s} />
-            ))}
-          </datalist>
-        </>
-      )}
-      <button class="btn primary" type="submit">
-        <Icon name="plus" size={16} />
-        Add
-      </button>
-    </form>
+    <div class="additem-wrap">
+      <form class={`additem${f.has('sections') ? ' with-section' : ''}`} onSubmit={submit}>
+        <input
+          ref={input}
+          class="txt"
+          type="text"
+          value={text}
+          maxLength={500}
+          onInput={(e) => setText(e.currentTarget.value)}
+          placeholder={placeholder}
+          autocomplete="off"
+          aria-label={`Add to ${list.rec.data.name}`}
+          aria-describedby={`add-hint-${list.id}`}
+        />
+        {f.has('sections') && (
+          <>
+            <input
+              class="txt sec"
+              type="text"
+              value={section}
+              maxLength={60}
+              list={`sec-${list.id}`}
+              onInput={(e) => setSection(e.currentTarget.value)}
+              placeholder="Section"
+              aria-label="Section"
+              autocomplete="off"
+            />
+            <datalist id={`sec-${list.id}`}>
+              {sections.map((s) => (
+                <option key={s} value={s} />
+              ))}
+            </datalist>
+          </>
+        )}
+        <button class="btn primary" type="submit">
+          <Icon name="plus" size={16} />
+          Add
+        </button>
+      </form>
+      <div class="add-hint" id={`add-hint-${list.id}`} aria-live="polite">
+        {chips.map((c) => (
+          <span class="pchip" key={c}>
+            {c}
+          </span>
+        ))}
+        {ideas.map((i) => (
+          <button type="button" class="chip sm" key={i.id} onClick={() => bringBack(i, line ?? {})}>
+            <Icon name="repeat" size={13} />
+            Bring back “{i.rec.data.text}”
+          </button>
+        ))}
+      </div>
+    </div>
   );
 }
 
@@ -462,20 +527,119 @@ const placeholderFor = (list: ListEntry) => {
   return 'Add an item';
 };
 
-export function planIdea(text: string) {
-  openQuick({ text, date: nextFreeEvening(), time: '19:00', who: 'ours' });
+/** Plans an idea on the next evening you're both free, linked back to the idea (L-10). */
+export function planIdea(text: string, fromItem?: string) {
+  openQuick({
+    text,
+    date: nextFreeEvening(),
+    time: '19:00',
+    who: 'ours',
+    ...(fromItem ? { fromItem } : {}),
+  });
 }
 
-/** Items in their sections (those without one first), in list order. */
-function bySection(items: ItemEntry[]): [string | null, ItemEntry[]][] {
-  const groups = new Map<string | null, ItemEntry[]>();
-  for (const i of items) {
-    const k = i.rec.data.section?.trim() || null;
-    groups.set(k, [...(groups.get(k) ?? []), i]);
+/** A run of items under one heading: a section, a due-date band or a person. */
+interface Group {
+  key: string;
+  title: string | null;
+  items: ItemEntry[];
+  /** A section's name: its heading folds away (kept on this device). */
+  section?: string;
+  late?: boolean;
+}
+
+/**
+ * The open items in the list's order (L-4, L-7): due-date bands, by person,
+ * A to Z, newest first, or the list's own order in its sections, kept in the
+ * list's section order with items not in one last.
+ */
+function groupItems(items: ItemEntry[], list: ListEntry, order: ListOrder): Group[] {
+  const f = featuresOf(list);
+  const one = (sorted: ItemEntry[]): Group[] => [{ key: 'all', title: null, items: sorted }];
+  if (order === 'az')
+    return one([...items].sort((a, b) => a.rec.data.text.localeCompare(b.rec.data.text)));
+  if (order === 'recent') return one([...items].sort((a, b) => (a.id < b.id ? 1 : -1)));
+  if (order === 'due') {
+    const t = today.value;
+    const week = addDays(t, 7);
+    const bands: Group[] = [
+      { key: 'late', title: 'Overdue', items: [], late: true },
+      { key: 'today', title: 'Today', items: [] },
+      { key: 'week', title: 'This week', items: [] },
+      { key: 'later', title: 'Later', items: [] },
+      { key: 'none', title: 'No date', items: [] },
+    ];
+    const dues = new Map(items.map((i) => [i.id, dueOf(i)]));
+    const sorted = [...items].sort((a, b) =>
+      (dues.get(a.id) ?? '9999').localeCompare(dues.get(b.id) ?? '9999'),
+    );
+    for (const i of sorted) {
+      const d = dues.get(i.id);
+      const band = !d ? 4 : d < t ? 0 : d === t ? 1 : d <= week ? 2 : 3;
+      bands[band]?.items.push(i);
+    }
+    const used = bands.filter((b) => b.items.length);
+    // A single "No date" band needs no heading.
+    return used.length === 1 && used[0]?.key === 'none' ? one(used[0].items) : used;
   }
-  const none = groups.get(null);
-  groups.delete(null);
-  return [...(none ? [[null, none] as [null, ItemEntry[]]] : []), ...groups.entries()];
+  if (order === 'who') {
+    const me = viewer.value;
+    const p = partner.value;
+    const groups: Group[] = [
+      { key: 'me', title: 'Me', items: [] },
+      { key: 'p', title: nameOf(p), items: [] },
+      { key: 'none', title: 'Nobody yet', items: [] },
+    ];
+    for (const i of items) {
+      const a = i.rec.data.assignee;
+      groups[a === me ? 0 : a === p ? 1 : 2]?.items.push(i);
+    }
+    return groups.filter((g) => g.items.length);
+  }
+  if (!f.has('sections')) return one(items);
+  const bySec = new Map<string, ItemEntry[]>();
+  const loose: ItemEntry[] = [];
+  for (const i of items) {
+    const k = i.rec.data.section?.trim();
+    if (!k) loose.push(i);
+    else {
+      const g = bySec.get(k);
+      if (g) g.push(i);
+      else bySec.set(k, [i]);
+    }
+  }
+  const out: Group[] = [];
+  for (const name of sectionsOf(list.id)) {
+    const g = bySec.get(name);
+    if (g) out.push({ key: `s:${name}`, title: name, items: g, section: name });
+    bySec.delete(name);
+  }
+  for (const [name, g] of bySec)
+    out.push({ key: `s:${name}`, title: name, items: g, section: name });
+  if (loose.length) out.push({ key: 'loose', title: out.length ? 'Other' : null, items: loose });
+  return out;
+}
+
+/** Sections folded away, per list, on this device only. */
+const FOLD_KEY = 'ours-folded';
+const folded = signal<Record<string, string[]>>(
+  (() => {
+    try {
+      return JSON.parse(localStorage.getItem(FOLD_KEY) ?? '{}') as Record<string, string[]>;
+    } catch {
+      return {};
+    }
+  })(),
+);
+function toggleFold(listId: string, name: string): void {
+  const cur = folded.value[listId] ?? [];
+  const next = cur.includes(name) ? cur.filter((n) => n !== name) : [...cur, name];
+  folded.value = { ...folded.value, [listId]: next };
+  try {
+    localStorage.setItem(FOLD_KEY, JSON.stringify(folded.value));
+  } catch {
+    // private mode: folds last until the page closes
+  }
 }
 
 /**
@@ -494,29 +658,61 @@ function useProgressive(total: number): number {
   return limit;
 }
 
-function Items({ items: all, list }: { items: ItemEntry[]; list: ListEntry }) {
+function Items({
+  items: all,
+  list,
+  done = false,
+}: {
+  items: ItemEntry[];
+  list: ListEntry;
+  done?: boolean;
+}) {
   const limit = useProgressive(all.length);
-  const items = all.length > limit ? all.slice(0, limit) : all;
-  if (!featuresOf(list).has('sections'))
-    return (
-      <ul class="items">
-        {items.map((i) => (
-          <ItemRow key={i.id} item={i} list={list} />
-        ))}
-      </ul>
-    );
+  const groups = done
+    ? [{ key: 'done', title: null, items: all } as Group]
+    : groupItems(all, list, orderOf(list));
+  const shut = folded.value[list.id] ?? [];
+  let left = limit;
   return (
     <>
-      {bySection(items).map(([name, group]) => (
-        <section class="isection" key={name ?? ''} aria-label={name ?? 'Not in a section'}>
-          {name && <h2 class="eyebrow">{name}</h2>}
+      {groups.map((g) => {
+        const isShut = !!g.section && shut.includes(g.section);
+        const rows = isShut ? [] : g.items.slice(0, Math.max(0, left));
+        left -= rows.length;
+        const list_ = (
           <ul class="items">
-            {group.map((i) => (
+            {rows.map((i) => (
               <ItemRow key={i.id} item={i} list={list} />
             ))}
           </ul>
-        </section>
-      ))}
+        );
+        if (!g.title) return <Fragment key={g.key}>{list_}</Fragment>;
+        const section = g.section;
+        return (
+          <section class="isection" key={g.key} aria-label={g.title}>
+            <h2 class={`eyebrow isec-h${g.late ? ' late' : ''}`}>
+              {section ? (
+                <button
+                  type="button"
+                  class="isec-fold"
+                  aria-expanded={!isShut}
+                  onClick={() => toggleFold(list.id, section)}
+                >
+                  <Icon name={isShut ? 'next' : 'down'} size={14} />
+                  {g.title}
+                  <span class="n">{g.items.length}</span>
+                </button>
+              ) : (
+                <>
+                  {g.title}
+                  <span class="n">{g.items.length}</span>
+                </>
+              )}
+            </h2>
+            {list_}
+          </section>
+        );
+      })}
     </>
   );
 }
@@ -595,7 +791,11 @@ function Pick({ list, pool }: { list: ListEntry; pool: ItemEntry[] }) {
       )}
       <div class="pickrow">
         {f.has('plan') && (
-          <button type="button" class="btn primary sm" onClick={() => planIdea(pick.rec.data.text)}>
+          <button
+            type="button"
+            class="btn primary sm"
+            onClick={() => planIdea(pick.rec.data.text, pick.id)}
+          >
             Ask {nameOf(partner.value)}
           </button>
         )}
@@ -608,9 +808,77 @@ function Pick({ list, pool }: { list: ListEntry; pool: ItemEntry[] }) {
   );
 }
 
+const ORDER_LABEL: Record<ListOrder, string> = {
+  own: 'Our order',
+  due: 'Due date',
+  who: 'Who’s on it',
+  az: 'A to Z',
+  recent: 'Newest first',
+};
+
+/** How the list is ordered (kept on the list, for both of you), and finding in a long one. */
+function ListTools({
+  list,
+  count,
+  find,
+  setFind,
+}: {
+  list: ListEntry;
+  count: number;
+  find: string;
+  setFind: (v: string) => void;
+}) {
+  const f = featuresOf(list);
+  const order = orderOf(list);
+  const choices = (Object.keys(ORDER_LABEL) as ListOrder[]).filter(
+    (o) => (o !== 'due' || f.has('due')) && (o !== 'who' || f.has('who')),
+  );
+  // Short lists don't need it: the row would only cost height.
+  if (count < 6) return null;
+  return (
+    <div class="ltools">
+      {count >= 30 && (
+        <input
+          class="txt sm"
+          type="search"
+          value={find}
+          onInput={(e) => setFind(e.currentTarget.value)}
+          placeholder="Find in this list"
+          aria-label={`Find in ${list.rec.data.name}`}
+          autocomplete="off"
+        />
+      )}
+      <label class="ltools-order">
+        <span class="small muted">Order</span>
+        <select
+          class="txt sm"
+          value={order}
+          onChange={(e) => update<'list'>(list.id, { order: e.currentTarget.value as ListOrder })}
+        >
+          {choices.map((o) => (
+            <option key={o} value={o}>
+              {ORDER_LABEL[o]}
+            </option>
+          ))}
+        </select>
+      </label>
+    </div>
+  );
+}
+
 function ListBody({ list }: { list: ListEntry }) {
   const f = featuresOf(list);
-  const all = itemsOf(list.id);
+  const everything = itemsOf(list.id);
+  const [find, setFind] = useState('');
+  const needle = find.trim().toLowerCase();
+  // "Find in this list" (L-4): by name, note or section.
+  const all = needle
+    ? everything.filter((i) =>
+        [i.rec.data.text, i.rec.data.note, i.rec.data.section].some((x) =>
+          x?.toLowerCase().includes(needle),
+        ),
+      )
+    : everything;
   const open = applyFilters(f.has('tick') ? all.filter((i) => !i.rec.data.done) : all, f);
   // Most recently ticked first, so a mis-tick is at the top (L-6).
   const done = f.has('tick')
@@ -646,6 +914,7 @@ function ListBody({ list }: { list: ListEntry }) {
       {f.has('pick') && !selecting(list.id) && <Pick list={list} pool={open} />}
       <Filters list={list} />
       {!selecting(list.id) && <AddItem list={list} placeholder={placeholderFor(list)} />}
+      <ListTools list={list} count={everything.length} find={find} setFind={setFind} />
       <Items items={open} list={list} />
       {!open.length && (
         <p class="nothing">
@@ -654,6 +923,12 @@ function ListBody({ list }: { list: ListEntry }) {
               ? 'All done.'
               : 'Nothing matches.'
             : 'Nothing here yet.'}
+          {needle && ' '}
+          {needle && (
+            <button type="button" class="linkbtn" onClick={() => setFind('')}>
+              Clear the search
+            </button>
+          )}
         </p>
       )}
       {f.has('price') && toGet > 0 && (
@@ -689,7 +964,7 @@ function ListBody({ list }: { list: ListEntry }) {
               Clear done
             </button>
           </div>
-          {showDone.value && <Items items={done} list={list} />}
+          {showDone.value && <Items items={done} list={list} done />}
         </>
       )}
       {selecting(list.id) && (
@@ -703,7 +978,8 @@ function ListBody({ list }: { list: ListEntry }) {
 function BulkBar({ list, shown }: { list: ListEntry; shown: ItemEntry[] }) {
   const f = featuresOf(list);
   const sel = selecting(list.id) ? { ids: picks.value } : null;
-  const [panel, setPanel] = useState<'due' | 'who' | 'section' | null>(null);
+  const [panel, setPanel] = useState<'due' | 'who' | 'section' | 'move' | null>(null);
+  const [target, setTarget] = useState('');
   const [date, setDate] = useState(today.value);
   const [before, setBefore] = useState<number | null>(1);
   const [section, setSection] = useState('');
@@ -725,7 +1001,7 @@ function BulkBar({ list, shown }: { list: ListEntry; shown: ItemEntry[] }) {
     if (exit) startSelecting(null);
     toast(r.changed ? msg.replace('#', things(r.changed)) : 'Nothing to change.', r.undo);
   };
-  const toggle = (which: 'due' | 'who' | 'section') => {
+  const toggle = (which: 'due' | 'who' | 'section' | 'move') => {
     setArmed(false);
     setPanel(panel === which ? null : which);
   };
@@ -853,12 +1129,69 @@ function BulkBar({ list, shown }: { list: ListEntry; shown: ItemEntry[] }) {
           ))}
         </div>
       )}
+      {panel === 'move' &&
+        (() => {
+          const others = activeLists().filter((l) => l.id !== list.id);
+          // Nothing chosen yet: the first list on the same side of privacy.
+          const dest =
+            others.find((l) => l.id === target) ??
+            others.find((l) => !movesScope(list, l)) ??
+            others[0];
+          const crossing = !!dest && movesScope(list, dest);
+          return (
+            <form
+              class="bulk-panel"
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (!dest) return;
+                // Across privacy it asks first: a second tap, once it says what happens.
+                if (crossing && !armed) {
+                  setArmed(true);
+                  return;
+                }
+                const r = moveItems(ids, dest.id);
+                done(`Moved # to ${dest.rec.data.name}.`, { undo: r.undo, changed: r.moved }, true);
+              }}
+            >
+              <label class="sr" for="bulk-move">
+                Move to
+              </label>
+              <select
+                id="bulk-move"
+                class="txt"
+                value={dest?.id ?? ''}
+                onChange={(e) => {
+                  setTarget(e.currentTarget.value);
+                  setArmed(false);
+                }}
+              >
+                {others.map((l) => (
+                  <option key={l.id} value={l.id}>
+                    {l.rec.data.private ? `${l.rec.data.name} (just you)` : l.rec.data.name}
+                  </option>
+                ))}
+              </select>
+              <button class="btn sm primary" type="submit" disabled={!dest}>
+                {crossing && armed ? 'Move them anyway' : 'Move'}
+              </button>
+              {crossing && dest && (
+                <p class="small" role={armed ? 'alert' : 'status'}>
+                  {dest.rec.data.private
+                    ? `${nameOf(p)} won’t see them any more.`
+                    : `${nameOf(p)} will see them.`}
+                  {armed ? ' Tap again to move them.' : ''}
+                </p>
+              )}
+            </form>
+          );
+        })()}
       {panel === 'section' && (
         <form
           class="bulk-panel"
           onSubmit={(e) => {
             e.preventDefault();
             const name = section.trim().slice(0, 60) || null;
+            keepSection(list.id, name);
             done(
               name ? `Moved # to ${name}.` : 'Took # out of their sections.',
               updateItems(ids, (i) =>
@@ -922,6 +1255,18 @@ function BulkBar({ list, shown }: { list: ListEntry; shown: ItemEntry[] }) {
             onClick={() => toggle('section')}
           >
             Section
+          </button>
+        )}
+        {activeLists().length > 1 && (
+          <button
+            type="button"
+            class="btn sm"
+            disabled={!n}
+            aria-expanded={panel === 'move'}
+            onClick={() => toggle('move')}
+          >
+            <Icon name="move" size={15} />
+            Move
           </button>
         )}
         {f.has('tick') &&
@@ -1068,6 +1413,64 @@ function NewListSheet() {
   );
 }
 
+/** A list's sections in order: rename (every item follows) and move up or down (L-7). */
+function SectionsEditor({ listId }: { listId: string }) {
+  const names = sectionsOf(listId);
+  return (
+    <fieldset class="fgroup">
+      <legend class="eyebrow">Sections, in order</legend>
+      <ul class="sw-list">
+        {names.map((name, i) => (
+          <li key={name} class="sw-li">
+            <input
+              class="txt sm"
+              type="text"
+              defaultValue={name}
+              maxLength={60}
+              aria-label={`Rename section ${name}`}
+              autocomplete="off"
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  e.currentTarget.blur();
+                }
+              }}
+              onBlur={(e) => {
+                const to = e.currentTarget.value.trim();
+                if (!to || to === name) {
+                  e.currentTarget.value = name;
+                  return;
+                }
+                toast(`Renamed “${name}” to “${to}”.`, renameSection(listId, name, to));
+              }}
+            />
+            <span class="sw-tools">
+              <button
+                type="button"
+                class="iconbtn"
+                aria-label={`Move ${name} up`}
+                disabled={i === 0}
+                onClick={() => moveSection(listId, name, -1)}
+              >
+                <Icon name="up" size={16} />
+              </button>
+              <button
+                type="button"
+                class="iconbtn"
+                aria-label={`Move ${name} down`}
+                disabled={i === names.length - 1}
+                onClick={() => moveSection(listId, name, 1)}
+              >
+                <Icon name="down" size={16} />
+              </button>
+            </span>
+          </li>
+        ))}
+      </ul>
+    </fieldset>
+  );
+}
+
 function ListSettingsSheet({ id }: { id: string }) {
   const list = allLists().find((l) => l.id === id);
   const [name, setName] = useState(list?.rec.data.name ?? '');
@@ -1142,6 +1545,14 @@ function ListSettingsSheet({ id }: { id: string }) {
             hint="Its open items come up in the check-in, to share out who does what."
           />
         )}
+        {!list.rec.data.archived && (
+          <Switch
+            checked={!!list.rec.data.pinned}
+            onChange={(v) => setPinned(id, v)}
+            label="Pin to the top"
+            hint="Pinned lists come first, for both of you."
+          />
+        )}
         {plan?.rec.kind === 'event' && (
           <p class="small muted">
             A checklist for “{plan.rec.data.title}”.{' '}
@@ -1154,6 +1565,7 @@ function ListSettingsSheet({ id }: { id: string }) {
             </button>
           </p>
         )}
+        {f.has('sections') && sectionsOf(id).length > 0 && <SectionsEditor listId={id} />}
         {FEATURE_GROUPS.map(([group, title]) => (
           <fieldset class="fgroup" key={group}>
             <legend class="eyebrow">{title}</legend>
@@ -1192,6 +1604,22 @@ function ListSettingsSheet({ id }: { id: string }) {
                 }}
               >
                 Copy list
+              </button>
+              <button
+                type="button"
+                class="btn sm"
+                onClick={() => {
+                  const archive = !list.rec.data.archived;
+                  const undo = setArchived(id, archive);
+                  closeSheet();
+                  if (archive) {
+                    currentList.value = null;
+                    toast(`Archived “${list.rec.data.name}”. It’s still in search.`, undo);
+                  } else toast(`“${list.rec.data.name}” is back with your lists.`);
+                }}
+              >
+                <Icon name="archive" size={15} />
+                {list.rec.data.archived ? 'Bring back' : 'Archive'}
               </button>
             </div>
           ) : (
@@ -1249,6 +1677,163 @@ function ListSettingsSheet({ id }: { id: string }) {
 }
 
 /** What the list's starting point was called, or "Your list". */
+/** Opens a list, leaving any view across lists. */
+function openList(id: string): void {
+  currentList.value = id;
+  crossView.value = null;
+  picked.value = null;
+  filters.value = { both: false, soon: false, season: false, favs: false };
+}
+
+/**
+ * Every list in one place (review 0008, L-1): grouped, with a filter once
+ * there are more than a few, the views across lists, archived lists, and an
+ * order mode to move and pin lists (L-2).
+ */
+function ListSwitcher({ current }: { current: string | null }) {
+  const [q, setQ] = useState('');
+  const [ordering, setOrdering] = useState(false);
+  const all = allLists();
+  const active = activeLists();
+  const needle = q.trim().toLowerCase();
+  const match = (l: ListEntry) => !needle || l.rec.data.name.toLowerCase().includes(needle);
+  const go = (id: string) => {
+    openList(id);
+    closeSheet();
+  };
+  const pinned = active.filter((l) => l.rec.data.pinned);
+  const rest = active.filter((l) => !l.rec.data.pinned);
+  const groups: [string, ListEntry[]][] = ordering
+    ? [
+        ['Pinned', pinned],
+        ['Lists', rest],
+      ]
+    : [
+        ['Pinned', pinned],
+        ['Shared', rest.filter((l) => !l.rec.data.private && !l.rec.data.plan_id)],
+        ['Just for you', rest.filter((l) => l.rec.data.private && !l.rec.data.plan_id)],
+        ['Plans’ checklists', rest.filter((l) => l.rec.data.plan_id)],
+      ];
+  const archived = all.filter((l) => l.rec.data.archived && match(l));
+  const row = (l: ListEntry, i: number, group: ListEntry[]) => {
+    const { n, what } = countOf(l);
+    const name = l.rec.data.name;
+    return (
+      <li key={l.id} class="sw-li">
+        <button
+          type="button"
+          class="sw-row"
+          aria-current={l.id === current ? 'true' : undefined}
+          onClick={() => go(l.id)}
+        >
+          {l.rec.data.private && <Icon name="lock" size={14} />}
+          {l.rec.data.private && <span class="sr">Private: </span>}
+          <span class="sw-name">{name}</span>
+          <span class="n">
+            {n}
+            <span class="sr"> {what}</span>
+          </span>
+        </button>
+        {ordering && !l.rec.data.archived && (
+          <span class="sw-tools">
+            <button
+              type="button"
+              class="iconbtn"
+              aria-label={`Move ${name} up`}
+              disabled={i === 0}
+              onClick={() => moveList(l.id, -1)}
+            >
+              <Icon name="up" size={16} />
+            </button>
+            <button
+              type="button"
+              class="iconbtn"
+              aria-label={`Move ${name} down`}
+              disabled={i === group.length - 1}
+              onClick={() => moveList(l.id, 1)}
+            >
+              <Icon name="down" size={16} />
+            </button>
+            <button
+              type="button"
+              class="iconbtn"
+              aria-label={`Pin ${name}`}
+              aria-pressed={!!l.rec.data.pinned}
+              onClick={() => setPinned(l.id, !l.rec.data.pinned)}
+            >
+              <Icon name="star" size={16} />
+            </button>
+          </span>
+        )}
+      </li>
+    );
+  };
+  return (
+    <Sheet labelledBy="sw-title" onClose={closeSheet}>
+      <div class="sheet-form">
+        <div class="sh-head">
+          <h2 id="sw-title">Your lists</h2>
+          <CloseButton onClose={closeSheet} />
+        </div>
+        {all.length > 8 && !ordering && (
+          <input
+            data-autofocus
+            class="txt"
+            type="search"
+            value={q}
+            onInput={(e) => setQ(e.currentTarget.value)}
+            placeholder="Find a list"
+            aria-label="Find a list"
+            autocomplete="off"
+            onKeyDown={(e) => {
+              if (e.key !== 'Enter') return;
+              const first = active.find(match) ?? all.find(match);
+              if (first) go(first.id);
+            }}
+          />
+        )}
+        {!needle && !ordering && (
+          <section class="sw-group" aria-labelledby="sw-x">
+            <h3 class="eyebrow" id="sw-x">
+              Across lists
+            </h3>
+            <CrossViews
+              onPick={() => {
+                picked.value = null;
+                closeSheet();
+              }}
+            />
+          </section>
+        )}
+        {groups.map(([title, lists]) => {
+          const shown = lists.filter(match);
+          if (!shown.length) return null;
+          const gid = `sw-${title.replace(/\W+/g, '-').toLowerCase()}`;
+          return (
+            <section class="sw-group" key={title} aria-labelledby={gid}>
+              <h3 class="eyebrow" id={gid}>
+                {title}
+              </h3>
+              <ul class="sw-list">{shown.map((l, i) => row(l, i, shown))}</ul>
+            </section>
+          );
+        })}
+        {archived.length > 0 && !ordering && (
+          <details class="sw-group" open={!!needle}>
+            <summary class="eyebrow">Archived ({archived.length})</summary>
+            <ul class="sw-list">{archived.map((l, i) => row(l, i, archived))}</ul>
+          </details>
+        )}
+        {active.length > 1 && (
+          <button type="button" class="linkbtn" onClick={() => setOrdering(!ordering)}>
+            {ordering ? 'Done' : 'Change the order or pin lists'}
+          </button>
+        )}
+      </div>
+    </Sheet>
+  );
+}
+
 function startLabel(list: ListEntry): string {
   const t = list.rec.data.template;
   return STARTING_POINTS.find((s) => s.template === t)?.label ?? 'List';
@@ -1257,9 +1842,12 @@ function startLabel(list: ListEntry): string {
 /* ---------- view ---------- */
 
 export function ListsView() {
-  const lists = allLists();
+  const lists = activeLists();
   const view = crossView.value;
-  const cur = view ? undefined : (lists.find((l) => l.id === currentList.value) ?? lists[0]);
+  // An archived list can still be open (from search, or the switcher).
+  const cur = view
+    ? undefined
+    : (allLists().find((l) => l.id === currentList.value) ?? lists[0] ?? allLists()[0]);
   const s = listSheet.value;
   // Keep the open list's tab in view, however it was opened (search, a new
   // list, a plan's checklist): the row can be far wider than the screen (L-1).
@@ -1308,12 +1896,7 @@ export function ListsView() {
                     class="ltab"
                     key={l.id}
                     aria-pressed={!view && l.id === cur?.id}
-                    onClick={() => {
-                      currentList.value = l.id;
-                      crossView.value = null;
-                      picked.value = null;
-                      filters.value = { both: false, soon: false, season: false, favs: false };
-                    }}
+                    onClick={() => openList(l.id)}
                   >
                     {l.rec.data.private && <Icon name="lock" size={14} />}
                     {l.rec.data.private && <span class="sr">Private: </span>}
@@ -1334,14 +1917,46 @@ export function ListsView() {
                   {/* The list's own name, and who sees it (review 0008, L-1). */}
                   <div class="ltitle">
                     <h2 class="h3" id="list-h">
-                      {cur.rec.data.private && <Icon name="lock" size={15} />}
-                      {cur.rec.data.name}
+                      {/* The name opens every list: the way to find one among many. */}
+                      <button
+                        type="button"
+                        class="lswitch"
+                        aria-haspopup="dialog"
+                        aria-describedby="lswitch-d"
+                        onClick={() => {
+                          listSheet.value = { type: 'switch' };
+                        }}
+                      >
+                        {cur.rec.data.private && <Icon name="lock" size={15} />}
+                        {cur.rec.data.name}
+                        <Icon name="down" size={16} />
+                      </button>
                     </h2>
+                    <span class="sr" id="lswitch-d">
+                      Shows all your lists
+                    </span>
                     <span class="small muted">
-                      {cur.rec.data.private
-                        ? 'Just for you'
-                        : `Shared with ${nameOf(partner.value)}`}{' '}
+                      {cur.rec.data.archived
+                        ? 'Archived'
+                        : cur.rec.data.private
+                          ? 'Just for you'
+                          : `Shared with ${nameOf(partner.value)}`}{' '}
                       · {startLabel(cur)}
+                      {cur.rec.data.archived && (
+                        <>
+                          {' · '}
+                          <button
+                            type="button"
+                            class="linkbtn"
+                            onClick={() => {
+                              setArchived(cur.id, false);
+                              toast(`“${cur.rec.data.name}” is back with your lists.`);
+                            }}
+                          >
+                            Bring back
+                          </button>
+                        </>
+                      )}
                     </span>
                   </div>
                   {itemsOf(cur.id).length > 1 && (
@@ -1383,6 +1998,7 @@ export function ListsView() {
       )}
       {s?.type === 'new' && <NewListSheet />}
       {s?.type === 'settings' && <ListSettingsSheet key={s.id} id={s.id} />}
+      {s?.type === 'switch' && <ListSwitcher current={cur?.id ?? null} />}
     </>
   );
 }

@@ -50,6 +50,12 @@ export interface SyncContext {
 
 /** True when this device lacks the keys the server now requires (ADR 0013). */
 export const needsNewKeys = signal(false);
+/**
+ * Some synced records wouldn't open in this version of the app (usually
+ * written by a newer one). They're kept and read again once it updates;
+ * meanwhile edits to them wait, so the app asks to be updated.
+ */
+export const heldForUpdate = signal(false);
 
 type Live = Extract<DecodedRecord, { deleted: false }>;
 
@@ -207,6 +213,7 @@ export class SyncEngine implements Backend {
     // Records this app couldn't read are pulled again once it has updated
     // (review 0005 re-review 2, Info).
     const unreadable = await kvGet<{ since: number; build: string }>(this.unreadableKey());
+    heldForUpdate.value = !!unreadable && unreadable.build === BUILD.commit;
     if (unreadable && unreadable.build !== BUILD.commit) {
       const cursor = (await kvGet<number>(this.cursorKey())) ?? 0;
       await kvSet(this.cursorKey(), Math.min(cursor, unreadable.since));
@@ -533,6 +540,7 @@ export class SyncEngine implements Backend {
         const prev = await kvGet<{ since: number; build: string }>(this.unreadableKey());
         if (!prev || since < prev.since)
           await kvSet(this.unreadableKey(), { since, build: BUILD.commit });
+        heldForUpdate.value = true;
       }
       if (held) {
         const from = await kvGet<number>(this.repullKey());

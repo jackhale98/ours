@@ -229,8 +229,77 @@ export function countOf(list: ListEntry): { n: number; what: string } {
   return { n: items.length, what: 'ideas' };
 }
 
+/** Pinned first, then each list's place (L-2); lists never placed come after, oldest first. */
+function byListOrder(a: ListEntry, b: ListEntry): number {
+  const [x, y] = [a.rec.data, b.rec.data];
+  if (!!x.pinned !== !!y.pinned) return x.pinned ? -1 : 1;
+  const [kx, ky] = [x.sort_key ?? null, y.sort_key ?? null];
+  if (kx !== ky) {
+    if (kx === null) return 1;
+    if (ky === null) return -1;
+    return kx < ky ? -1 : 1;
+  }
+  return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+}
+
+const listIndex = computed(() => {
+  const lists = (byKind('list') as ListEntry[]).filter((l) => !l.rec.data.stash);
+  const all = Object.freeze([...lists].sort(byListOrder));
+  return { all, active: Object.freeze(all.filter((l) => !l.rec.data.archived)) };
+});
+
+/** Every list in order, archived ones too (search, plans' checklists). Frozen. */
 export function allLists(): ListEntry[] {
-  return byKind('list') as ListEntry[];
+  return listIndex.value.all as ListEntry[];
+}
+
+/** The lists in use: not archived (the switcher, check-in, views across lists). Frozen. */
+export function activeLists(): ListEntry[] {
+  return listIndex.value.active as ListEntry[];
+}
+
+export function archivedLists(): ListEntry[] {
+  return allLists().filter((l) => l.rec.data.archived);
+}
+
+export function setPinned(id: string, pinned: boolean): void {
+  update<'list'>(id, { pinned });
+}
+
+/** Archives or brings back a list. Returns undo. */
+export function setArchived(id: string, archived: boolean): () => void {
+  const d = (findEntry(id) as ListEntry | undefined)?.rec.data;
+  const was = { archived: !!d?.archived, pinned: !!d?.pinned };
+  update<'list'>(id, { archived, ...(archived ? { pinned: false } : {}) });
+  return () => update<'list'>(id, was);
+}
+
+/**
+ * Moves a list up or down one place among the lists in use (within pinned
+ * or unpinned ones). Lists that never had a place get one first, in their
+ * current order, so the move is the same on both phones.
+ */
+export function moveList(id: string, by: -1 | 1): void {
+  const list = findEntry(id) as ListEntry | undefined;
+  if (!list) return;
+  const group = activeLists().filter((l) => !!l.rec.data.pinned === !!list.rec.data.pinned);
+  const at = group.findIndex((l) => l.id === id);
+  const to = at + by;
+  if (at < 0 || to < 0 || to >= group.length) return;
+  bulk(() => {
+    let keys = group.map((l) => l.rec.data.sort_key ?? null);
+    if (keys.some((k, i) => k === null || (i > 0 && (keys[i - 1] ?? '') >= k))) {
+      const fresh = keysBetween(null, null, group.length);
+      group.forEach((l, i) => {
+        update<'list'>(l.id, { sort_key: fresh[i] as string });
+      });
+      keys = fresh;
+    }
+    // Between the neighbours on the far side of the one it passes.
+    const lo = by < 0 ? (keys[to - 1] ?? null) : keys[to];
+    const hi = by < 0 ? keys[to] : (keys[to + 1] ?? null);
+    update<'list'>(id, { sort_key: keyBetween(lo ?? null, hi ?? null) });
+  });
 }
 
 /** In list order; the same on every device even if two keys tie (review 0008, L-14). */
@@ -258,16 +327,75 @@ const itemIndex = computed(() => {
 });
 const NO_ITEMS: readonly ItemEntry[] = Object.freeze([]);
 
-/** Each list's section names, in the order they first appear (once per change). */
+/**
+ * Each list's section names: in the list's own order, then any others in
+ * the order they first appear (L-7). Adding an item never moves a section.
+ */
 const sectionIndex = computed(() => {
   const out = new Map<string, readonly string[]>();
+  const lists = new Map<string, ListEntry>();
+  for (const l of byKind('list') as ListEntry[]) lists.set(l.id, l);
   for (const [listId, items] of itemIndex.value) {
-    const names = new Set<string>();
+    const names = new Set<string>(lists.get(listId)?.rec.data.sections ?? []);
     for (const i of items) if (i.rec.data.section) names.add(i.rec.data.section);
     out.set(listId, Object.freeze([...names]));
   }
+  for (const [id, l] of lists)
+    if (!out.has(id) && l.rec.data.sections?.length)
+      out.set(id, Object.freeze(l.rec.data.sections));
   return out;
 });
+
+const MAX_SECTIONS = 60;
+
+/** Notes a section in its list's order (at the end) the first time it's used. */
+export function keepSection(listId: string, name: string | null | undefined): void {
+  if (!name) return;
+  const list = findEntry(listId) as ListEntry | undefined;
+  if (list?.rec.kind !== 'list') return;
+  const known = sectionsOf(listId);
+  const saved = list.rec.data.sections ?? [];
+  if (saved.includes(name)) return;
+  // Sections used before the order was kept join it as they are now. Past
+  // 60 the order isn't kept for more (they still show, after the rest).
+  const next = [...known.filter((n) => n !== name), name];
+  if (next.length > MAX_SECTIONS) return;
+  update<'list'>(listId, { sections: next });
+}
+
+/** Moves a section up or down. */
+export function moveSection(listId: string, name: string, by: -1 | 1): void {
+  const names = [...sectionsOf(listId)];
+  const at = names.indexOf(name);
+  const to = at + by;
+  if (at < 0 || to < 0 || to >= names.length) return;
+  [names[at], names[to]] = [names[to] as string, names[at] as string];
+  update<'list'>(listId, { sections: names.slice(0, MAX_SECTIONS) });
+}
+
+/** Renames a section on every item in it. Returns undo. */
+export function renameSection(listId: string, from: string, to: string): () => void {
+  const name = to.trim().slice(0, 60);
+  const list = findEntry(listId) as ListEntry | undefined;
+  if (!name || name === from || !list) return () => {};
+  const before = [...sectionsOf(listId)];
+  const ids = itemsOf(listId)
+    .filter((i) => i.rec.data.section === from)
+    .map((i) => i.id);
+  let undoItems = () => {};
+  bulk(() => {
+    undoItems = updateItems(ids, () => ({ section: name })).undo;
+    const names = before.includes(name)
+      ? before.filter((n) => n !== from)
+      : before.map((n) => (n === from ? name : n));
+    update<'list'>(listId, { sections: names.slice(0, MAX_SECTIONS) });
+  });
+  return () =>
+    bulk(() => {
+      undoItems();
+      update<'list'>(listId, { sections: before });
+    });
+}
 export function sectionsOf(listId: string): readonly string[] {
   return sectionIndex.value.get(listId) ?? [];
 }
@@ -327,7 +455,15 @@ export function startOver(listId: string): () => void {
 export function copyList(id: string): string | null {
   const list = findEntry(id) as ListEntry | undefined;
   if (!list) return null;
-  const { plan_id: _plan, ...data } = list.rec.data;
+  // A fresh list: not archived, pinned, placed or hidden like the one copied.
+  const {
+    plan_id: _plan,
+    archived: _ar,
+    pinned: _pin,
+    sort_key: _key,
+    stash: _stash,
+    ...data
+  } = list.rec.data;
   const newId = put(
     'list',
     { ...data, name: `${data.name} (copy)`.slice(0, 100) },
@@ -495,13 +631,22 @@ export function renameList(id: string, name: string): void {
 export function setListPrivacy(id: string, isPrivate: boolean): string {
   const list = findEntry(id) as ListEntry | undefined;
   if (!list || list.rec.data.private === isPrivate) return id;
-  const items = allItemsOf(id).map((e) => (e.rec.kind === 'item' ? e.rec.data : null));
-  remove([id, ...allItemsOf(id).map((e) => e.id)]);
+  const items = allItemsOf(id).map((e) => ({
+    id: e.id,
+    data: e.rec.kind === 'item' ? e.rec.data : null,
+  }));
+  remove([id, ...items.map((i) => i.id)]);
   const scope = isPrivate ? 'user' : 'space';
   const newId = put('list', { ...list.rec.data, private: isPrivate }, { scope });
   for (const item of items) {
-    if (item)
-      put('item', { ...item, list_id: newId, ...(isPrivate ? { assignee: null } : {}) }, { scope });
+    if (!item.data) continue;
+    const made = put(
+      'item',
+      { ...item.data, list_id: newId, ...(isPrivate ? { assignee: null } : {}) },
+      { scope },
+    );
+    // Plans made from an idea keep pointing at it (L-10).
+    relinkPlans(item.id, made);
   }
   return newId;
 }
@@ -522,7 +667,7 @@ export function inCheckin(list: ListEntry, legacyId?: string | null): boolean {
 }
 
 export function checkinLists(legacyId?: string | null): ListEntry[] {
-  return allLists().filter((l) => inCheckin(l, legacyId));
+  return activeLists().filter((l) => inCheckin(l, legacyId));
 }
 
 export function setListCheckin(id: string, on: boolean): void {
@@ -531,13 +676,13 @@ export function setListCheckin(id: string, on: boolean): void {
 
 /** The shared list the check-in suggests ideas from: the first one you can pick from. */
 export function ideasList(): ListEntry | undefined {
-  const pickable = allLists().filter((l) => has(l, 'plan') && !has(l, 'tick'));
+  const pickable = activeLists().filter((l) => has(l, 'plan') && !has(l, 'tick'));
   return pickable.find((l) => !l.rec.data.private) ?? pickable[0];
 }
 
 /** Lists whose items are ideas to plan (for free time and the check-in). */
 export function ideaLists(): ListEntry[] {
-  return allLists().filter((l) => has(l, 'plan') && !has(l, 'tick'));
+  return activeLists().filter((l) => has(l, 'plan') && !has(l, 'tick'));
 }
 
 /**
@@ -664,3 +809,281 @@ export function topKey(listId: string): string {
   }
   return key;
 }
+
+/** A key for a new item at the end of a list. */
+export function endKey(listId: string): string {
+  const items = itemsOf(listId);
+  let last = items[items.length - 1]?.rec.data.sort_key ?? null;
+  let key = keyBetween(last, null);
+  if (key.length > LONG_KEY) {
+    renumber(listId);
+    const again = itemsOf(listId);
+    last = again[again.length - 1]?.rec.data.sort_key ?? null;
+    key = keyBetween(last, null);
+  }
+  return key;
+}
+
+/**
+ * Moves an item among `peers` (the items around it as shown: its section's
+ * open items, say): one place up or down, or to the top. One write, between
+ * its new neighbours; the list is renumbered first if their keys tie.
+ */
+export function moveItem(
+  item: ItemEntry,
+  to: 'up' | 'down' | 'top',
+  peers: readonly ItemEntry[],
+): void {
+  const at = peers.findIndex((p) => p.id === item.id);
+  const dest = to === 'top' ? 0 : to === 'up' ? at - 1 : at + 1;
+  if (at < 0 || dest < 0 || dest >= peers.length || dest === at) return;
+  const others = peers.filter((p) => p.id !== item.id);
+  const place = () => {
+    const fresh = (p: ItemEntry | undefined) =>
+      p ? ((findEntry(p.id) as ItemEntry | undefined)?.rec.data.sort_key ?? null) : null;
+    return [fresh(others[dest - 1]), fresh(others[dest])] as const;
+  };
+  let [lo, hi] = place();
+  if (lo !== null && hi !== null && lo >= hi) {
+    renumber(item.rec.data.list_id);
+    [lo, hi] = place();
+  }
+  update<'item'>(item.id, { sort_key: keyBetween(lo, hi) });
+}
+
+/** Points plans made from an idea at its new id (it was re-created). Returns [plan, old id]. */
+function relinkPlans(oldId: string, newId: string): [string, string][] {
+  const out: [string, string][] = [];
+  for (const e of byKind('event'))
+    if (e.rec.kind === 'event' && e.rec.data.from_item === oldId) {
+      update<'event'>(e.id, { from_item: newId });
+      out.push([e.id, oldId]);
+    }
+  return out;
+}
+
+/** Whether moving items between these lists changes who can see them. */
+export const movesScope = (from: ListEntry, to: ListEntry) =>
+  from.rec.data.private !== to.rec.data.private;
+
+/**
+ * Moves items to another list, at its end, keeping their notes, hearts and
+ * memories. Between a shared and a private list they are re-created under
+ * the other key (as making a list private does), without an assignee when
+ * they go private. Returns undo.
+ */
+export function moveItems(
+  ids: readonly string[],
+  targetId: string,
+): { undo: () => void; moved: number } {
+  const target = findEntry(targetId) as ListEntry | undefined;
+  if (target?.rec.kind !== 'list') return { undo: () => {}, moved: 0 };
+  const items = ids
+    .map((id) => findEntry(id))
+    .filter((e): e is ItemEntry => e?.rec.kind === 'item' && e.rec.data.list_id !== targetId);
+  if (!items.length) return { undo: () => {}, moved: 0 };
+  const scope = target.rec.data.private ? 'user' : 'space';
+  const last = itemsOf(targetId).at(-1)?.rec.data.sort_key ?? null;
+  const keys = keysBetween(last, null, items.length);
+  const moved: { id: string; data: ItemData }[] = [];
+  const made: string[] = [];
+  // Undo puts back the target's section order too, so a private section's
+  // name doesn't stay behind on a shared list.
+  const hadSections = target.rec.data.sections;
+  const relinks: [string, string][] = [];
+  let restore = () => {};
+  bulk(() => {
+    const recreate: ItemEntry[] = [];
+    items.forEach((item, i) => {
+      const patch = { list_id: targetId, sort_key: keys[i] as string };
+      if (item.scope === scope) {
+        moved.push({ id: item.id, data: item.rec.data });
+        update<'item'>(item.id, patch);
+      } else recreate.push(item);
+      keepSection(targetId, item.rec.data.section);
+    });
+    if (recreate.length) {
+      restore = remove(recreate.map((r) => r.id));
+      recreate.forEach((item) => {
+        const i = items.indexOf(item);
+        const newId = put(
+          'item',
+          {
+            ...item.rec.data,
+            list_id: targetId,
+            sort_key: keys[i] as string,
+            ...(scope === 'user' ? { assignee: null } : {}),
+          },
+          { scope },
+        );
+        made.push(newId);
+        relinks.push(...relinkPlans(item.id, newId));
+      });
+    }
+  });
+  return {
+    moved: items.length,
+    undo: () =>
+      bulk(() => {
+        for (const m of moved)
+          update<'item'>(m.id, { list_id: m.data.list_id, sort_key: m.data.sort_key });
+        if (made.length) {
+          remove(made);
+          restore();
+          for (const [plan, oldId] of relinks) update<'event'>(plan, { from_item: oldId });
+        }
+        const now = (findEntry(targetId) as ListEntry | undefined)?.rec.data.sections;
+        if (JSON.stringify(now) !== JSON.stringify(hadSections))
+          update<'list'>(targetId, { sections: hadSections ?? [] });
+      }),
+  };
+}
+
+export type ListOrder = 'own' | 'due' | 'who' | 'az' | 'recent';
+
+/** How a list's items are ordered: as chosen, else by due date when it has dates (L-4). */
+export function orderOf(list: ListEntry): ListOrder {
+  const o = list.rec.data.order;
+  const f = featuresOf(list);
+  if (o === 'due' && !f.has('due')) return 'own';
+  if (o === 'who' && !f.has('who')) return 'own';
+  return o ?? (f.has('due') && f.has('tick') ? 'due' : 'own');
+}
+
+/** The items an item moves among: open or done like it, and in its section. */
+export function peersOf(item: ItemEntry, list: ListEntry): ItemEntry[] {
+  const d = item.rec.data;
+  const bySection = featuresOf(list).has('sections');
+  return itemsOf(list.id).filter(
+    (i) =>
+      i.rec.data.done === d.done &&
+      (!bySection || (i.rec.data.section || null) === (d.section || null)),
+  );
+}
+
+/* ---------- reading what's typed into a list (review 0008, L-8) ---------- */
+
+const QTY_LEAD = /^(\d{1,4}(?:[.,]\d{1,2})?)\s*(?:x|×)\s+(?=\S)/i;
+const QTY_TRAIL = /\s+(?:x|×)\s*(\d{1,4})$|\s+(\d{1,4})\s*(?:x|×)$/i;
+const QTY_UNIT =
+  /\s+(\d{1,4}(?:[.,]\d{1,2})?\s?(?:g|kg|ml|l|lb|lbs|oz|pack|packs|tins?|cans?|bottles?|loaf|loaves))$/i;
+
+/**
+ * "2 x milk", "milk x2", "flour 500 g" → how many; "@Alex", "@me" → who's on
+ * it. Only for lists with those features; the rest stays the item's name.
+ */
+export function readItemText(
+  input: string,
+  opts: { qty: boolean; who: boolean; me: Slot; names: Record<Slot, string> },
+): { text: string; qty: string | null; assignee: Slot | null } {
+  let text = input.trim();
+  let qty: string | null = null;
+  let assignee: Slot | null = null;
+  if (opts.who) {
+    const m = /(?:^|\s)@(\S+)/.exec(text);
+    if (m) {
+      const tag = (m[1] ?? '').toLowerCase();
+      const partner = other(opts.me);
+      const who =
+        tag === 'me' || tag === opts.names[opts.me].toLowerCase()
+          ? opts.me
+          : tag === opts.names[partner].toLowerCase()
+            ? partner
+            : null;
+      if (who) {
+        assignee = who;
+        text = (text.slice(0, m.index) + text.slice(m.index + m[0].length)).trim();
+      }
+    }
+  }
+  if (opts.qty) {
+    const lead = QTY_LEAD.exec(text);
+    const trail = lead ? null : QTY_TRAIL.exec(text);
+    const unit = lead || trail ? null : QTY_UNIT.exec(text);
+    if (lead) {
+      qty = lead[1] ?? null;
+      text = text.slice(lead[0].length);
+    } else if (trail) {
+      qty = trail[1] ?? trail[2] ?? null;
+      text = text.slice(0, trail.index);
+    } else if (unit) {
+      qty = unit[1] ?? null;
+      text = text.slice(0, unit.index);
+    }
+  }
+  text = text.replace(/\s+/g, ' ').trim();
+  return text ? { text, qty, assignee } : { text: input.trim(), qty: null, assignee: null };
+}
+
+/** The list's items whose names start with (then contain) what's typed, done ones too. */
+export function suggestItems(listId: string, typed: string, max = 5): ItemEntry[] {
+  const q = typed.trim().toLowerCase();
+  if (q.length < 2) return [];
+  const starts: ItemEntry[] = [];
+  const has: ItemEntry[] = [];
+  const seen = new Set<string>();
+  for (const i of itemsOf(listId)) {
+    const name = i.rec.data.text.toLowerCase();
+    if (seen.has(name)) continue;
+    if (name.startsWith(q)) starts.push(i);
+    else if (name.includes(q)) has.push(i);
+    else continue;
+    seen.add(name);
+  }
+  // Done ones first: bringing one back is what typing ahead is for.
+  const rank = (a: ItemEntry, b: ItemEntry) => Number(b.rec.data.done) - Number(a.rec.data.done);
+  return [...starts.sort(rank), ...has.sort(rank)].slice(0, max);
+}
+
+/** The item with exactly this name on the list (any case), open ones first. */
+export function sameItem(listId: string, text: string): ItemEntry | undefined {
+  const t = text.trim().toLowerCase();
+  const found = itemsOf(listId).filter((i) => i.rec.data.text.trim().toLowerCase() === t);
+  return found.find((i) => !i.rec.data.done) ?? found[0];
+}
+
+/* ---------- ideas planned (review 0008, L-10) ---------- */
+
+/** Plans made from each idea, by the idea's id. */
+const plansByIdea = computed(() => {
+  const out = new Map<string, Entry[]>();
+  for (const e of byKind('event')) {
+    if (e.rec.kind !== 'event' || e.rec.data.status === 'declined') continue;
+    const from = e.rec.data.from_item;
+    if (!from) continue;
+    const got = out.get(from);
+    if (got) got.push(e);
+    else out.set(from, [e]);
+  }
+  return out;
+});
+
+/** The plan an idea was planned as: the next one still ahead, else the latest past one. */
+export function planForIdea(itemId: string): { id: string; date: string; past: boolean } | null {
+  const plans = plansByIdea.value.get(itemId);
+  if (!plans?.length) return null;
+  const t = today.value;
+  const dated = plans
+    .map((e) => ({ id: e.id, date: e.rec.kind === 'event' ? e.rec.data.start.slice(0, 10) : '' }))
+    .sort((a, b) => a.date.localeCompare(b.date));
+  const ahead = dated.find((p) => p.date >= t);
+  const pick = ahead ?? dated[dated.length - 1];
+  return pick ? { ...pick, past: !ahead } : null;
+}
+
+/**
+ * Ideas planned that have now happened and aren't marked done since: the
+ * check-in and Waiting on you ask "How was it?" (closing the loop).
+ */
+export const ideasToRecall = computed(() => {
+  const out: { item: ItemEntry; planId: string; date: string }[] = [];
+  for (const [itemId] of plansByIdea.value) {
+    const item = findEntry(itemId) as ItemEntry | undefined;
+    if (item?.rec.kind !== 'item') continue;
+    const plan = planForIdea(itemId);
+    if (!plan?.past) continue;
+    if ((item.rec.data.did ?? []).some((x) => x.date >= plan.date)) continue;
+    out.push({ item, planId: plan.id, date: plan.date });
+  }
+  return out;
+});

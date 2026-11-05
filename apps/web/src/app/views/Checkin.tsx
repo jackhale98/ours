@@ -264,7 +264,7 @@ export function CheckinView() {
                 <button
                   type="button"
                   class="linkbtn"
-                  onClick={() => planIdea(recall.item.rec.data.text)}
+                  onClick={() => planIdea(recall.item.rec.data.text, recall.item.id)}
                 >
                   Do it again
                 </button>

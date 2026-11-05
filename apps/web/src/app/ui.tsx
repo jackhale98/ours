@@ -41,6 +41,11 @@ const PATHS = {
     '<path d="M3.5 13.5 6 5.5h12l2.5 8v5a1.5 1.5 0 0 1-1.5 1.5H5a1.5 1.5 0 0 1-1.5-1.5z"/><path d="M3.5 13.5h5l1.5 2.5h4l1.5-2.5h5"/>',
   search: '<circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/>',
   flag: '<path d="M6 21V4.5M6 5h11l-2.5 4 2.5 4H6"/>',
+  down: '<path d="M6 9.5l6 6 6-6"/>',
+  up: '<path d="M6 14.5l6-6 6 6"/>',
+  archive:
+    '<rect x="3.5" y="4.5" width="17" height="4" rx="1"/><path d="M5.5 8.5V18a1.5 1.5 0 0 0 1.5 1.5h10a1.5 1.5 0 0 0 1.5-1.5V8.5M10 12.5h4"/>',
+  move: '<path d="M4 12h13M13 7l5 5-5 5"/><path d="M20 5v14"/>',
 } as const;
 export type IconName = keyof typeof PATHS;
 

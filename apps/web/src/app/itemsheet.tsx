@@ -12,11 +12,19 @@ import { signal } from '@preact/signals';
 import { useState } from 'preact/hooks';
 import { LENGTH_LABEL } from './freetime';
 import {
+  activeLists,
   didIt,
   featuresOf,
   type ItemEntry,
+  keepSection,
   type ListEntry,
   money,
+  moveItem,
+  moveItems,
+  movesScope,
+  orderOf,
+  peersOf,
+  planForIdea,
   planOf,
   react,
   SEASON_NAME,
@@ -24,8 +32,9 @@ import {
 } from './lists';
 import { findEntry, nameOf, partner, remove, type Slot, update, viewer } from './model';
 import { REPEAT_CHOICES } from './planform';
-import { fmtLong, relDay, repeatText, today } from './select';
-import { CloseButton, Marker, Sheet, Switch, toast } from './ui';
+import { fmtLong, nextFreeEvening, relDay, repeatText, today } from './select';
+import { openEvent, openQuick } from './sheets';
+import { CloseButton, Icon, Marker, Sheet, Switch, toast } from './ui';
 
 export const itemSheet = signal<string | null>(null);
 const close = () => {
@@ -90,6 +99,28 @@ function ItemSheet({ item, list }: { item: ItemEntry; list: ListEntry }) {
   const [again, setAgain] = useState(d.again ?? false);
   const [armed, setArmed] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Changed but not saved: moving the item to another list waits for Save.
+  // Worked out from the fields (a form-wide input handler would undo
+  // checkbox clicks: Preact restores a controlled input after its event).
+  const fields = JSON.stringify([
+    length,
+    text,
+    due,
+    before,
+    repeat,
+    rotate,
+    who,
+    qty,
+    price,
+    section,
+    link,
+    note,
+    when,
+    season,
+    again,
+  ]);
+  const [initial] = useState(fields);
+  const dirty = fields !== initial;
   const custom = !!repeat && !REPEAT_CHOICES.some(([v]) => v === repeat);
   const sections = sectionsOf(list.id);
 
@@ -125,6 +156,7 @@ function ItemSheet({ item, list }: { item: ItemEntry; list: ListEntry }) {
       ...(f.has('when') ? { when, season } : {}),
       ...(f.has('did') ? { again } : {}),
     });
+    if (f.has('sections')) keepSection(list.id, section.trim().slice(0, 60));
     close();
     toast(repeat && useDue ? `Saved. It repeats ${repeatText(repeat).toLowerCase()}.` : 'Saved.');
   };
@@ -138,6 +170,7 @@ function ItemSheet({ item, list }: { item: ItemEntry; list: ListEntry }) {
       <h2 id="is-title" class="sr">
         {d.text}
       </h2>
+      {!f.has('tick') && (f.has('plan') || f.has('did')) && <IdeaActions item={item} />}
       <form class="stack gap planform" onSubmit={save} noValidate>
         <div class="field">
           <label for="is-name">What</label>
@@ -422,6 +455,7 @@ function ItemSheet({ item, list }: { item: ItemEntry; list: ListEntry }) {
           Save
         </button>
       </form>
+      <Place item={item} list={list} dirty={dirty} />
       <div class="sh-foot">
         <span class="small muted">{d.due && !forPlan ? `Due ${fmtLong(d.due)}` : ''}</span>
         <button
@@ -512,6 +546,159 @@ function Memories({ item }: { item: ItemEntry }) {
       ) : (
         <button type="button" class="linkbtn" onClick={() => setAdding(true)}>
           Add a time you did it
+        </button>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Where the item sits: up, down or to the top of its list (when the list
+ * keeps its own order), and which list it's on (review 0008, L-3). Moving
+ * it to a list the partner can't see, or can, says so first.
+ */
+function Place({ item, list, dirty }: { item: ItemEntry; list: ListEntry; dirty: boolean }) {
+  const [target, setTarget] = useState(list.id);
+  const p = nameOf(partner.value);
+  const lists = activeLists();
+  const options = lists.some((l) => l.id === list.id) ? lists : [list, ...lists];
+  const dest = options.find((l) => l.id === target);
+  const crossing = dest && dest.id !== list.id && movesScope(list, dest);
+  const peers = orderOf(list) === 'own' ? peersOf(item, list) : [];
+  const at = peers.findIndex((x) => x.id === item.id);
+  const move = (to: ListEntry) => {
+    const { undo } = moveItems([item.id], to.id);
+    close();
+    toast(`Moved to “${to.rec.data.name}”.`, undo);
+  };
+  return (
+    <div class="stack gap itemplace">
+      {peers.length > 1 && (
+        // biome-ignore lint/a11y/useSemanticElements: a labelled row of buttons; fieldset breaks the row layout
+        <div class="btnrow" role="group" aria-label="Order in the list">
+          <button
+            type="button"
+            class="btn sm"
+            disabled={at <= 0}
+            onClick={() => moveItem(item, 'top', peers)}
+          >
+            Move to top
+          </button>
+          <button
+            type="button"
+            class="btn sm"
+            disabled={at <= 0}
+            aria-label="Move up"
+            onClick={() => moveItem(item, 'up', peers)}
+          >
+            <Icon name="up" size={16} />
+            Up
+          </button>
+          <button
+            type="button"
+            class="btn sm"
+            disabled={at < 0 || at >= peers.length - 1}
+            aria-label="Move down"
+            onClick={() => moveItem(item, 'down', peers)}
+          >
+            <Icon name="down" size={16} />
+            Down
+          </button>
+        </div>
+      )}
+      {options.length > 1 && (
+        <div class="field">
+          <label for="is-list">List</label>
+          <select
+            id="is-list"
+            class="txt"
+            disabled={dirty}
+            aria-describedby={dirty ? 'is-list-d' : undefined}
+            value={target}
+            onChange={(e) => {
+              const id = e.currentTarget.value;
+              setTarget(id);
+              const to = options.find((l) => l.id === id);
+              if (to && to.id !== list.id && !movesScope(list, to)) move(to);
+            }}
+          >
+            {options.map((l) => (
+              <option key={l.id} value={l.id}>
+                {l.rec.data.private ? `${l.rec.data.name} (just you)` : l.rec.data.name}
+              </option>
+            ))}
+          </select>
+          {dirty && (
+            <p class="small muted" id="is-list-d">
+              Save your changes first, then move it.
+            </p>
+          )}
+          {crossing && dest && (
+            <p class="small" role="alert">
+              {dest.rec.data.private ? `${p} won’t see it any more.` : `${p} will see it.`}{' '}
+              <button type="button" class="linkbtn" onClick={() => move(dest)}>
+                Move it
+              </button>{' '}
+              <button type="button" class="linkbtn" onClick={() => setTarget(list.id)}>
+                Keep it here
+              </button>
+            </p>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** What you do with an idea: plan it (linked back to it), or say you did it (L-10, L-11). */
+function IdeaActions({ item }: { item: ItemEntry }) {
+  const list = findEntry(item.rec.data.list_id) as ListEntry | undefined;
+  if (!list) return null;
+  const f = featuresOf(list);
+  const d = item.rec.data;
+  const plan = planForIdea(item.id);
+  return (
+    <div class="btnrow ideaacts">
+      {f.has('plan') &&
+        (plan && !plan.past ? (
+          <button
+            type="button"
+            class="btn sm"
+            onClick={() => {
+              close();
+              openEvent(plan.id);
+            }}
+          >
+            <Icon name="cal" size={15} />
+            Planned for {relDay(plan.date)}
+          </button>
+        ) : (
+          <button
+            type="button"
+            class="btn sm primary"
+            onClick={() => {
+              close();
+              openQuick({
+                text: d.text,
+                date: nextFreeEvening(),
+                time: '19:00',
+                who: 'ours',
+                fromItem: item.id,
+              });
+            }}
+          >
+            <Icon name="cal" size={15} />
+            Plan it
+          </button>
+        ))}
+      {f.has('did') && (
+        <button
+          type="button"
+          class="btn sm"
+          onClick={() => toast(`Noted. How was “${d.text}”? Say below.`, didIt(item))}
+        >
+          <Icon name="check" size={15} />
+          We did it
         </button>
       )}
     </div>

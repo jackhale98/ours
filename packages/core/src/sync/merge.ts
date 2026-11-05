@@ -15,7 +15,7 @@
 import { type DecodedRecord, isValidData, type Kind } from '../schema/records';
 import { compareWrites, nextTimestamp } from './clock';
 
-export const FIELD_MERGE_KINDS: ReadonlySet<Kind> = new Set<Kind>(['item', 'settings']);
+export const FIELD_MERGE_KINDS: ReadonlySet<Kind> = new Set<Kind>(['item', 'list', 'settings']);
 
 export type MergeOutcome =
   /** Remote is the result. Store it; nothing to push. */
@@ -77,6 +77,16 @@ function sameJson(a: unknown, b: unknown): boolean {
  * @param hasPendingLocal whether `local` has unpushed changes
  * @param writer   this device, used to stamp a merged result as a new write
  */
+/** A list's fields that only say where and how it's shown, not what it holds. */
+const LAYOUT_FIELDS = new Set(['sort_key', 'pinned', 'archived', 'sections', 'order']);
+
+function onlyLayout(base: Record<string, unknown> | null, live: Record<string, unknown> | null) {
+  if (!base || !live) return false;
+  for (const key of new Set([...Object.keys(base), ...Object.keys(live)]))
+    if (!LAYOUT_FIELDS.has(key) && !sameJson(base[key], live[key])) return false;
+  return true;
+}
+
 export function mergeRecord(
   base: DecodedRecord | undefined,
   local: DecodedRecord | undefined,
@@ -94,6 +104,17 @@ export function mergeRecord(
     return order < 0
       ? { action: 'take-remote', record: remote }
       : { action: 'keep-local', record: local };
+  }
+
+  // A list deleted on one side (or re-created under the other key when made
+  // private) and only rearranged on the other stays deleted: an empty copy
+  // must not come back because the other phone moved or pinned it.
+  if (base && !base.deleted && remote.kind === 'list' && local.deleted !== remote.deleted) {
+    const live = local.deleted ? remote : local;
+    if (onlyLayout(base.data as Record<string, unknown>, live.data as Record<string, unknown>))
+      return local.deleted
+        ? { action: 'keep-local', record: local }
+        : { action: 'take-remote', record: remote };
   }
 
   const canFieldMerge =

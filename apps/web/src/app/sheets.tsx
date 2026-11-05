@@ -51,6 +51,8 @@ export interface QuickPreset {
   placeholder?: string;
   /** How long, when it's known (a date idea's rough length); otherwise an hour. */
   minutes?: number;
+  /** The idea (a list item) it's planned from, so the idea shows it's planned (L-10). */
+  fromItem?: string;
 }
 
 export type SheetState =
@@ -187,6 +189,7 @@ function QuickAdd({ preset }: { preset: QuickPreset }) {
         notes: null,
         countdown: false,
         stub_id: null,
+        ...(preset.fromItem ? { from_item: preset.fromItem } : {}),
       };
       const id = createEvent(owner === p ? draft : withDefaultReminders(draft, me));
       if (proposing) noticeProposal(id);
@@ -362,6 +365,7 @@ function QuickAdd({ preset }: { preset: QuickPreset }) {
               location: parsed.place,
               rrule: repeat || null,
               privacy: isPrivate ? 'busy' : 'full',
+              ...(preset.fromItem ? { from_item: preset.fromItem } : {}),
             });
           }}
         >

@@ -74,9 +74,10 @@ export function FreeTimeSheet({ date }: { date: string }) {
     const evening = start <= '19:00' && hhmm(w.end) >= '20:00';
     return evening && (!len || IDEA_LENGTHS[len] <= IDEA_LENGTHS.evening) ? '19:00' : start;
   };
-  const plan = (text: string, len?: IdeaLength | null) => {
+  const plan = (text: string, len?: IdeaLength | null, fromItem?: string) => {
     openQuick({
       text,
+      ...(fromItem ? { fromItem } : {}),
       date,
       time: startFor(len),
       who: 'ours',
@@ -147,7 +148,7 @@ export function FreeTimeSheet({ date }: { date: string }) {
               <button
                 type="button"
                 class="ft-idea"
-                onClick={() => plan(i.rec.data.text, i.rec.data.length)}
+                onClick={() => plan(i.rec.data.text, i.rec.data.length, i.id)}
               >
                 <span>
                   <b>{i.rec.data.text}</b>

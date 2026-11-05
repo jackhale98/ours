@@ -8,7 +8,7 @@ import { IDEA_LENGTHS } from '@ours/core/schema';
 import { addDays } from '@ours/core/time';
 import { computed, signal } from '@preact/signals';
 import {
-  allLists,
+  activeLists,
   bothWant,
   dueOf,
   featuresOf,
@@ -17,7 +17,7 @@ import {
   type ListEntry,
 } from '../lists';
 import { viewer } from '../model';
-import { today } from '../select';
+import { relDay, today } from '../select';
 import { ItemRow } from './Lists';
 
 export type CrossView = 'due' | 'mine' | 'short' | 'both';
@@ -45,7 +45,7 @@ const allViews = computed((): Record<CrossView, ViewRow[]> => {
   };
   const week = addDays(today.value, 7);
   const me = viewer.value;
-  for (const list of allLists()) {
+  for (const list of activeLists()) {
     const f = featuresOf(list);
     const tick = f.has('tick');
     for (const item of itemsOf(list.id)) {
@@ -103,6 +103,34 @@ export function CrossViews({ onPick }: { onPick: () => void }) {
   );
 }
 
+function Rows({ rows }: { rows: ViewRow[] }) {
+  return (
+    <ul class="items">
+      {rows.map(({ item, list }) => (
+        <ItemRow key={item.id} item={item} list={list} from={list.rec.data.name} />
+      ))}
+    </ul>
+  );
+}
+
+/** "Due this week" under Overdue, Today and then each day (review 0008, L-12). */
+function bands(v: CrossView, rows: ViewRow[]): [string | null, ViewRow[], boolean][] {
+  if (v !== 'due') return [[null, rows, false]];
+  const t = today.value;
+  const out = new Map<string, [string, ViewRow[], boolean]>();
+  for (const r of rows) {
+    const d = dueOf(r.item) ?? t;
+    const key = d < t ? 'late' : d;
+    const title = d < t ? 'Overdue' : relDay(d);
+    const got = out.get(key);
+    if (got) got[1].push(r);
+    else out.set(key, [title, [r], d < t]);
+  }
+  return [...out.entries()]
+    .sort(([a], [b]) => (a === 'late' ? -1 : b === 'late' ? 1 : a < b ? -1 : 1))
+    .map(([, g]) => g);
+}
+
 export function CrossViewPane() {
   const v = crossView.value;
   if (!v) return null;
@@ -113,11 +141,19 @@ export function CrossViewPane() {
         {VIEWS[v].label}
       </h2>
       {rows.length ? (
-        <ul class="items">
-          {rows.map(({ item, list }) => (
-            <ItemRow key={item.id} item={item} list={list} from={list.rec.data.name} />
-          ))}
-        </ul>
+        bands(v, rows).map(([title, group, late]) =>
+          title ? (
+            <section class="isection" key={title} aria-label={title}>
+              <h3 class={`eyebrow isec-h${late ? ' late' : ''}`}>
+                {title}
+                <span class="n">{group.length}</span>
+              </h3>
+              <Rows rows={group} />
+            </section>
+          ) : (
+            <Rows key="all" rows={group} />
+          ),
+        )
       ) : (
         <p class="nothing">{VIEWS[v].empty}</p>
       )}

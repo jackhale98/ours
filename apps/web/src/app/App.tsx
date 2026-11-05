@@ -22,9 +22,10 @@ import {
   setPendingInvite,
   syncNow,
 } from '../account/session';
-import { needsNewKeys, syncStatus } from '../account/sync';
+import { heldForUpdate, needsNewKeys, syncStatus } from '../account/sync';
 import { LogoMark } from '../Logo';
 import './appearance';
+import { updateReady } from '../update';
 import { waiting } from './inbox';
 import { ItemSheetHost } from './itemsheet';
 import { findEntry, mode, nameOf, names, partner, viewer } from './model';
@@ -183,6 +184,22 @@ function WaitingLink({ variant }: { variant: 'rail' | 'top' }) {
         </span>
       )}
     </a>
+  );
+}
+
+/** Records from a newer version of the app are waiting: updating reads them. */
+function HeldBanner() {
+  if (!heldForUpdate.value || needsNewKeys.value || updateReady.value) return null;
+  return (
+    <div class="keybanner update" role="status">
+      <Icon name="download" size={16} />
+      <span>
+        Some changes were made in a newer version of Ours, so they can’t show here yet.{' '}
+        <button type="button" class="linkbtn" onClick={() => location.reload()}>
+          Update now
+        </button>
+      </span>
+    </div>
   );
 }
 
@@ -567,6 +584,7 @@ export function App() {
           <KeyLinkPrompt />
           <JoinInsteadPrompt />
           <NewKeysBanner />
+          <HeldBanner />
           <RotationBanner />
           <PhraseBanner />
           <Suspense fallback={<p class="nothing">Loading…</p>}>{content}</Suspense>
