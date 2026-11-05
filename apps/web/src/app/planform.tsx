@@ -39,6 +39,20 @@ export const REPEAT_CHOICES: [string, string][] = [
 
 type Who = 'me' | 'ours' | 'partner';
 
+/** Every zone the browser knows, with this device's and the plan's first. */
+function zoneChoices(current: string): string[] {
+  let all: string[] = [];
+  try {
+    all =
+      (Intl as unknown as { supportedValuesOf?: (k: string) => string[] }).supportedValuesOf?.(
+        'timeZone',
+      ) ?? [];
+  } catch {
+    all = [];
+  }
+  return [...new Set([zone, current, ...all])];
+}
+
 /* A repeat rule as the form edits it (review 0009, P-6): how often, which weekdays, when it ends. */
 const DAY_CODES = ['SU', 'MO', 'TU', 'WE', 'TH', 'FR', 'SA'];
 interface RuleParts {
@@ -110,6 +124,8 @@ export function PlanForm({ id, draft }: { id: string | null; draft?: Draft }) {
   const [endDate, setEndDate] = useState(endDate0);
   const [endTime, setEndTime] = useState(endTime0);
   const [repeat, setRepeat] = useState(base.rrule ?? '');
+  // The zone its times are in: this device's unless the plan says otherwise (P-13).
+  const [tz, setTz] = useState(base.tz ?? zone);
   const [location, setLocation] = useState(base.location ?? '');
   const [notes, setNotes] = useState(base.notes ?? '');
   const [away, setAway] = useState(base.away ?? false);
@@ -168,7 +184,7 @@ export function PlanForm({ id, draft }: { id: string | null; draft?: Draft }) {
       start,
       end,
       all_day: allDay,
-      tz: allDay ? null : (base.tz ?? zone),
+      tz: allDay ? null : tz,
       rrule: repeat || null,
       away: allDay && away,
       owner,
@@ -379,6 +395,34 @@ export function PlanForm({ id, draft }: { id: string | null; draft?: Draft }) {
           )}
         </div>
 
+        {!allDay && (
+          <details class="tzpick" open={tz !== zone}>
+            <summary class="small muted">
+              Time zone: {tz.replace(/_/g, ' ')}
+              {tz === zone ? ' (here)' : ''}
+            </summary>
+            <div class="field">
+              <label for="pf-tz">Times are in</label>
+              <select
+                id="pf-tz"
+                class="txt"
+                value={tz}
+                onChange={(e) => setTz(e.currentTarget.value)}
+              >
+                {zoneChoices(tz).map((z) => (
+                  <option key={z} value={z}>
+                    {z.replace(/_/g, ' ')}
+                    {z === zone ? ' (here)' : ''}
+                  </option>
+                ))}
+              </select>
+              <p class="small muted">
+                For a plan somewhere else, like a flight or a call abroad: it shows at the right
+                time here.
+              </p>
+            </div>
+          </details>
+        )}
         <div class="field">
           <label for="pf-rep">Repeats</label>
           <select

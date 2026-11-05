@@ -847,6 +847,29 @@ function EventSheet({ id, occ }: { id: string; occ: string | null }) {
           <button type="button" class="btn sm" onClick={() => openPlanForm(id)}>
             {e.rrule ? 'Edit all days' : 'Edit'}
           </button>
+          <button
+            type="button"
+            class="btn sm ghost"
+            onClick={() =>
+              // A new plan with the same details, to change the day (P-14).
+              openPlanForm(null, {
+                title: e.title,
+                start: e.start,
+                end: e.end,
+                all_day: e.all_day,
+                tz: e.tz,
+                owner: e.owner,
+                location: e.location,
+                notes: e.notes,
+                away: e.away,
+                privacy: e.privacy,
+                rrule: null,
+              })
+            }
+          >
+            <Icon name="copy" size={15} />
+            Duplicate
+          </button>
           <button type="button" class="linkbtn danger" onClick={del}>
             {armed
               ? 'Tap again to confirm'

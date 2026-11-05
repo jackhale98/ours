@@ -9,7 +9,7 @@ import { signal } from '@preact/signals';
 import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
 import { waiting } from '../inbox';
 import { nameOf, partner } from '../model';
-import { drawerOpen, focusDate, type PlanMode, planMode, setPlanMode } from '../planview';
+import { drawerOpen, focusDate, hidden, type PlanMode, planMode, setPlanMode } from '../planview';
 import {
   agendaFrom,
   continues,
@@ -22,6 +22,7 @@ import {
   now,
   type Row,
   routineWhileAway,
+  shownDays,
   startOfWeek,
   today,
   weekStartsOn,
@@ -67,6 +68,12 @@ function addMonths(date: string, n: number): string {
 
 export const selected = () => focusDate.value ?? today.value;
 
+/** The next or previous week or month (keyboard J and K, review 0009 P-14). */
+export function stepPeriod(n: 1 | -1): void {
+  const cur = selected();
+  focusDate.value = planMode.value === 'month' ? addMonths(cur, n) : addDays(cur, 7 * n);
+}
+
 /** Wide screens get the time grid and titles in month cells. */
 const wide = signal(typeof matchMedia === 'function' && matchMedia('(min-width: 720px)').matches);
 /** Big screens: taller month cells, room for a third title. */
@@ -107,7 +114,13 @@ function rank(r: Row): number {
   if (r.status === 'proposed') return 2;
   return r.owner === 'both' ? 1 : 3;
 }
-const byImportance = (a: Row, b: Row) => rank(a) - rank(b) || a.start.localeCompare(b.start);
+const byImportance = (a: Row, b: Row) =>
+  rank(a) - rank(b) ||
+  // Plans over several days keep the same place in each day, so they line up as a bar.
+  Number(!!b.span) - Number(!!a.span) ||
+  a.occStart - b.occStart ||
+  a.start.localeCompare(b.start) ||
+  a.key.localeCompare(b.key);
 
 const markerMode = (r: Row) =>
   r.type === 'busy' ? ('busy' as const) : r.status !== 'confirmed' ? ('dash' as const) : undefined;
@@ -466,14 +479,14 @@ export function MonthView() {
   const sel = selected();
   const first = `${monthOf(sel)}-01`;
   const gridStart = startOfWeek(first);
-  const days = agendaFrom(gridStart, GRID_DAYS);
+  const days = shownDays(agendaFrom(gridStart, GRID_DAYS), hidden.value);
   const t = today.value;
   const grid = useRef<HTMLTableElement>(null);
   const stage = useRef<HTMLDivElement>(null);
   const remember = useFollowFocus(grid, sel);
   const monthSlide = useSlide(monthOf(sel));
   const ws = weekStartsOn.value;
-  const selDay = days.find((d) => d.date === sel) ?? agendaFrom(sel, 1)[0];
+  const selDay = days.find((d) => d.date === sel) ?? shownDays(agendaFrom(sel, 1), hidden.value)[0];
   const phone = compact.value;
   // Titles shown in each cell: the rest are counted as markers.
   const titles = desk.value ? 3 : 2;
@@ -607,9 +620,17 @@ export function MonthView() {
                                 {plans.slice(0, titles).map((r) => {
                                   const mode = markerMode(r);
                                   return (
-                                    <span key={r.key} class="mtitle">
+                                    <span
+                                      key={r.key}
+                                      class={`mtitle${r.span ? ` mspan${r.span.day > 1 ? ' cont' : ''}${r.span.day < r.span.of ? ' more' : ''}` : ''}`}
+                                    >
                                       <Marker owner={r.owner} {...(mode ? { mode } : {})} />
-                                      <span>{r.title}</span>
+                                      {/* A bar's name shows where it starts, and again each week. */}
+                                      <span>
+                                        {!r.span || r.span.day === 1 || dow(day.date) === ws
+                                          ? r.title
+                                          : ' '}
+                                      </span>
                                     </span>
                                   );
                                 })}
@@ -731,6 +752,72 @@ function blockLabel(r: Row): string {
 const quantile = (sorted: number[], q: number) =>
   sorted[Math.min(sorted.length - 1, Math.max(0, Math.round(q * (sorted.length - 1))))] ?? 0;
 
+/**
+ * The week's all-day plans as bars across the days they cover (review 0009,
+ * P-8): a trip is one bar, not seven chips. Bars take the first free lane.
+ */
+function AllDayBars({ days }: { days: Day[] }) {
+  const bars: { row: Row; from: number; to: number; lane: number }[] = [];
+  const seen = new Map<string, (typeof bars)[number]>();
+  days.forEach((d, i) => {
+    for (const r of d.rows) {
+      if (!r.allDay) continue;
+      const got = seen.get(r.key);
+      if (got) got.to = i;
+      else {
+        const bar = { row: r, from: i, to: i, lane: 0 };
+        seen.set(r.key, bar);
+        bars.push(bar);
+      }
+    }
+  });
+  const lanes: number[] = [];
+  for (const b of bars) {
+    let lane = lanes.findIndex((end) => end < b.from);
+    if (lane < 0) lane = lanes.length;
+    lanes[lane] = b.to;
+    b.lane = lane;
+  }
+  return (
+    <div
+      class="wg-allday"
+      style={{ gridTemplateRows: `repeat(${Math.max(1, lanes.length)}, auto)` }}
+    >
+      <span class="wg-lbl" style={{ gridRow: `1 / ${Math.max(1, lanes.length) + 1}` }}>
+        All day
+      </span>
+      {days.map((d, i) => (
+        <span
+          key={d.date}
+          class="wg-adcell"
+          aria-hidden="true"
+          style={{ gridColumn: `${i + 2}`, gridRow: `1 / ${Math.max(1, lanes.length) + 1}` }}
+        />
+      ))}
+      {bars.map(({ row: r, from, to, lane }) => {
+        const mode = markerMode(r);
+        const first = !r.span || r.span.day === 1 || from > 0;
+        return (
+          <button
+            type="button"
+            key={r.key}
+            class={`wg-chip wg-bar${r.away ? ' away' : ''}${from === 0 && r.span && r.span.day > 1 ? ' cont' : ''}`}
+            style={{ gridColumn: `${from + 2} / ${to + 3}`, gridRow: `${lane + 1}` }}
+            aria-label={blockLabel(r)}
+            onClick={() => openEvent(r.id, r.occ)}
+          >
+            <Marker owner={r.owner} {...(mode ? { mode } : {})} />
+            <span>
+              {first ? '' : '← '}
+              {r.title}
+            </span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 function WeekGrid({ days, sel }: { days: Day[]; sel: string }) {
   const t = today.value;
   const timed = days.map((d) => d.rows.filter((r) => !r.allDay));
@@ -774,30 +861,7 @@ function WeekGrid({ days, sel }: { days: Day[]; sel: string }) {
           </button>
         ))}
       </div>
-      <div class="wg-allday">
-        <span class="wg-lbl">All day</span>
-        {days.map((d) => (
-          <div key={d.date} class="wg-adcell">
-            {d.rows
-              .filter((r) => r.allDay)
-              .map((r) => {
-                const mode = markerMode(r);
-                return (
-                  <button
-                    type="button"
-                    key={r.key}
-                    class={`wg-chip${r.away ? ' away' : ''}`}
-                    aria-label={blockLabel(r)}
-                    onClick={() => openEvent(r.id, r.occ)}
-                  >
-                    <Marker owner={r.owner} {...(mode ? { mode } : {})} />
-                    <span>{r.title}</span>
-                  </button>
-                );
-              })}
-          </div>
-        ))}
-      </div>
+      <AllDayBars days={days} />
       <div class="wg-body">
         <div class="wg-hours" aria-hidden="true">
           {hours.map((h) => (
@@ -924,7 +988,7 @@ function WeekStrip({ days, sel }: { days: Day[]; sel: string }) {
 export function WeekView() {
   const sel = selected();
   const start = startOfWeek(sel);
-  const days = agendaFrom(start, 7);
+  const days = shownDays(agendaFrom(start, 7), hidden.value);
   const selDay = days.find((d) => d.date === sel) ?? days[0];
   const weekSlide = useSlide(start);
   // Swipe on the day strip changes week (a shortcut; the buttons do the same).

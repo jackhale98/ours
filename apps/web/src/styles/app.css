@@ -3801,3 +3801,120 @@ body:has(.bulkbar) .fab {
 .suggest {
   margin-top: 10px;
 }
+/* Keyboard shortcuts sheet (review 0009, P-14). */
+.kbd-list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+}
+.kbd-list > div {
+  display: grid;
+  grid-template-columns: 7.5rem 1fr;
+  gap: 12px;
+  align-items: baseline;
+}
+.kbd-list dd {
+  margin: 0;
+}
+kbd {
+  display: inline-block;
+  padding: 2px 6px;
+  border: 1px solid var(--control);
+  border-radius: 6px;
+  font: inherit;
+  font-size: 0.875rem;
+  background: var(--surface);
+}
+.tzpick > summary {
+  cursor: pointer;
+  min-height: 32px;
+  display: flex;
+  align-items: center;
+}
+/* Agenda: earlier, jump to a date, routines folded (review 0009, P-10). */
+.agenda-nav {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+.agenda-jump {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.agenda-jump .txt {
+  width: auto;
+}
+.linkbtn.routines {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 40px;
+  font-weight: 500;
+  color: var(--muted);
+  text-align: start;
+}
+.agenda-end {
+  height: 1px;
+}
+/* Plans over several days as bars (review 0009, P-8). */
+.wg-allday {
+  position: relative;
+  row-gap: 2px;
+  padding-block: 3px;
+}
+.wg-allday .wg-adcell {
+  min-height: 0;
+  padding: 0;
+}
+.wg-bar {
+  margin-inline: 3px;
+  z-index: 1;
+  min-width: 0;
+}
+.wg-bar.cont {
+  margin-inline-start: 0;
+  border-start-start-radius: 0;
+  border-end-start-radius: 0;
+}
+.mtitles .mspan {
+  background: var(--sunk);
+  border-radius: 4px;
+  padding-inline: 2px;
+}
+.mtitles .mspan.cont {
+  border-start-start-radius: 0;
+  border-end-start-radius: 0;
+  margin-inline-start: -6px;
+  padding-inline-start: 8px;
+}
+.mtitles .mspan.more {
+  border-start-end-radius: 0;
+  border-end-end-radius: 0;
+  margin-inline-end: -6px;
+}
+.mtitles .mspan.cont .mk {
+  visibility: hidden;
+}
+/* View filters (review 0009, P-8). */
+.vswitch-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.vswitch-row > :first-child {
+  flex: 1;
+  min-width: 0;
+}
+.fbtn {
+  white-space: nowrap;
+}
+.fbtn.on {
+  color: var(--ours);
+}
+.vfilters {
+  flex-wrap: wrap;
+  margin-block: 4px 10px;
+}

@@ -30,11 +30,12 @@ import { waiting } from './inbox';
 import { ItemSheetHost } from './itemsheet';
 import { activeLists, allLists, currentList } from './lists';
 import { findEntry, mode, nameOf, names, partner, viewer } from './model';
-import { drawerOpen, type PlanMode, planHash, setPlanMode } from './planview';
+import { drawerOpen, focusDate, type PlanMode, planHash, planMode, setPlanMode } from './planview';
 import { now } from './select';
-import { accept, afterAdd, openEvent, openQuick, SheetHost, sheet } from './sheets';
-import { Avatar, Icon, type IconName, ToastHost, toast } from './ui';
+import { accept, afterAdd, openEvent, openPlanForm, openQuick, SheetHost, sheet } from './sheets';
+import { Avatar, CloseButton, Icon, type IconName, Sheet, ToastHost, toast } from './ui';
 import { UpdateBanner } from './version';
+import { stepPeriod } from './views/Calendar';
 import { PlanView } from './views/Plan';
 
 const ListsView = lazy(() => import('./views/Lists').then((m) => ({ default: m.ListsView })));
@@ -58,6 +59,47 @@ export const isTab = (h: string): h is Tab =>
   h === 'inbox' || h === 'search' || TABS.some(([t]) => t === h);
 
 export const tab = signal<Tab>('plan');
+/** The keyboard shortcuts sheet ("?"). */
+const helpOpen = signal(false);
+
+const SHORTCUTS: [string, string][] = [
+  ['N', 'New plan (on Lists: add to the list)'],
+  ['/', 'Search'],
+  ['T', 'Today'],
+  ['D, W, M', 'Agenda, week, month (or 1, 2, 3)'],
+  ['J, K', 'Next or previous week or month'],
+  ['E', 'Edit the plan that’s open'],
+  ['↑ ↓', 'Move between items in a list'],
+  ['Alt + ↑ ↓', 'Move an item up or down'],
+  ['X', 'Tick the item'],
+  ['Esc', 'Close'],
+  ['?', 'These shortcuts'],
+];
+
+function ShortcutsSheet() {
+  if (!helpOpen.value) return null;
+  const close = () => {
+    helpOpen.value = false;
+  };
+  return (
+    <Sheet labelledBy="kb-title" onClose={close}>
+      <div class="sh-head">
+        <h2 id="kb-title">Keyboard shortcuts</h2>
+        <CloseButton onClose={close} />
+      </div>
+      <dl class="kbd-list">
+        {SHORTCUTS.map(([k, what]) => (
+          <div key={k}>
+            <dt>
+              <kbd>{k}</kbd>
+            </dt>
+            <dd>{what}</dd>
+          </div>
+        ))}
+      </dl>
+    </Sheet>
+  );
+}
 
 /** The open list's add box, if one is on screen (Lists). */
 const addBox = () => document.querySelector<HTMLInputElement>('.listcard .additem input.txt');
@@ -464,8 +506,50 @@ export function App() {
     };
     const onKey = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement;
-      if (sheet.value || e.metaKey || e.ctrlKey || e.altKey) return;
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
       if (t.closest('input, textarea, select, [contenteditable]')) return;
+      // In a plan's sheet, "e" edits it (review 0009, P-14).
+      const open = sheet.value;
+      if (open?.type === 'event' && e.key === 'e') {
+        e.preventDefault();
+        openPlanForm(open.id);
+        return;
+      }
+      if (open || helpOpen.value) return;
+      if (e.key === '?') {
+        e.preventDefault();
+        helpOpen.value = true;
+        return;
+      }
+      // Inside a list its own keys apply (x, e, arrows).
+      if (t.closest('.listcard')) return;
+      // Views and periods, as in other calendars: T, D/W/M (or 1/2/3), J/K.
+      const views: Record<string, PlanMode> = {
+        d: 'agenda',
+        w: 'week',
+        m: 'month',
+        '1': 'agenda',
+        '2': 'week',
+        '3': 'month',
+      };
+      if (e.key === 't') {
+        e.preventDefault();
+        focusDate.value = null;
+        if (tab.value !== 'plan') go('plan');
+        return;
+      }
+      const mode = views[e.key];
+      if (mode) {
+        e.preventDefault();
+        if (tab.value !== 'plan') go('plan');
+        setPlanMode(mode);
+        return;
+      }
+      if ((e.key === 'j' || e.key === 'k') && tab.value === 'plan' && planMode.value !== 'agenda') {
+        e.preventDefault();
+        stepPeriod(e.key === 'j' ? 1 : -1);
+        return;
+      }
       // On Lists, "n" or "a" adds to the list on screen; Shift+N is still a new plan (L-16).
       if (tab.value === 'lists' && (e.key === 'n' || e.key === 'a') && focusAddBox()) {
         e.preventDefault();
@@ -628,6 +712,7 @@ export function App() {
       )}
       <SheetHost />
       <ItemSheetHost />
+      <ShortcutsSheet />
       <ToastHost />
     </>
   );

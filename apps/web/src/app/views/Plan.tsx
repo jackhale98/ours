@@ -2,15 +2,15 @@
 
 import { addDays } from '@ours/core/time';
 import { signal } from '@preact/signals';
-import { useState } from 'preact/hooks';
+import { useEffect, useRef, useState } from 'preact/hooks';
 import { tasksFor, waiting } from '../inbox';
 import { itemSheet } from '../itemsheet';
 import { dueOf, dueText } from '../lists';
 import { commentsFor, nameOf, names, partner, viewer } from '../model';
 import { markSeen, news } from '../news';
-import { planMode } from '../planview';
+import { type Hide, hidden, planMode, toggleHidden } from '../planview';
 import {
-  agenda,
+  agendaFrom,
   askVerb,
   awaitingMe,
   changeText,
@@ -24,6 +24,7 @@ import {
   ownerLabel,
   type Row,
   routineWhileAway,
+  shownDays,
   today,
   whenText,
 } from '../select';
@@ -41,7 +42,81 @@ import { Icon, Marker, MarkerKey } from '../ui';
 import { MonthView, ViewSwitch, WeekView } from './Calendar';
 import { Result } from './Search';
 
-const weeks = signal<1 | 2>(1);
+const filtersOpen = signal(false);
+
+/** Shows or hides the view filters; says how many things are left out. */
+function FilterButton() {
+  const n = hidden.value.size;
+  return (
+    <button
+      type="button"
+      class={`linkbtn fbtn${n ? ' on' : ''}`}
+      aria-expanded={filtersOpen.value}
+      aria-controls="vfilters"
+      onClick={() => {
+        filtersOpen.value = !filtersOpen.value;
+      }}
+    >
+      {n ? `Filtered (${n})` : 'Filter'}
+    </button>
+  );
+}
+
+/** Mine, theirs, ours, imported, routines: shown or not, on this device (P-8). */
+function Filters() {
+  if (!filtersOpen.value) return null;
+  const p = nameOf(partner.value);
+  const choices: [Hide, string][] = [
+    ['mine', 'Mine'],
+    ['partner', `${p}’s`],
+    ['ours', 'Ours'],
+    ['imported', 'Imported'],
+    ['routines', 'Routines'],
+  ];
+  return (
+    // biome-ignore lint/a11y/useSemanticElements: toggle-button group (aria-pressed), labelled
+    <div class="chips vfilters" id="vfilters" role="group" aria-label="Show">
+      {choices.map(([k, label]) => (
+        <button
+          type="button"
+          class="chip"
+          key={k}
+          aria-pressed={!hidden.value.has(k)}
+          onClick={() => toggleHidden(k)}
+        >
+          {label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/** The agenda: from which day (null: today), and how many weeks are drawn (P-10). */
+const weeks = signal(1);
+const agendaStart = signal<string | null>(null);
+/** Days whose routines are shown in full (they fold into one line otherwise). */
+const routinesOpen = signal<ReadonlySet<string>>(new Set());
+const MAX_WEEKS = 26;
+/** A day with this many routines folds them into "+N routines". */
+const FOLD_ROUTINES = 3;
+
+/** Grows the agenda by a week when its end scrolls into view. */
+function MoreWhenSeen() {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || typeof IntersectionObserver === 'undefined') return;
+    const io = new IntersectionObserver(
+      (es) => {
+        if (es.some((x) => x.isIntersecting) && weeks.value < MAX_WEEKS) weeks.value += 1;
+      },
+      { rootMargin: '400px' },
+    );
+    io.observe(el);
+    return () => io.disconnect();
+  }, []);
+  return <div ref={ref} class="agenda-end" aria-hidden="true" />;
+}
 
 export function EventRow({
   row,
@@ -349,19 +424,25 @@ export function PlanView() {
               Encrypted
             </a>
           </header>
-          <ViewSwitch />
+          <div class="vswitch-row">
+            <ViewSwitch />
+            <FilterButton />
+          </div>
+          <Filters />
         </>
       ) : (
         // Week and month need the height for the calendar: the switch says which view this is.
         <header class="vhead compact">
           <h1 class="sr">{mode === 'week' ? 'Week' : 'Month'}</h1>
           <ViewSwitch />
+          <FilterButton />
           <a class="enc" href="#privacy" aria-label="Encrypted">
             <Icon name="lock" size={14} />
             <span class="enc-t">Encrypted</span>
           </a>
         </header>
       )}
+      {mode !== 'agenda' && <Filters />}
     </>
   );
   if (mode !== 'agenda') {
@@ -374,7 +455,8 @@ export function PlanView() {
       </>
     );
   }
-  const days = agenda(7 * weeks.value);
+  const from = agendaStart.value ?? t;
+  const days = shownDays(agendaFrom(from, 7 * weeks.value), hidden.value);
   const cds = countdowns.value;
   return (
     <>
@@ -457,55 +539,124 @@ export function PlanView() {
               <span class="free-cta">Go through</span>
             </a>
           )}
-          <div class="agenda">
-            {days.map((day, i) => (
-              <>
-                {i === 7 && (
-                  <h2 class="wk" key="next">
-                    Next week
-                  </h2>
-                )}
-                <section
-                  class={`day${i === 0 ? ' today' : ''}`}
-                  aria-label={i === 0 ? `Today, ${fmtLong(day.date)}` : fmtLong(day.date)}
-                  key={day.date}
-                >
-                  <div class="dhead" aria-hidden="true">
-                    <span class="dow">{i === 0 ? 'Today' : dowShort(day.date)}</span>
-                    <span class="dnum">{dayNum(day.date)}</span>
-                  </div>
-                  <div class="dlist">
-                    {day.rows.map((row) => (
-                      <EventRow
-                        key={row.key}
-                        row={row}
-                        date={day.date}
-                        clash={day.clash.has(row.key)}
-                        dim={routineWhileAway(row, day)}
-                      />
-                    ))}
-                    {!day.rows.length && !day.bothFree && <p class="nothing">Nothing planned</p>}
-                    {day.bothFree && (
-                      <button type="button" class="free" onClick={() => openFreeTime(day.date)}>
-                        <Marker owner="both" mode="dash" />
-                        {i === 0 ? 'Both free tonight' : 'Both free this evening'}
-                        <span class="free-cta">Plan something</span>
-                      </button>
-                    )}
-                  </div>
-                </section>
-              </>
-            ))}
+          <div class="agenda-nav">
+            <button
+              type="button"
+              class="btn sm ghost"
+              onClick={() => {
+                agendaStart.value = addDays(from, -7);
+                weeks.value = Math.min(MAX_WEEKS, weeks.value + 1);
+              }}
+            >
+              <Icon name="up" size={15} />
+              Earlier
+            </button>
+            <label class="agenda-jump">
+              <span class="small muted">Go to</span>
+              <input
+                class="txt sm"
+                type="date"
+                value={from}
+                onChange={(e) => {
+                  const v = e.currentTarget.value;
+                  if (!v) return;
+                  agendaStart.value = v === t ? null : v;
+                  weeks.value = 1;
+                }}
+              />
+            </label>
+            {from !== t && (
+              <button
+                type="button"
+                class="linkbtn"
+                onClick={() => {
+                  agendaStart.value = null;
+                  weeks.value = 1;
+                }}
+              >
+                Back to today
+              </button>
+            )}
           </div>
-          <button
-            type="button"
-            class="btn more"
-            onClick={() => {
-              weeks.value = weeks.value === 1 ? 2 : 1;
-            }}
-          >
-            {weeks.value === 1 ? 'Show next week' : 'Show less'}
-          </button>
+          <div class="agenda">
+            {days.map((day, i) => {
+              const isToday = day.date === t;
+              // Routines fold away on a full day (P-10); clashes and away days stay shown.
+              const routines = day.rows.filter(
+                (r) => r.repeat && !r.allDay && !day.clash.has(r.key) && r.status === 'confirmed',
+              );
+              const fold = routines.length >= FOLD_ROUTINES && !routinesOpen.value.has(day.date);
+              const rows = fold ? day.rows.filter((r) => !routines.includes(r)) : day.rows;
+              return (
+                <>
+                  {i > 0 && i % 7 === 0 && (
+                    <h2 class="wk" key={`wk-${day.date}`}>
+                      {from === t && i === 7 ? 'Next week' : `Week of ${fmtLong(day.date)}`}
+                    </h2>
+                  )}
+                  <section
+                    class={`day${isToday ? ' today' : ''}`}
+                    aria-label={isToday ? `Today, ${fmtLong(day.date)}` : fmtLong(day.date)}
+                    key={day.date}
+                  >
+                    <div class="dhead" aria-hidden="true">
+                      <span class="dow">{isToday ? 'Today' : dowShort(day.date)}</span>
+                      <span class="dnum">{dayNum(day.date)}</span>
+                    </div>
+                    <div class="dlist">
+                      {rows.map((row) => (
+                        <EventRow
+                          key={row.key}
+                          row={row}
+                          date={day.date}
+                          clash={day.clash.has(row.key)}
+                          dim={routineWhileAway(row, day)}
+                        />
+                      ))}
+                      {fold && (
+                        <button
+                          type="button"
+                          class="linkbtn routines"
+                          onClick={() => {
+                            routinesOpen.value = new Set([...routinesOpen.value, day.date]);
+                          }}
+                        >
+                          <Icon name="repeat" size={14} />+{routines.length} routines:{' '}
+                          {routines
+                            .slice(0, 3)
+                            .map((r) => r.title)
+                            .join(', ')}
+                          {routines.length > 3 ? '…' : ''}
+                        </button>
+                      )}
+                      {!day.rows.length && !day.bothFree && <p class="nothing">Nothing planned</p>}
+                      {day.bothFree && (
+                        <button type="button" class="free" onClick={() => openFreeTime(day.date)}>
+                          <Marker owner="both" mode="dash" />
+                          {isToday ? 'Both free tonight' : 'Both free this evening'}
+                          <span class="free-cta">Plan something</span>
+                        </button>
+                      )}
+                    </div>
+                  </section>
+                </>
+              );
+            })}
+          </div>
+          {weeks.value < MAX_WEEKS && (
+            <>
+              <button
+                type="button"
+                class="btn more"
+                onClick={() => {
+                  weeks.value = Math.min(MAX_WEEKS, weeks.value + 1);
+                }}
+              >
+                Show next week
+              </button>
+              {weeks.value > 1 && <MoreWhenSeen />}
+            </>
+          )}
           <MarkerKey names={names.value} />
         </div>
       </div>

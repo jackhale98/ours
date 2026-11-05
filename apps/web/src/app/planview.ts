@@ -36,3 +36,31 @@ export function setPlanMode(mode: PlanMode, updateHash = true): void {
 
 /** The hash for the Plan tab, in the view last used on this device. */
 export const planHash = () => (planMode.value === 'agenda' ? 'plan' : `plan/${planMode.value}`);
+
+/**
+ * What the Plan views leave out, on this device (review 0009, P-8): one of
+ * you, plans you share, imported calendars, routines.
+ */
+export type Hide = 'mine' | 'partner' | 'ours' | 'imported' | 'routines';
+const HIDE_KEY = 'ours-plan-hide';
+export const hidden = signal<ReadonlySet<Hide>>(
+  (() => {
+    try {
+      const v = JSON.parse(localStorage.getItem(HIDE_KEY) ?? '[]');
+      return new Set(Array.isArray(v) ? (v as Hide[]) : []);
+    } catch {
+      return new Set<Hide>();
+    }
+  })(),
+);
+export function toggleHidden(h: Hide): void {
+  const next = new Set(hidden.value);
+  if (next.has(h)) next.delete(h);
+  else next.add(h);
+  hidden.value = next;
+  try {
+    localStorage.setItem(HIDE_KEY, JSON.stringify([...next]));
+  } catch {
+    // per-device convenience only
+  }
+}

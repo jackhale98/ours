@@ -683,3 +683,16 @@ export const isMoveAsk = (d: EventData) =>
 /** "wants to move this" (a plan you had) or "suggests another time" (an answer to a request). */
 export const askVerb = (d: EventData) =>
   !isMoveAsk(d) ? 'asked' : d.was?.confirmed ? 'wants to move this' : 'suggests another time';
+
+/** Days with only the rows the Plan views show (filters in planview.ts). Same days if none. */
+export function shownDays(days: Day[], hide: ReadonlySet<string>): Day[] {
+  if (!hide.size) return days;
+  const me = viewer.value;
+  const show = (r: Row) => {
+    if (hide.has('routines') && r.repeat) return false;
+    if (r.origin === 'import') return !hide.has('imported');
+    if (r.owner === 'both') return !hide.has('ours');
+    return !hide.has(r.owner === me ? 'mine' : 'partner');
+  };
+  return days.map((d) => ({ ...d, rows: d.rows.filter(show) }));
+}

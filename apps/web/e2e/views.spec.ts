@@ -190,3 +190,33 @@ test('changing week or month slides the new one in from its side', async ({ page
     );
   }
 });
+
+test('filters, shortcuts and the agenda going further (review 0009, P-8, P-10, P-14)', async ({
+  page,
+}, info) => {
+  await page.goto('/#plan');
+  await expect(page.getByRole('heading', { name: 'This week', level: 1 })).toBeVisible();
+  // Routines can be left out, on this device.
+  await expect(page.locator('.ev', { hasText: 'Farmers market' }).first()).toBeVisible();
+  await page.getByRole('button', { name: 'Filter' }).click();
+  await page.getByRole('group', { name: 'Show' }).getByRole('button', { name: 'Routines' }).click();
+  await expect(page.locator('.ev', { hasText: 'Farmers market' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Filtered (1)' })).toBeVisible();
+  await page.getByRole('group', { name: 'Show' }).getByRole('button', { name: 'Routines' }).click();
+
+  // Jump ahead, then back to today.
+  await page.getByLabel('Go to').fill('2027-01-04');
+  await expect(page.getByRole('button', { name: 'Back to today' })).toBeVisible();
+  await page.getByRole('button', { name: 'Back to today' }).click();
+  await expect(page.locator('.day.today')).toHaveCount(1);
+
+  if (info.project.name.includes('mobile')) return;
+  await page.getByRole('heading', { name: 'This week', level: 1 }).click();
+  await page.keyboard.press('w');
+  await expect(page).toHaveURL(/#plan\/week/);
+  await page.keyboard.press('?');
+  await expect(page.getByRole('dialog', { name: 'Keyboard shortcuts' })).toBeVisible();
+  await page.keyboard.press('Escape');
+  await page.keyboard.press('d');
+  await expect(page).toHaveURL(/#plan$/);
+});
