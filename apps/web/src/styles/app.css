@@ -4123,3 +4123,21 @@ dialog.sheet {
   display: grid;
   gap: 2px;
 }
+/* Finding a list among many: a box in the sidebar, a search button on phones. */
+.lfind {
+  display: none;
+}
+.lfind-btn {
+  flex: none;
+  min-width: 44px;
+  justify-content: center;
+}
+@media (min-width: 1100px) {
+  .lfind {
+    display: block;
+    width: 100%;
+  }
+  .lfind-btn {
+    display: none;
+  }
+}

@@ -199,10 +199,14 @@ test('filters, shortcuts and the agenda going further (review 0009, P-8, P-10, P
   // Routines can be left out, on this device.
   await expect(page.locator('.ev', { hasText: 'Farmers market' }).first()).toBeVisible();
   await page.getByRole('button', { name: 'Filter' }).click();
-  await page.getByRole('group', { name: 'Show' }).getByRole('button', { name: 'Routines' }).click();
+  await page
+    .getByRole('group', { name: 'Show' })
+    .getByRole('button', { name: 'Repeating' })
+    .click();
   await expect(page.locator('.ev', { hasText: 'Farmers market' })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Filtered (1)' })).toBeVisible();
-  await page.getByRole('group', { name: 'Show' }).getByRole('button', { name: 'Routines' }).click();
+  await page.getByRole('button', { name: 'Show everything' }).click();
+  await expect(page.getByRole('button', { name: 'Filter' })).toBeVisible();
 
   // The heading picks a day; then back to today.
   await page

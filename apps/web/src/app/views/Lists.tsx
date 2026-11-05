@@ -92,8 +92,10 @@ import { CrossViewPane, CrossViews, crossView } from './ListViews';
 const showDone = signal(false);
 const picked = signal<string | null>(null);
 const listSheet = signal<
-  { type: 'new' } | { type: 'settings'; id: string } | { type: 'switch' } | null
+  { type: 'new' } | { type: 'settings'; id: string } | { type: 'switch'; find?: boolean } | null
 >(null);
+/** Past this many lists, they can be searched (sidebar box, or a search button on phones). */
+const FIND_LISTS = 8;
 /** Items picked to change together, in the list they belong to; null when not selecting. */
 /*
  * Which list is in select mode, and which of its items are picked, apart:
@@ -1836,7 +1838,7 @@ function openList(id: string): void {
  * there are more than a few, the views across lists, archived lists, and an
  * order mode to move and pin lists (L-2).
  */
-function ListSwitcher({ current }: { current: string | null }) {
+function ListSwitcher({ current, find = false }: { current: string | null; find?: boolean }) {
   const [q, setQ] = useState('');
   const [ordering, setOrdering] = useState(false);
   const all = allLists();
@@ -1921,9 +1923,9 @@ function ListSwitcher({ current }: { current: string | null }) {
           <h2 id="sw-title">Your lists</h2>
           <CloseButton onClose={closeSheet} />
         </div>
-        {all.length > 8 && !ordering && (
+        {all.length > FIND_LISTS && !ordering && (
           <input
-            data-autofocus={typeFirst() || undefined}
+            data-autofocus={find || typeFirst() || undefined}
             class="txt"
             type="search"
             value={q}
@@ -1995,6 +1997,11 @@ export function ListsView() {
     ? undefined
     : (allLists().find((l) => l.id === currentList.value) ?? lists[0] ?? allLists()[0]);
   const s = listSheet.value;
+  const [findList, setFindList] = useState('');
+  const needle = findList.trim().toLowerCase();
+  const shownLists = needle
+    ? lists.filter((l) => l.rec.data.name.toLowerCase().includes(needle))
+    : lists;
   // Keep the open list's tab in view, however it was opened (search, a new
   // list, a plan's checklist): the row can be far wider than the screen (L-1).
   const curId = cur?.id;
@@ -2032,9 +2039,33 @@ export function ListsView() {
                 picked.value = null;
               }}
             />
+            {lists.length > FIND_LISTS && (
+              // Many lists: find one by name (wide screens; phones get a search button).
+              <input
+                class="txt sm lfind"
+                type="search"
+                value={findList}
+                onInput={(e) => setFindList(e.currentTarget.value)}
+                placeholder="Find a list"
+                aria-label="Find a list"
+                autocomplete="off"
+              />
+            )}
             {/* biome-ignore lint/a11y/useSemanticElements: toggle-button group (aria-pressed), labelled; fieldset/legend breaks the segmented layout */}
             <div class="ltabs" role="group" aria-label="Lists">
-              {lists.map((l) => {
+              {lists.length > FIND_LISTS && (
+                <button
+                  type="button"
+                  class="ltab lfind-btn"
+                  aria-label="Find a list"
+                  onClick={() => {
+                    listSheet.value = { type: 'switch', find: true };
+                  }}
+                >
+                  <Icon name="search" size={16} />
+                </button>
+              )}
+              {shownLists.map((l) => {
                 const { n, what } = countOf(l);
                 return (
                   <button
@@ -2054,6 +2085,7 @@ export function ListsView() {
                   </button>
                 );
               })}
+              {needle && !shownLists.length && <p class="small muted">No list called that.</p>}
             </div>
           </div>
           <div class="lists-pane">
@@ -2144,7 +2176,7 @@ export function ListsView() {
       )}
       {s?.type === 'new' && <NewListSheet />}
       {s?.type === 'settings' && <ListSettingsSheet key={s.id} id={s.id} />}
-      {s?.type === 'switch' && <ListSwitcher current={cur?.id ?? null} />}
+      {s?.type === 'switch' && <ListSwitcher current={cur?.id ?? null} find={!!s.find} />}
     </>
   );
 }

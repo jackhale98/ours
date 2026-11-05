@@ -8,7 +8,7 @@ import { itemSheet } from '../itemsheet';
 import { dueOf, dueText } from '../lists';
 import { commentsFor, nameOf, names, partner, viewer } from '../model';
 import { markSeen, news } from '../news';
-import { type Hide, hidden, planMode, toggleHidden } from '../planview';
+import { clearHidden, type Hide, hidden, planMode, toggleHidden } from '../planview';
 import {
   agendaFrom,
   askVerb,
@@ -180,7 +180,8 @@ function Filters() {
     ['partner', `${p}’s`],
     ['ours', 'Ours'],
     ['imported', 'Imported'],
-    ['routines', 'Routines'],
+    // Plans set to repeat: gym every Monday, the weekly standup.
+    ['routines', 'Repeating'],
   ];
   return (
     // biome-ignore lint/a11y/useSemanticElements: toggle-button group (aria-pressed), labelled
@@ -196,6 +197,11 @@ function Filters() {
           {label}
         </button>
       ))}
+      {hidden.value.size > 0 && (
+        <button type="button" class="linkbtn" onClick={clearHidden}>
+          Show everything
+        </button>
+      )}
     </div>
   );
 }

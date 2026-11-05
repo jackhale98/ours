@@ -446,3 +446,28 @@ test('a plan can take a list you already have, and more than one', async ({ page
   await expect(page.getByRole('dialog', { name: 'Oat milk' })).toBeVisible();
   await expect(page.getByRole('textbox', { name: 'What' })).not.toBeFocused();
 });
+
+test('with many lists, one can be found by name', async ({ page }, info) => {
+  await page.goto('/#lists');
+  for (const name of ['Hardware store', 'Costco run', 'Books to read', 'Movies']) {
+    const dialog = await newList(page, 'To-dos', name);
+    await dialog.getByRole('button', { name: 'Make list' }).click();
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+  }
+  if (info.project.name.includes('mobile')) {
+    await page
+      .getByRole('group', { name: 'Lists' })
+      .getByRole('button', { name: 'Find a list' })
+      .click();
+    const sheet = page.getByRole('dialog', { name: 'Your lists' });
+    await expect(sheet.getByRole('searchbox', { name: 'Find a list' })).toBeFocused();
+    await page.keyboard.type('cost');
+    await page.keyboard.press('Enter');
+    await expect(page.getByRole('heading', { name: 'Costco run' })).toBeVisible();
+    return;
+  }
+  await page.getByRole('searchbox', { name: 'Find a list' }).fill('cost');
+  const tabs = page.getByRole('group', { name: 'Lists' });
+  await expect(tabs.getByRole('button', { name: /^Costco run/ })).toBeVisible();
+  await expect(tabs.getByRole('button', { name: /^Groceries/ })).toHaveCount(0);
+});

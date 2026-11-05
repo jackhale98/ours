@@ -64,3 +64,13 @@ export function toggleHidden(h: Hide): void {
     // per-device convenience only
   }
 }
+
+/** Shows everything again. */
+export function clearHidden(): void {
+  hidden.value = new Set();
+  try {
+    localStorage.setItem(HIDE_KEY, '[]');
+  } catch {
+    // per-device convenience only
+  }
+}
