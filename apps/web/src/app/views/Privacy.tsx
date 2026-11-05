@@ -21,7 +21,7 @@ import { VersionCard } from '../version';
 import { CalendarsCard } from './Calendars';
 import { DataCard } from './DataCard';
 import { PersonLook } from './PersonLook';
-import { RemindersCard } from './RemindersCard';
+import { EveningCard, RemindersCard } from './RemindersCard';
 
 const REPO = 'https://github.com/jackhale98/ours';
 const example = signal<string[] | null>(null);
@@ -198,6 +198,7 @@ export function PrivacyView() {
         </section>
 
         <RemindersCard />
+        <EveningCard />
         <DataCard />
         {!demo && <AccountCard />}
         <VersionCard />

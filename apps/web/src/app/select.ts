@@ -386,6 +386,12 @@ export const DATE_ORDER: 'MD' | 'DM' = (() => {
   }
 })();
 
+/** When "both free this evening" looks: shared setting, else 5 to 10 PM (P-12). */
+export const evening = computed(() => {
+  const e = settings.value.evening;
+  return e && e.start < e.end ? e : EVENING;
+});
+
 /** First day of the week: shared setting, else the locale's convention (Sunday in the US). */
 export const weekStartsOn = computed<number>(() => {
   const set = settings.value.week_start;
@@ -452,8 +458,8 @@ const blocksTime = (r: Row) => !r.allDay && !r.free && r.status !== 'declined';
 function isEveningFree(date: string, rows: Row[]): boolean {
   if (rows.some((r) => r.allDay && r.away)) return false;
   const window: Interval = {
-    start: toInstant(`${date}T${EVENING.start}`, zone),
-    end: toInstant(`${date}T${EVENING.end}`, zone),
+    start: toInstant(`${date}T${evening.value.start}`, zone),
+    end: toInstant(`${date}T${evening.value.end}`, zone),
   };
   const busy = rows
     .filter(blocksTime)

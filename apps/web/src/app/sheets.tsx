@@ -7,7 +7,18 @@ import { signal } from '@preact/signals';
 import { useState } from 'preact/hooks';
 import { AddToCalendar } from './addtocal';
 import { FreeTimeSheet } from './freetime';
-import { countOf, createList, currentList, listsForPlan, STARTING_POINTS } from './lists';
+import {
+  copyList,
+  countOf,
+  createList,
+  currentList,
+  type ListEntry,
+  listsForPlan,
+  pastChecklists,
+  STARTING_POINTS,
+  type StartingPoint,
+  savedStartingPoints,
+} from './lists';
 import {
   addComment,
   commentsFor,
@@ -630,6 +641,31 @@ function EventSheet({ id, occ }: { id: string; occ: string | null }) {
 /** Packing or getting-ready lists for a plan, and a way to add one. */
 function PlanChecklists({ id, e }: { id: string; e: EventData }) {
   const lists = listsForPlan(id);
+  const [choosing, setChoosing] = useState(false);
+  // A private plan's list is private too: the partner never sees either.
+  const priv = e.privacy === 'busy';
+  // The last trip's list, with its "days before" (review 0008, L-9), and
+  // starting points saved with items.
+  const earlier = pastChecklists(id)
+    .filter((l) => l.rec.data.private === priv)
+    .slice(0, 2);
+  const saved = savedStartingPoints().filter((sp) => sp.listId);
+  const make = (from: { copy: ListEntry } | { start: StartingPoint } | null) => {
+    const name = `For ${e.title}`.slice(0, 100);
+    let listId: string | null;
+    if (from && 'copy' in from) listId = copyList(from.copy.id, { planId: id, name });
+    else {
+      const start = from?.start ?? STARTING_POINTS.find((sp) => sp.id === 'packing');
+      listId = start ? createList(name, start, priv, { planId: id }) : null;
+    }
+    if (!listId) return;
+    open(listId);
+    toast(
+      from
+        ? 'Checklist made, unticked and ready.'
+        : 'Checklist made. Give things a “days before” in their details.',
+    );
+  };
   const open = (listId: string) => {
     currentList.value = listId;
     close();
@@ -649,22 +685,36 @@ function PlanChecklists({ id, e }: { id: string; e: EventData }) {
           </button>
         );
       })}
-      <button
-        type="button"
-        class="linkbtn"
-        onClick={() => {
-          const packing = STARTING_POINTS.find((sp) => sp.id === 'packing');
-          if (!packing) return;
-          // A private plan's list is private too: the partner never sees either.
-          const listId = createList(`For ${e.title}`.slice(0, 100), packing, e.privacy === 'busy', {
-            planId: id,
-          });
-          open(listId);
-          toast('Checklist made. Give things a “days before” in their details.');
-        }}
-      >
-        Add a checklist
-      </button>
+      {choosing ? (
+        <div class="stack gap">
+          <p class="small muted">Start the checklist from:</p>
+          <div class="btnrow">
+            <button type="button" class="btn sm" onClick={() => make(null)}>
+              Nothing yet
+            </button>
+            {earlier.map((l) => (
+              <button type="button" class="btn sm" key={l.id} onClick={() => make({ copy: l })}>
+                <Icon name="copy" size={15} />
+                Last time: {l.rec.data.name}
+              </button>
+            ))}
+            {saved.map((sp) => (
+              <button type="button" class="btn sm" key={sp.id} onClick={() => make({ start: sp })}>
+                <Icon name="list" size={15} />
+                {sp.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      ) : (
+        <button
+          type="button"
+          class="linkbtn"
+          onClick={() => (earlier.length || saved.length ? setChoosing(true) : make(null))}
+        >
+          Add a checklist
+        </button>
+      )}
     </div>
   );
 }

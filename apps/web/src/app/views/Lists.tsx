@@ -40,11 +40,13 @@ import {
   type ListOrder,
   lastDid,
   money,
+  moveItem,
   moveItems,
   moveList,
   moveSection,
   movesScope,
   orderOf,
+  peersOf,
   planForIdea,
   planOf,
   readItemText,
@@ -61,6 +63,7 @@ import {
   setArchived,
   setFeatures,
   setListCheckin,
+  setListPlan,
   setListPrivacy,
   setPinned,
   startOver,
@@ -69,7 +72,18 @@ import {
   topKey,
   updateItems,
 } from '../lists';
-import { nameOf, partner, put, remove, type Slot, settings, update, viewer } from '../model';
+import {
+  byKind,
+  findEntry,
+  nameOf,
+  partner,
+  put,
+  remove,
+  type Slot,
+  settings,
+  update,
+  viewer,
+} from '../model';
 import { DATE_ORDER, fmtLong, nextFreeEvening, relDay, repeatText, today } from '../select';
 import { openEvent, openQuick } from '../sheets';
 import { CloseButton, colorVar, Icon, Sheet, Switch, toast } from '../ui';
@@ -277,7 +291,7 @@ export function ItemRow({
   if (chosen) {
     // Selecting: the whole row picks it; nothing else happens on a tap.
     return (
-      <li class={`it selecting${done ? ' done' : ''}`}>
+      <li class={`it selecting${done ? ' done' : ''}`} data-id={item.id}>
         {/* biome-ignore lint/a11y/noLabelWithoutControl: PickBox renders the checkbox inside this label */}
         <label class="chk">
           <PickBox id={item.id} listId={list.id} label={d.text} />
@@ -289,6 +303,7 @@ export function ItemRow({
   return (
     <li
       class={`it${done ? ' done' : ''}${bothWant(item) && f.has('hearts') ? ' agreed' : ''}${f.has('tick') ? '' : ' idea'}`}
+      data-id={item.id}
     >
       {f.has('tick') ? (
         <label class="chk">
@@ -475,6 +490,7 @@ function AddItem({ list, placeholder }: { list: ListEntry; placeholder: string }
           autocomplete="off"
           aria-label={`Add to ${list.rec.data.name}`}
           aria-describedby={`add-hint-${list.id}`}
+          aria-keyshortcuts="n a"
         />
         {f.has('sections') && (
           <>
@@ -620,6 +636,49 @@ function groupItems(items: ItemEntry[], list: ListEntry, order: ListOrder): Grou
   return out;
 }
 
+/**
+ * Keys inside a list (review 0008, L-16): ↑/↓ go between rows, Alt+↑/↓
+ * moves the item (when the list keeps its own order), x ticks it, and e or
+ * Enter opens its details.
+ */
+function rowKeys(e: KeyboardEvent, list: ListEntry): void {
+  const t = e.target as HTMLElement;
+  if (t.closest('input[type="text"], input[type="search"], textarea, select')) return;
+  const row = t.closest<HTMLElement>('li.it');
+  if (!row) return;
+  const rows = [...(row.closest('.listcard')?.querySelectorAll<HTMLElement>('li.it') ?? [])];
+  const at = rows.indexOf(row);
+  const focusRow = (r: HTMLElement | undefined) =>
+    r?.querySelector<HTMLElement>('input[type="checkbox"], .it-open, .it-more')?.focus();
+  const id = row.dataset.id;
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+    e.preventDefault();
+    const down = e.key === 'ArrowDown';
+    if (!e.altKey) {
+      focusRow(rows[at + (down ? 1 : -1)]);
+      return;
+    }
+    const item = id ? (findEntry(id) as ItemEntry | undefined) : undefined;
+    if (!item || orderOf(list) !== 'own') return;
+    moveItem(item, down ? 'down' : 'up', peersOf(item, list));
+    requestAnimationFrame(() =>
+      focusRow(document.querySelector<HTMLElement>(`li.it[data-id="${id}"]`) ?? undefined),
+    );
+    return;
+  }
+  if (!id || e.altKey || e.ctrlKey || e.metaKey) return;
+  if (e.key === 'e' || (e.key === 'Enter' && t.matches('input[type="checkbox"]'))) {
+    e.preventDefault();
+    itemSheet.value = id;
+  } else if (e.key === 'x') {
+    const box = row.querySelector<HTMLInputElement>('.chk input[type="checkbox"]');
+    if (box) {
+      e.preventDefault();
+      box.click();
+    }
+  }
+}
+
 /** Sections folded away, per list, on this device only. */
 const FOLD_KEY = 'ours-folded';
 const folded = signal<Record<string, string[]>>(
@@ -680,7 +739,7 @@ function Items({
         const rows = isShut ? [] : g.items.slice(0, Math.max(0, left));
         left -= rows.length;
         const list_ = (
-          <ul class="items">
+          <ul class="items" onKeyDown={(e) => rowKeys(e, list)}>
             {rows.map((i) => (
               <ItemRow key={i.id} item={i} list={list} />
             ))}
@@ -1413,6 +1472,51 @@ function NewListSheet() {
   );
 }
 
+/** Makes a list a coming plan's checklist, so "days before" count from it (L-9). */
+function AttachToPlan({ listId }: { listId: string }) {
+  const t = today.value;
+  const plans = byKind('event')
+    .filter(
+      (e) =>
+        e.rec.kind === 'event' &&
+        e.rec.data.status !== 'declined' &&
+        !e.rec.data.rrule &&
+        e.rec.data.end.slice(0, 10) >= t,
+    )
+    .sort((a, b) =>
+      (a.rec.data as { start: string }).start.localeCompare(
+        (b.rec.data as { start: string }).start,
+      ),
+    )
+    .slice(0, 30);
+  if (!plans.length) return null;
+  return (
+    <div class="field">
+      <label for="le-plan">For a plan</label>
+      <select
+        id="le-plan"
+        class="txt"
+        value=""
+        onChange={(e) => {
+          const planId = e.currentTarget.value;
+          if (!planId) return;
+          setListPlan(listId, planId);
+          toast('It’s that plan’s checklist now. Days before count from it.');
+        }}
+      >
+        <option value="">Not for a plan</option>
+        {plans.map((e) =>
+          e.rec.kind === 'event' ? (
+            <option key={e.id} value={e.id}>
+              {e.rec.data.title} · {fmtLong(e.rec.data.start.slice(0, 10))}
+            </option>
+          ) : null,
+        )}
+      </select>
+    </div>
+  );
+}
+
 /** A list's sections in order: rename (every item follows) and move up or down (L-7). */
 function SectionsEditor({ listId }: { listId: string }) {
   const names = sectionsOf(listId);
@@ -1476,6 +1580,7 @@ function ListSettingsSheet({ id }: { id: string }) {
   const [name, setName] = useState(list?.rec.data.name ?? '');
   const [armed, setArmed] = useState(false);
   const [saving, setSaving] = useState<string | null>(null);
+  const [withItems, setWithItems] = useState(true);
   if (!list) return null;
   const p = nameOf(partner.value);
   const count = itemsOf(id).length;
@@ -1553,6 +1658,7 @@ function ListSettingsSheet({ id }: { id: string }) {
             hint="Pinned lists come first, for both of you."
           />
         )}
+        {!plan && <AttachToPlan listId={id} />}
         {plan?.rec.kind === 'event' && (
           <p class="small muted">
             A checklist for “{plan.rec.data.title}”.{' '}
@@ -1641,14 +1747,26 @@ function ListSettingsSheet({ id }: { id: string }) {
                   onClick={() => {
                     const n = saving.trim();
                     if (!n) return;
-                    saveStartingPoint(list, n);
+                    saveStartingPoint(list, n, withItems);
                     setSaving(null);
-                    toast(`Saved “${n}”. It’s in New list for both of you.`);
+                    toast(
+                      `Saved “${n}”${withItems && count ? ` with its ${count} items` : ''}. It’s in New list for ${
+                        list.rec.data.private ? 'you' : 'both of you'
+                      }.`,
+                    );
                   }}
                 >
                   Save
                 </button>
               </div>
+              {count > 0 && (
+                <Switch
+                  checked={withItems}
+                  onChange={setWithItems}
+                  label={`Include its ${count} item${count === 1 ? '' : 's'}`}
+                  hint="Unticked, with their sections and days before. Hearts and memories stay here."
+                />
+              )}
             </div>
           )}
         </div>

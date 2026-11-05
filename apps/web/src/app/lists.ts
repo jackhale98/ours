@@ -84,6 +84,8 @@ export interface StartingPoint {
   features: Feature[];
   private: boolean;
   checkin?: boolean;
+  /** A saved starting point's items, kept in a hidden list (review 0008, L-9). */
+  listId?: string;
 }
 
 export const STARTING_POINTS: StartingPoint[] = [
@@ -186,10 +188,14 @@ export function savedStartingPoints(): StartingPoint[] {
     id: t.id,
     template: 'custom',
     label: t.name,
-    blurb: t.features.map((f) => FEATURES[f].label).join(', '),
+    blurb: [
+      ...(t.list_id && itemsOf(t.list_id).length ? [`${itemsOf(t.list_id).length} items`] : []),
+      ...t.features.map((f) => FEATURES[f].label),
+    ].join(', '),
     example: t.name,
     features: t.features,
     private: t.private,
+    ...(t.list_id ? { listId: t.list_id } : {}),
   }));
 }
 
@@ -416,7 +422,7 @@ export function createList(
   isPrivate: boolean,
   opts: { planId?: string } = {},
 ): string {
-  return put(
+  const id = put(
     'list',
     {
       name,
@@ -429,6 +435,29 @@ export function createList(
     },
     { scope: isPrivate ? 'user' : 'space' },
   );
+  if (start.listId) copyItems(start.listId, id, isPrivate ? 'user' : 'space');
+  return id;
+}
+
+/**
+ * Copies a list's items into another, unticked and without anyone's hearts
+ * or history; "days before" a plan and sections are kept. Bulk, in order.
+ */
+function copyItems(fromId: string, toId: string, scope: 'space' | 'user'): void {
+  const items = itemsOf(fromId);
+  if (!items.length) return;
+  const sections = (findEntry(fromId) as ListEntry | undefined)?.rec.data.sections;
+  bulk(() => {
+    for (const i of items) {
+      const { hearts: _h, did: _d, again: _a, last_done: _l, ...rest } = i.rec.data;
+      put(
+        'item',
+        { ...rest, list_id: toId, done: false, ...(scope === 'user' ? { assignee: null } : {}) },
+        { scope },
+      );
+    }
+    if (sections?.length) update<'list'>(toId, { sections });
+  });
 }
 
 /** Switches features on or off. */
@@ -451,8 +480,11 @@ export function startOver(listId: string): () => void {
     });
 }
 
-/** A copy of a list and its items, unticked and without anyone's hearts or history. */
-export function copyList(id: string): string | null {
+/**
+ * A copy of a list and its items, unticked and without anyone's hearts or
+ * history: "(copy)", or for another plan (a checklist from the last trip).
+ */
+export function copyList(id: string, opts: { planId?: string; name?: string } = {}): string | null {
   const list = findEntry(id) as ListEntry | undefined;
   if (!list) return null;
   // A fresh list: not archived, pinned, placed or hidden like the one copied.
@@ -466,39 +498,83 @@ export function copyList(id: string): string | null {
   } = list.rec.data;
   const newId = put(
     'list',
-    { ...data, name: `${data.name} (copy)`.slice(0, 100) },
     {
-      scope: list.scope,
+      ...data,
+      name: (opts.name ?? `${data.name} (copy)`).slice(0, 100),
+      ...(opts.planId ? { plan_id: opts.planId } : {}),
     },
+    { scope: list.scope },
   );
-  bulk(() => {
-    for (const i of itemsOf(id)) {
-      const { hearts: _h, did: _d, again: _a, last_done: _l, ...rest } = i.rec.data;
-      put('item', { ...rest, list_id: newId, done: false }, { scope: list.scope });
-    }
-  });
+  copyItems(id, newId, list.scope === 'user' ? 'user' : 'space');
   return newId;
 }
 
-/** Saves a list's switches as a starting point for both of you. */
-export function saveStartingPoint(list: ListEntry, name: string): void {
+/** Makes a list a plan's checklist (its "days before" count from that plan), or not. */
+export function setListPlan(id: string, planId: string | null): void {
+  update<'list'>(id, { plan_id: planId });
+}
+
+/** Earlier plans' checklists, newest plan first: to start the next trip's from. */
+export function pastChecklists(exceptPlan: string): ListEntry[] {
+  return allLists()
+    .filter((l) => l.rec.data.plan_id && l.rec.data.plan_id !== exceptPlan && itemsOf(l.id).length)
+    .sort((a, b) => {
+      const da = (planOf(a)?.rec.data as { start?: string } | undefined)?.start ?? '';
+      const db = (planOf(b)?.rec.data as { start?: string } | undefined)?.start ?? '';
+      return db.localeCompare(da);
+    });
+}
+
+/**
+ * Saves a list's switches as a starting point for both of you, and, if
+ * asked, its items: kept in a hidden list (not in the shared settings, which
+ * stay small), under the same key as the list (L-9).
+ */
+export function saveStartingPoint(list: ListEntry, name: string, withItems = false): void {
   const saved = settings.value.list_templates ?? [];
-  updateSettings({
-    list_templates: [
+  const replaced = saved.filter((t) => t.name === name);
+  let stash: string | null = null;
+  bulk(() => {
+    for (const t of replaced) if (t.list_id) deleteList(t.list_id);
+    if (withItems && itemsOf(list.id).length) {
+      const d = list.rec.data;
+      stash = put(
+        'list',
+        {
+          name,
+          kind: d.kind,
+          private: d.private,
+          stash: true,
+          ...(d.features ? { features: d.features } : {}),
+          ...(d.template ? { template: d.template } : {}),
+        },
+        { scope: list.scope },
+      );
+      copyItems(list.id, stash, list.scope === 'user' ? 'user' : 'space');
+    }
+    const kept = [
       ...saved.filter((t) => t.name !== name),
       {
         id: uuidv7(),
         name,
         features: [...featuresOf(list)],
         private: list.rec.data.private,
+        ...(stash ? { list_id: stash } : {}),
       },
-    ].slice(-12),
+    ];
+    // Past twelve the oldest goes, with its items.
+    for (const t of kept.slice(0, -12)) if (t.list_id) deleteList(t.list_id);
+    updateSettings({ list_templates: kept.slice(-12) });
   });
 }
 
 export function deleteStartingPoint(id: string): void {
-  updateSettings({
-    list_templates: (settings.value.list_templates ?? []).filter((t) => t.id !== id),
+  const t = (settings.value.list_templates ?? []).find((x) => x.id === id);
+  bulk(() => {
+    if (t?.list_id) deleteList(t.list_id);
+    updateSettings({
+      list_templates: (settings.value.list_templates ?? []).filter((x) => x.id !== id),
+    });
   });
 }
 

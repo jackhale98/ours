@@ -19,6 +19,7 @@ import {
   dueText,
   type ItemEntry,
   react,
+  setArchived,
 } from '../lists';
 import { commentsFor, deleteEvent, findEntry, nameOf, partner, update, viewer } from '../model';
 import { noticeProposal } from '../notices';
@@ -52,6 +53,8 @@ function summary(w: Waiting): { title: string; why: string } {
         .map((i) => i.rec.data.text)
         .join(', '),
     };
+  if (w.kind === 'archive')
+    return { title: `Archive “${w.list.rec.data.name}”?`, why: `${w.plan} is over` };
   if (w.kind === 'recall')
     return {
       title: `How was “${w.item.rec.data.text}”?`,
@@ -81,6 +84,37 @@ function Current({ w, headRef }: { w: Waiting; headRef: { current: HTMLHeadingEl
   }
   if (w.kind === 'overdue') return <Overdue w={w} headRef={headRef} />;
   if (w.kind === 'recall') return <Recall w={w} headRef={headRef} />;
+  if (w.kind === 'archive')
+    return (
+      <>
+        <p class="eyebrow">{w.plan} is over</p>
+        <h2 class="h3" id="wo-title" tabIndex={-1} ref={headRef}>
+          Archive “{w.list.rec.data.name}”?
+        </h2>
+        <p class="ask-when">
+          It leaves your lists but stays in search, and can come back any time.
+        </p>
+        <div class="ask-actions">
+          <button
+            type="button"
+            class="btn primary"
+            onClick={() =>
+              toast(`Archived “${w.list.rec.data.name}”.`, setArchived(w.list.id, true))
+            }
+          >
+            <Icon name="archive" size={16} />
+            Archive it
+          </button>
+          <button
+            type="button"
+            class="btn ghost"
+            onClick={() => toast('Kept with your lists.', putRecallAside(w.id))}
+          >
+            Keep it
+          </button>
+        </div>
+      </>
+    );
   if (w.kind === 'task') {
     const d = w.item.rec.data;
     const due = dueText(d.due ?? today.value);
@@ -406,13 +440,15 @@ export function InboxView() {
                         name={
                           w.kind === 'task' || w.kind === 'overdue'
                             ? 'list'
-                            : w.kind === 'recall'
-                              ? 'heart'
-                              : w.kind === 'ask'
-                                ? 'chat'
-                                : w.kind === 'invite'
-                                  ? 'send'
-                                  : 'x'
+                            : w.kind === 'archive'
+                              ? 'archive'
+                              : w.kind === 'recall'
+                                ? 'heart'
+                                : w.kind === 'ask'
+                                  ? 'chat'
+                                  : w.kind === 'invite'
+                                    ? 'send'
+                                    : 'x'
                         }
                         size={16}
                       />

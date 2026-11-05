@@ -383,3 +383,39 @@ test('switch lists, pin one, move an item and bring a done one back (review 0008
   await expect(page.locator('.toast-host')).toContainText('Brought back “Peas”');
   await expect(page.locator('.items .it', { hasText: 'Peas' })).toHaveCount(1);
 });
+
+test('keyboard: n adds to the open list, arrows move between items (review 0008, L-16)', async ({
+  page,
+}, info) => {
+  test.skip(info.project.name.includes('mobile'), 'keyboard');
+  await page.goto('/#lists');
+  await page
+    .getByRole('button', { name: /^Groceries/ })
+    .first()
+    .click();
+  await page.getByRole('heading', { name: 'Lists', level: 1 }).click(); // focus away from inputs
+  await page.keyboard.press('n');
+  await expect(page.getByRole('textbox', { name: 'Add to Groceries' })).toBeFocused();
+  await page.keyboard.type('Basil');
+  await page.keyboard.press('Enter');
+  await expect(page.locator('.it', { hasText: 'Basil' })).toHaveCount(1);
+
+  const first = page.locator('.listcard li.it').first().getByRole('checkbox');
+  await first.focus();
+  await page.keyboard.press('ArrowDown');
+  await expect(page.locator('.listcard li.it').nth(1).getByRole('checkbox')).toBeFocused();
+  await page.keyboard.press('e');
+  await expect(page.getByRole('dialog')).toBeVisible();
+});
+
+test('a plan’s new checklist can start from the last trip’s (review 0008, L-9)', async ({
+  page,
+}) => {
+  await page.goto('/#plan');
+  await page.getByRole('button', { name: /Ours: Dinner with Jordan/ }).click();
+  const plan = page.getByRole('dialog', { name: 'Dinner with Jordan & Priya' });
+  await plan.getByRole('button', { name: 'Add a checklist' }).click();
+  await plan.getByRole('button', { name: 'Last time: For Lisbon' }).click();
+  await expect(page.getByRole('button', { name: /^For Dinner with Jordan/ }).first()).toBeVisible();
+  await expect(page.locator('.it', { hasText: 'Passports' })).toHaveCount(1);
+});

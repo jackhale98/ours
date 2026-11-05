@@ -6,6 +6,7 @@
  *   1. plans the partner asked about (answer yes or no),
  *   2. plans I asked about that the partner can't make (ask again or remove),
  *   3. ideas you planned that have happened: "How was it?" (review 0008, L-10),
+ *   5. checklists for plans that are over: archive them?
  *   4. my tasks that are overdue or due by tomorrow, and shared ones nobody
  *      has taken yet. Several overdue on one list are one entry ("12 overdue
  *      on House projects"), so a real question isn't lost among chores (L-12).
@@ -23,7 +24,7 @@ import {
   itemsOf,
   type ListEntry,
 } from './lists';
-import { byKind, type Entry, partner, viewer } from './model';
+import { byKind, type Entry, findEntry, partner, viewer } from './model';
 import { awaitingMe, stillAhead, today } from './select';
 
 export type Waiting =
@@ -32,7 +33,8 @@ export type Waiting =
   | { kind: 'declined'; id: string; entry: Entry }
   | { kind: 'task'; id: string; item: ItemEntry; list: ListEntry }
   | { kind: 'overdue'; id: string; items: ItemEntry[]; list: ListEntry }
-  | { kind: 'recall'; id: string; item: ItemEntry; planId: string; date: string };
+  | { kind: 'recall'; id: string; item: ItemEntry; planId: string; date: string }
+  | { kind: 'archive'; id: string; list: ListEntry; plan: string };
 
 /** "How was it?" questions put aside on this device ("We didn't go"). */
 const RECALL_KEY = 'ours-recall-off';
@@ -103,6 +105,16 @@ export const waiting = computed<Waiting[]>(() => {
   const recalls = ideasToRecall.value
     .filter((r) => !off.has(`${r.item.id}:${r.date}`))
     .map((r): Waiting => ({ kind: 'recall', id: `recall:${r.item.id}`, ...r }));
+  // A trip that's over: its checklist can be put away (review 0008, L-2).
+  const finished = activeLists().flatMap((list): Waiting[] => {
+    const plan = list.rec.data.plan_id ? findEntry(list.rec.data.plan_id) : undefined;
+    if (plan?.rec.kind !== 'event' || plan.rec.data.rrule) return [];
+    const last = plan.rec.data.all_day
+      ? addDays(plan.rec.data.end.slice(0, 10), -1)
+      : plan.rec.data.end.slice(0, 10);
+    if (last >= t || off.has(`archive:${list.id}`)) return [];
+    return [{ kind: 'archive', id: `archive:${list.id}`, list, plan: plan.rec.data.title }];
+  });
   // Two or more overdue on one list: one entry for the list.
   const due = tasksFor(1);
   const lateBy = new Map<string, ItemEntry[]>();
@@ -122,5 +134,5 @@ export const waiting = computed<Waiting[]>(() => {
   }
   // Nobody to plan with yet: inviting them comes first.
   const invite: Waiting[] = partnerMissing() ? [{ kind: 'invite', id: 'invite' }] : [];
-  return [...invite, ...asks, ...declined, ...recalls, ...tasks];
+  return [...invite, ...asks, ...declined, ...recalls, ...tasks, ...finished];
 });

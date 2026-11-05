@@ -8,6 +8,7 @@ import {
   completeItem,
   copyList,
   createList,
+  deleteStartingPoint,
   didIt,
   dueOf,
   featuresOf,
@@ -22,6 +23,7 @@ import {
   moveList,
   moveSection,
   movesScope,
+  pastChecklists,
   react,
   readItemText,
   renameSection,
@@ -33,6 +35,7 @@ import {
   sectionsOf,
   setArchived,
   setFeatures,
+  setListPlan,
   setPinned,
   startOver,
   suggestItems,
@@ -344,3 +347,76 @@ describe('reading what is typed into a list (review 0008, L-8)', () => {
     expect(sameItem(list, 'bread')).toBeUndefined();
   });
 });
+
+describe('starting points with items and checklists for plans (review 0008, L-9)', () => {
+  it('saves a list with its items, makes new lists from it, and deletes them together', () => {
+    const shop = createList('Weekly shop', STARTING_POINTS[0] as StartingPoint, false);
+    put('item', {
+      list_id: shop,
+      text: 'Milk',
+      done: true,
+      assignee: 'a',
+      due: null,
+      sort_key: 'V',
+      section: 'Dairy',
+      hearts: { a: true },
+    });
+    saveStartingPoint(findEntry(shop) as ListEntry, 'Staples', true);
+    const sp = savedStartingPoints().find((s) => s.label === 'Staples') as StartingPoint;
+    expect(sp.listId).toBeTruthy();
+    // The hidden list holding them isn't one of your lists.
+    expect(allLists().map((l) => l.rec.data.name)).not.toContain('Staples');
+    const made = createList('Next shop', sp, false);
+    const copy = itemsOf(made)[0]?.rec.data;
+    expect(copy).toMatchObject({ text: 'Milk', done: false, section: 'Dairy' });
+    expect(copy?.hearts).toBeUndefined();
+    deleteStartingPoint(sp.id);
+    expect(findEntry(sp.listId as string)).toBeUndefined();
+    expect(itemsOf(sp.listId as string)).toHaveLength(0);
+  });
+
+  it('copies the last trip’s checklist for the next plan, keeping days before', () => {
+    const trip = createEvent({ ...TRIP, title: 'Lisbon', start: '2026-12-01', end: '2026-12-05' });
+    const next = createEvent({ ...TRIP, title: 'Rome', start: '2027-03-01', end: '2027-03-04' });
+    const packing = STARTING_POINTS.find((s) => s.id === 'packing') as StartingPoint;
+    const lisbon = createList('For Lisbon', packing, false, { planId: trip });
+    put('item', {
+      list_id: lisbon,
+      text: 'Passports',
+      done: true,
+      assignee: null,
+      due: null,
+      sort_key: 'V',
+      before_days: 1,
+    });
+    expect(pastChecklists(next).map((l) => l.id)).toEqual([lisbon]);
+    const rome = copyList(lisbon, { planId: next, name: 'For Rome' }) as string;
+    const item = itemsOf(rome)[0] as ItemEntry;
+    expect((findEntry(rome) as ListEntry).rec.data).toMatchObject({
+      name: 'For Rome',
+      plan_id: next,
+    });
+    expect(item.rec.data.done).toBe(false);
+    expect(dueOf(item)).toBe('2027-02-28');
+    setListPlan(rome, null);
+    expect(dueOf(itemsOf(rome)[0] as ItemEntry)).toBeNull();
+  });
+});
+
+const TRIP = {
+  title: 'Trip',
+  start: '2026-12-10',
+  end: '2026-12-14',
+  all_day: true,
+  tz: null,
+  rrule: null,
+  away: true,
+  owner: 'both',
+  status: 'confirmed',
+  proposed_by: null,
+  privacy: 'full',
+  location: null,
+  notes: null,
+  countdown: false,
+  stub_id: null,
+} as const;

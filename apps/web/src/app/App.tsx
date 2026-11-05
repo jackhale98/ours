@@ -28,6 +28,7 @@ import './appearance';
 import { updateReady } from '../update';
 import { waiting } from './inbox';
 import { ItemSheetHost } from './itemsheet';
+import { activeLists, allLists, currentList } from './lists';
 import { findEntry, mode, nameOf, names, partner, viewer } from './model';
 import { drawerOpen, type PlanMode, planHash, setPlanMode } from './planview';
 import { now } from './select';
@@ -57,6 +58,23 @@ export const isTab = (h: string): h is Tab =>
   h === 'inbox' || h === 'search' || TABS.some(([t]) => t === h);
 
 export const tab = signal<Tab>('plan');
+
+/** The open list's add box, if one is on screen (Lists). */
+const addBox = () => document.querySelector<HTMLInputElement>('.listcard .additem input.txt');
+/** The open list's name, for the floating button's label. */
+const addBoxName = (): string | null => {
+  const all = allLists();
+  const cur = all.find((l) => l.id === currentList.value) ?? activeLists()[0];
+  return cur?.rec.data.name ?? null;
+};
+/** Puts the cursor in the open list's add box. False when there's none. */
+function focusAddBox(): boolean {
+  const box = addBox();
+  if (!box) return false;
+  box.scrollIntoView({ block: 'nearest' });
+  box.focus();
+  return true;
+}
 /**
  * Links from notifications: #plan&open=<id>. A "Yes" tapped on the
  * notification arrives separately (the service worker records it on this
@@ -448,6 +466,11 @@ export function App() {
       const t = e.target as HTMLElement;
       if (sheet.value || e.metaKey || e.ctrlKey || e.altKey) return;
       if (t.closest('input, textarea, select, [contenteditable]')) return;
+      // On Lists, "n" or "a" adds to the list on screen; Shift+N is still a new plan (L-16).
+      if (tab.value === 'lists' && (e.key === 'n' || e.key === 'a') && focusAddBox()) {
+        e.preventDefault();
+        return;
+      }
       if (e.key === 'n' || e.key === 'N') {
         e.preventDefault();
         openQuick();
@@ -594,7 +617,12 @@ export function App() {
         <Nav variant="tabbar" />
       </nav>
       {!drawerOpen.value && (
-        <button type="button" class="fab" onClick={() => openQuick()} aria-label="New plan">
+        <button
+          type="button"
+          class="fab"
+          onClick={() => (tab.value === 'lists' && focusAddBox()) || openQuick()}
+          aria-label={tab.value === 'lists' && addBoxName() ? `Add to ${addBoxName()}` : 'New plan'}
+        >
           <Icon name="plus" size={26} />
         </button>
       )}
