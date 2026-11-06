@@ -32,7 +32,8 @@ import {
 } from './lists';
 import { findEntry, nameOf, partner, remove, type Slot, update, viewer } from './model';
 import { REPEAT_CHOICES } from './planform';
-import { fmtLong, nextFreeEvening, relDay, repeatText, today } from './select';
+import { ReminderPicker } from './reminderpicker';
+import { fmtLong, fmtTime, nextFreeEvening, relDay, repeatText, today } from './select';
 import { openEvent, openQuick } from './sheets';
 import { CloseButton, Icon, Marker, Sheet, Switch, toast, typeFirst } from './ui';
 
@@ -85,6 +86,14 @@ function ItemSheet({ item, list }: { item: ItemEntry; list: ListEntry }) {
   const [due, setDue] = useState(d.due ?? '');
   const [before, setBefore] = useState<number | null>(d.before_days ?? null);
   const [repeat, setRepeat] = useState(d.repeat ?? '');
+  const [time, setTimeRaw] = useState(d.time ?? '');
+  const [reminders, setReminders] = useState<number[]>(d.reminders ?? []);
+  // Reminders count from the time, or from 9 AM without one: adding or
+  // removing the time would move them, so they start over.
+  const setTime = (next: string) => {
+    if (!!next !== !!time) setReminders([]);
+    setTimeRaw(next);
+  };
   const [rotate, setRotate] = useState(d.rotate ?? false);
   const [who, setWho] = useState<Who>(
     d.assignee === me ? 'me' : d.assignee === p ? 'partner' : 'none',
@@ -106,6 +115,8 @@ function ItemSheet({ item, list }: { item: ItemEntry; list: ListEntry }) {
     length,
     text,
     due,
+    time,
+    reminders,
     before,
     repeat,
     rotate,
@@ -142,7 +153,9 @@ function ItemSheet({ item, list }: { item: ItemEntry; list: ListEntry }) {
       ...(useDue && !forPlan
         ? {
             // A repeating task needs a date to count from: today if none was given.
-            due: due || (repeat ? today.value : null),
+            due: due || (repeat || time ? today.value : null),
+            time: time || null,
+            reminders: reminders.length ? reminders : null,
             repeat: repeat || null,
             rotate: !!repeat && shared && rotate,
           }
@@ -315,6 +328,29 @@ function ItemSheet({ item, list }: { item: ItemEntry; list: ListEntry }) {
             </div>
           </div>
         )}
+        {f.has('due') && !forPlan && (due || repeat) && (
+          <>
+            <div class="field">
+              <label for="is-time">
+                Time <span class="opt">optional</span>
+              </label>
+              <input
+                id="is-time"
+                class="txt"
+                type="time"
+                value={time}
+                onInput={(e) => setTime(e.currentTarget.value)}
+              />
+            </div>
+            <ReminderPicker
+              value={reminders}
+              allDay={!time}
+              onChange={setReminders}
+              label={shared ? 'Remind whoever’s on it' : 'Remind me'}
+              atTime
+            />
+          </>
+        )}
         {f.has('due') && !forPlan && repeat && (
           <p class="small muted">
             Ticking it moves it to the next date instead of finishing it.
@@ -457,7 +493,9 @@ function ItemSheet({ item, list }: { item: ItemEntry; list: ListEntry }) {
       </form>
       <Place item={item} list={list} dirty={dirty} />
       <div class="sh-foot">
-        <span class="small muted">{d.due && !forPlan ? `Due ${fmtLong(d.due)}` : ''}</span>
+        <span class="small muted">
+          {d.due && !forPlan ? `Due ${fmtLong(d.due)}${d.time ? `, ${fmtTime(d.time)}` : ''}` : ''}
+        </span>
         <button
           type="button"
           class="linkbtn danger"

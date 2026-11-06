@@ -471,3 +471,31 @@ test('with many lists, one can be found by name', async ({ page }, info) => {
   await expect(tabs.getByRole('button', { name: /^Costco run/ })).toBeVisible();
   await expect(tabs.getByRole('button', { name: /^Groceries/ })).toHaveCount(0);
 });
+
+test('a chore can have a time and a reminder for whoever’s on it', async ({ page }) => {
+  await page.goto('/#lists');
+  await page.getByRole('button', { name: /^Home/ }).first().click();
+  // The demo's bins go out at 7 PM, with a reminder.
+  const bins = page.locator('.it', { hasText: 'Take out the bins' });
+  await expect(bins).toContainText('7 PM');
+  await expect(bins.locator('.it-bell')).toBeVisible();
+
+  // Typed with a time: "call the plumber 6pm" is for today at 6.
+  const add = page.getByRole('textbox', { name: /^Add to Home/ });
+  await add.fill('Call the plumber 6pm');
+  await expect(page.locator('.add-hint')).toContainText('Today · 6 PM');
+  await add.press('Enter');
+  const plumber = page.locator('.it', { hasText: 'Call the plumber' });
+  await expect(plumber).toContainText('Due today · 6 PM');
+
+  // In its sheet: change the time and add a reminder.
+  await plumber.getByRole('button', { name: 'Details: Call the plumber' }).click();
+  const sheet = page.getByRole('dialog', { name: 'Call the plumber' });
+  await expect(sheet.getByLabel('Time')).toHaveValue('18:00');
+  await sheet.getByLabel('Time').fill('17:30');
+  await sheet.getByRole('button', { name: 'Add a reminder' }).click();
+  await sheet.getByRole('button', { name: /^30 minutes before$/ }).click();
+  await sheet.getByRole('button', { name: 'Save' }).click();
+  await expect(plumber).toContainText('Due today · 5:30 PM');
+  await expect(plumber.locator('.it-bell')).toBeVisible();
+});

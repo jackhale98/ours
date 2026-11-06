@@ -82,7 +82,7 @@ export function Result({ hit }: { hit: Hit }) {
             <b class={d.done ? 'done' : undefined}>{d.text}</b>
             <span class="small muted">
               {hit.list.rec.data.name}
-              {d.done ? ' · done' : d.due ? ` · ${dueText(d.due).text}` : ''}
+              {d.done ? ' · done' : d.due ? ` · ${dueText(d.due, d.time).text}` : ''}
             </span>
           </span>
         </button>

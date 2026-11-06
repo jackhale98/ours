@@ -36,6 +36,8 @@ const UNITS: Partial<Record<Kind, string[][]>> = {
   // `was` describes one change as a whole: never half of two.
   event: [WHEN, ['status', 'proposed_by'], ['privacy', 'stub_id'], ['was']],
   busy_stub: [WHEN],
+  // A chore's reminders count from its time (or 9 AM without one): together.
+  item: [['time', 'reminders']],
 };
 
 /** Copies each unit whole from the side that changed it (the later writer if both did). */

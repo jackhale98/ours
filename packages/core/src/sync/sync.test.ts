@@ -129,6 +129,23 @@ describe('mergeRecord', () => {
     expect(out.record.device_id).toBe('dev-me');
   });
 
+  it('keeps a chore’s time and reminders together (they count from the time)', () => {
+    const base = item({ due: '2026-11-09', time: '19:00', reminders: [15] }, 1, 'x');
+    // One phone drops the time (its reminders start over); the other adds one.
+    const local = item({ due: '2026-11-09', time: null, reminders: null }, 2, 'me');
+    const remote = item({ due: '2026-11-09', time: '19:00', reminders: [15, 60] }, 3, 'them');
+    const out = mergeRecord(base, local, remote, true, writer);
+    expect(out.record.data).toMatchObject({ time: '19:00', reminders: [15, 60] });
+    // Never the other side's reminders against this side's time.
+    const later = item({ due: '2026-11-09', time: null, reminders: null }, 4, 'me');
+    const out2 = mergeRecord(base, later, remote, true, writer);
+    expect(out2.record.data).toMatchObject({ time: null, reminders: null });
+    // A tick (moving the due date) still merges with a reminder change.
+    const ticked = item({ due: '2026-11-16', time: '19:00', reminders: [15] }, 5, 'me');
+    const out3 = mergeRecord(base, ticked, remote, true, writer);
+    expect(out3.record.data).toMatchObject({ due: '2026-11-16', reminders: [15, 60] });
+  });
+
   it('merges lists field by field: a rename on one phone and a pin on the other', () => {
     const list = (
       data: Partial<ListData>,

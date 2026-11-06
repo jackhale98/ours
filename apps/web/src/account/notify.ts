@@ -21,7 +21,7 @@ import {
 } from '@ours/core/crypto';
 import { expand, toInstant, toWall } from '@ours/core/time';
 import { effect, signal } from '@preact/signals';
-import { byKind, nameOf, type Slot, store, viewer } from '../app/model';
+import { byKind, findEntry, nameOf, type Slot, store, viewer } from '../app/model';
 import { allDayParts, duration, remindersOf } from '../app/reminders';
 import { fmtTime, zone } from '../app/select';
 import { ApiError, api } from './api';
@@ -352,7 +352,64 @@ export function plannedReminders(now = Date.now()): Planned[] {
       }
     }
   }
+  out.push(...choreReminders(me, now));
   return out.sort((a, b) => a.fire_at - b.fire_at).slice(0, MAX_REMINDERS);
+}
+
+/** What a chore's reminder says: "Due in 15 minutes · 7 PM · Home", "Due tomorrow · Home". */
+function choreBody(minutes: number, time: string | null, due: string, list: string | null) {
+  let lead: string;
+  let when: string | null = null;
+  if (time) {
+    lead = minutes <= 0 ? 'Due now' : `Due in ${duration(minutes)}`;
+    when = fmtTime(time);
+  } else {
+    const { daysBefore } = allDayParts(minutes);
+    lead =
+      daysBefore === 0
+        ? 'Due today'
+        : daysBefore === 1
+          ? 'Due tomorrow'
+          : `Due in ${daysBefore} days`;
+    if (daysBefore > 1)
+      when = new Date(toInstant(`${due}T${ALL_DAY_TIME}`, zone)).toLocaleDateString(undefined, {
+        weekday: 'long',
+        timeZone: zone,
+      });
+  }
+  return [lead, when, list].filter(Boolean).join(' · ');
+}
+
+/**
+ * Chores with a due date and reminders, for whoever's on them (both of you
+ * when nobody or both are). Only the next due date: ticking a repeating one
+ * moves it on, and its reminders with it. Done ones, and ones on archived or
+ * saved-for-later lists, don't remind.
+ */
+function choreReminders(me: Slot, now: number): Planned[] {
+  const out: Planned[] = [];
+  for (const e of byKind('item')) {
+    if (e.rec.kind !== 'item') continue;
+    const d = e.rec.data;
+    if (d.done || !d.due || !d.reminders?.length) continue;
+    if (d.before_days !== undefined && d.before_days !== null) continue;
+    if (d.assignee && d.assignee !== 'both' && d.assignee !== me) continue;
+    const list = findEntry(d.list_id);
+    if (list?.rec.kind !== 'list' || list.rec.data.archived || list.rec.data.stash) continue;
+    const anchor = toInstant(`${d.due}T${d.time ?? ALL_DAY_TIME}`, zone);
+    for (const minutes of new Set(d.reminders)) {
+      const fire = anchor - minutes * 60_000;
+      if (fire < now || fire > now + REMINDER_HORIZON_MS) continue;
+      out.push({
+        fire_at: fire,
+        start: anchor,
+        record_id: e.id,
+        title: d.text,
+        body: choreBody(minutes, d.time ?? null, d.due, list.rec.data.name),
+      });
+    }
+  }
+  return out;
 }
 
 let lastReminderSig: string | null = null;

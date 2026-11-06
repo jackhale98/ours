@@ -30,7 +30,7 @@ import {
   update,
   updateSettings,
 } from './model';
-import { relDay, today } from './select';
+import { fmtTime, relDay, today } from './select';
 
 export type ListEntry = Entry & { rec: { kind: 'list' } };
 export type ItemEntry = Entry & { rec: { kind: 'item' } };
@@ -785,10 +785,11 @@ export function completeItem(item: ItemEntry): { undo: () => void; next: string 
 }
 
 /** "Due today", "Due Friday", "Overdue · was Mon, Nov 2". */
-export function dueText(due: string): { text: string; late: boolean } {
+export function dueText(due: string, time?: string | null): { text: string; late: boolean } {
   const t = today.value;
-  if (due < t) return { text: `Overdue · was ${relDay(due)}`, late: true };
-  return { text: due === t ? 'Due today' : `Due ${relDay(due)}`, late: false };
+  const at = time ? ` · ${fmtTime(time)}` : '';
+  if (due < t) return { text: `Overdue · was ${relDay(due)}${at}`, late: true };
+  return { text: `${due === t ? 'Due today' : `Due ${relDay(due)}`}${at}`, late: false };
 }
 
 /* ---------- several items at once ---------- */

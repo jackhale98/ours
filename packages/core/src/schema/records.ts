@@ -296,6 +296,16 @@ export const ItemData = v.strictObject({
   rotate: v.optional(v.boolean()),
   /** When a repeating task was last done. */
   last_done: v.optional(v.nullable(LocalDate)),
+  /** A time on the due date (wall clock, where you are), if it has one. */
+  time: v.optional(v.nullable(HHmm)),
+  /**
+   * Reminders for whoever's on it (both of you when nobody or both are):
+   * minutes before `time`, or before 9 AM on the due day without one, as for
+   * all-day plans; up to three.
+   */
+  reminders: v.optional(
+    v.nullable(v.pipe(v.array(ReminderMinutes), v.maxLength(MAX_REMINDERS_PER_PERSON))),
+  ),
   /** Date ideas: roughly how long it takes, if anyone said (see IDEA_LENGTHS). */
   length: v.optional(v.nullable(v.picklist(['short', 'evening', 'half', 'day']))),
   /** Details, each shown when its list has that feature. */

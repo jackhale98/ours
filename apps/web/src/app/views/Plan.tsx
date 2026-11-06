@@ -437,7 +437,10 @@ function SideCards() {
         {tasks.length ? (
           <ul class="side-tasks">
             {tasks.slice(0, 8).map(({ item, list }) => {
-              const due = dueText(dueOf(item) ?? today.value);
+              const due = dueText(
+                dueOf(item) ?? today.value,
+                item.rec.data.before_days == null ? item.rec.data.time : null,
+              );
               return (
                 <li key={item.id}>
                   <button

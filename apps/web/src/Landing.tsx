@@ -220,7 +220,7 @@ function PhonePreview() {
 /** The demo's Home list: who's on what, due dates and repeats that take turns. */
 function ListPreview() {
   const items: [string, string, Who | null][] = [
-    ['Take out the bins', 'Due Monday · Every Monday, taking turns', 'a'],
+    ['Take out the bins', 'Monday 7 PM · Every Monday, taking turns', 'a'],
     ['Water the plants', 'Due today · Every Wednesday and Saturday', null],
     ['Book furnace service', '', 'a'],
     ['Return library books', '', 'b'],

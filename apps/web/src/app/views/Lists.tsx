@@ -84,7 +84,15 @@ import {
   update,
   viewer,
 } from '../model';
-import { DATE_ORDER, fmtLong, nextFreeEvening, relDay, repeatText, today } from '../select';
+import {
+  DATE_ORDER,
+  fmtLong,
+  fmtTime,
+  nextFreeEvening,
+  relDay,
+  repeatText,
+  today,
+} from '../select';
 import { openEvent, openQuick } from '../sheets';
 import { CloseButton, colorVar, Icon, Sheet, Switch, toast, typeFirst } from '../ui';
 import { CrossViewPane, CrossViews, crossView } from './ListViews';
@@ -219,7 +227,7 @@ function itemSub(item: ItemEntry, f: ReadonlySet<Feature>): string[] {
   if (f.has('qty') && d.qty) out.push(d.qty);
   if (f.has('due')) {
     const due = dueOf(item);
-    if (due) out.push(dueText(due).text);
+    if (due) out.push(dueText(due, d.before_days != null ? null : d.time).text);
     if (d.repeat) out.push(`${repeatText(d.repeat)}${d.rotate ? ', taking turns' : ''}`);
   }
   if (f.has('length') && d.length) out.push(LENGTH_LABEL[d.length]);
@@ -297,7 +305,17 @@ export function ItemRow({
         </span>
       )}
       {d.text}
-      {sub.length > 0 && <span class={`it-sub${late ? ' late' : ''}`}>{sub.join(' · ')}</span>}
+      {sub.length > 0 && (
+        <span class={`it-sub${late ? ' late' : ''}`}>
+          {sub.join(' · ')}
+          {f.has('due') && !!d.reminders?.length && d.before_days == null && (
+            <span class="it-bell">
+              <Icon name="bell" size={12} />
+              <span class="sr"> · reminder set</span>
+            </span>
+          )}
+        </span>
+      )}
       {f.has('notes') && d.note && <span class="it-note">{d.note}</span>}
     </span>
   );
@@ -402,7 +420,10 @@ function readLine(v: string, list: ListEntry) {
   const parsed = f.has('due')
     ? parseQuickAdd(v, { today: today.value, dateOrder: DATE_ORDER })
     : null;
-  const taken = parsed?.tokens.filter((t) => t.type === 'date' || t.type === 'repeat') ?? [];
+  // "Bins every monday 7pm": a time too, for a task with a date.
+  const taken =
+    parsed?.tokens.filter((t) => t.type === 'date' || t.type === 'repeat' || t.type === 'time') ??
+    [];
   let name = v;
   for (const t of [...taken].sort((a, b) => b.start - a.start)) {
     name = name.slice(0, t.start) + name.slice(t.end);
@@ -420,10 +441,13 @@ function readLine(v: string, list: ListEntry) {
     me,
     names: { a: nameOf('a'), b: nameOf('b') },
   });
+  const time = parsed?.time ?? null;
   return {
     ...read,
     repeat,
-    due: parsed?.date ?? (repeat ? today.value : null),
+    // A time alone ("call mum 6pm") is for today.
+    due: parsed?.date ?? (repeat || time ? today.value : null),
+    time,
   };
 }
 
@@ -437,7 +461,7 @@ function AddItem({ list, placeholder }: { list: ListEntry; placeholder: string }
   const line = text.trim() ? readLine(text.trim(), list) : null;
   // What this list reads from the words, shown while the box is empty and in use.
   const tries = [
-    ...(f.has('due') ? ['bins every monday', 'renew passport by mar 1'] : []),
+    ...(f.has('due') ? ['bins every monday 7pm', 'renew passport by mar 1'] : []),
     ...(f.has('qty') ? ['2 x milk'] : []),
     ...(f.has('who') && f.has('tick') && !list.rec.data.private
       ? [`call the plumber @${nameOf(partner.value)}`]
@@ -478,6 +502,7 @@ function AddItem({ list, placeholder }: { list: ListEntry; placeholder: string }
         assignee: line.assignee,
         due: line.due,
         sort_key: topKey(list.id),
+        ...(line.time ? { time: line.time } : {}),
         ...(line.repeat ? { repeat: line.repeat } : {}),
         ...(line.qty ? { qty: line.qty.slice(0, 30) } : {}),
         ...(f.has('sections') && section.trim() ? { section: section.trim().slice(0, 60) } : {}),
@@ -491,7 +516,7 @@ function AddItem({ list, placeholder }: { list: ListEntry; placeholder: string }
   const chips =
     line && line.text !== text.trim()
       ? [
-          line.due && relDay(line.due),
+          line.due && `${relDay(line.due)}${line.time ? ` · ${fmtTime(line.time)}` : ''}`,
           line.repeat && repeatText(line.repeat),
           line.qty && `How many: ${line.qty}`,
           line.assignee &&

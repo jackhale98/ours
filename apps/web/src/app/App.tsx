@@ -29,7 +29,7 @@ import './appearance';
 import { updateReady } from '../update';
 import { demoRequested, requestDemo } from './demo';
 import { waiting } from './inbox';
-import { ItemSheetHost } from './itemsheet';
+import { ItemSheetHost, itemSheet } from './itemsheet';
 import { activeLists, allLists, currentList } from './lists';
 import { findEntry, mode, nameOf, names, partner, store, viewer } from './model';
 import { drawerOpen, focusDate, type PlanMode, planHash, planMode, setPlanMode } from './planview';
@@ -132,6 +132,11 @@ async function deepLink(id: string): Promise<void> {
   startRequested.value = false;
   if (!findEntry(id)) await syncNow()?.catch(() => undefined);
   const e = findEntry(id);
+  if (e?.rec.kind === 'item') {
+    // A chore's reminder: open the chore.
+    itemSheet.value = id;
+    return;
+  }
   if (e?.rec.kind !== 'event') {
     toast('That plan isn’t on this device yet. It will appear once it syncs.');
     return;

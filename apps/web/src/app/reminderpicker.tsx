@@ -29,13 +29,18 @@ export function ReminderPicker({
   onChange,
   label = 'Remind me',
   hint = true,
+  atTime = false,
 }: {
   value: number[];
   allDay: boolean;
   onChange: (next: number[]) => void;
   label?: string;
   hint?: boolean;
+  /** A chore's time rather than a plan's start: "At the time". */
+  atTime?: boolean;
 }) {
+  const labelOf = (m: number, allDay: boolean) =>
+    atTime && !allDay && m === 0 ? 'At the time' : reminderLabel(m, allDay);
   const id = useId();
   const [open, setOpen] = useState(false);
   const [amount, setAmount] = useState('15');
@@ -62,7 +67,7 @@ export function ReminderPicker({
       ? allDay
         ? 'Enter how many days before (0 for the day itself) and a time.'
         : 'Enter a whole number.'
-      : (reminderProblem(candidate, allDay, value) ?? reminderLabel(candidate, allDay));
+      : (reminderProblem(candidate, allDay, value) ?? labelOf(candidate, allDay));
 
   const add = (minutes: number | null) => {
     if (minutes === null) {
@@ -93,11 +98,11 @@ export function ReminderPicker({
         <ul class="rchips" aria-label="Reminders">
           {value.map((m) => (
             <li key={m}>
-              <span>{reminderLabel(m, allDay)}</span>
+              <span>{labelOf(m, allDay)}</span>
               <button
                 type="button"
                 class="iconbtn"
-                aria-label={`Remove reminder: ${reminderLabel(m, allDay)}`}
+                aria-label={`Remove reminder: ${labelOf(m, allDay)}`}
                 onClick={() => onChange(value.filter((x) => x !== m))}
               >
                 <Icon name="x" size={14} />
@@ -135,7 +140,7 @@ export function ReminderPicker({
                 disabled={value.includes(m)}
                 onClick={() => add(m)}
               >
-                {reminderLabel(m, allDay)}
+                {labelOf(m, allDay)}
               </button>
             ))}
           </fieldset>

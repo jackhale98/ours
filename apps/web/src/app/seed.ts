@@ -197,6 +197,9 @@ function seedAll(): void {
       sort_key: '01',
       repeat: 'FREQ=WEEKLY;BYDAY=MO',
       rotate: true,
+      // A time and a reminder, for whoever's turn it is.
+      time: '19:00',
+      reminders: [60],
     },
     { scope: 'space' },
   );
