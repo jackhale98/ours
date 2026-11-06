@@ -387,7 +387,7 @@ function Cta() {
           Get started, free
         </a>
       )}
-      <a class={HAS_API ? 'btn big' : 'btn primary big'} href="#plan">
+      <a class={HAS_API ? 'btn big' : 'btn primary big'} href="#demo">
         Try the demo
       </a>
     </div>
@@ -406,7 +406,7 @@ export function Landing() {
             <LogoMark />
             {APP_NAME.toLowerCase()}
           </span>
-          <a class="btn sm" href="#plan">
+          <a class="btn sm" href="#demo">
             Try the demo
           </a>
         </div>

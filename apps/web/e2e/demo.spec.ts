@@ -341,7 +341,8 @@ test('quick add says it reads plain words, with examples to try', async ({ page 
   await expect(page.getByRole('textbox', { name: 'What’s the plan?' })).toHaveValue(
     'Camping sat-sun',
   );
-  await expect(dialog.locator('.qa-hint')).toContainText('Saturday');
+  // "Saturday", or "Tomorrow" when run on a Friday.
+  await expect(dialog.locator('.qa-hint')).toContainText(/Saturday|Tomorrow/);
   await page.keyboard.press('Escape');
   // A list's add box says what it reads too, once you're in it.
   await page.goto('/#lists');

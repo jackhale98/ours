@@ -717,7 +717,7 @@ export function StartView({ onFinished }: { onFinished: () => void }) {
         <p class="d">
           This site is running the demo only. Try it with sample data in the meantime.
         </p>
-        <a class="btn primary" href="#plan">
+        <a class="btn primary" href="#demo">
           Try the demo
         </a>
       </section>

@@ -14,6 +14,7 @@ const APP_ROUTES = new Set([
   'inbox',
   'search',
   'start',
+  'demo',
 ]);
 const isAppRoute = () =>
   APP_ROUTES.has(location.hash.slice(1)) ||

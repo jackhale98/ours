@@ -19,7 +19,11 @@ test('search finds plans, list items and lists, and opens them', async ({ page }
   if (info.project.name.includes('mobile')) {
     await page.getByRole('link', { name: 'Search' }).filter({ visible: true }).click();
   } else {
-    await page.keyboard.press('/');
+    // "/" opens search once the app is listening; pressing too soon does nothing.
+    await expect(async () => {
+      if (!page.url().endsWith('#search')) await page.keyboard.press('/');
+      await expect(page).toHaveURL(/#search$/, { timeout: 1000 });
+    }).toPass();
   }
   await expect(page).toHaveURL(/#search$/);
   const box = page.getByRole('searchbox', { name: 'Search plans, lists and notes' });

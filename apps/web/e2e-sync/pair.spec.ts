@@ -968,3 +968,23 @@ test('a new device scans the device link’s code with its camera', async ({ bro
     await cam.close();
   }
 });
+
+test('the demo opens on a device that’s signed in but not set up, with a way back', async ({
+  browser,
+}) => {
+  const page = await newPage(browser);
+  await page.goto('/#start');
+  await signUp(page, `demo-${Date.now()}@example.com`, 'code');
+  await expect(page.getByRole('heading', { name: 'Set up your space' })).toBeVisible();
+  // "Try the demo" from the landing page.
+  await page.goto('/#demo');
+  await expect(page.getByText('This is the demo. You’re signed in')).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'This week', exact: true })).toBeVisible();
+  await expect(page.locator('.ev').first()).toBeVisible();
+  await page.getByRole('link', { name: 'Finish signing in' }).click();
+  await expect(page.getByRole('heading', { name: 'Set up your space' })).toBeVisible();
+  // Opened any other way, a device that isn't set up goes to setup.
+  await page.goto('/');
+  await page.goto('/#plan');
+  await expect(page.getByRole('heading', { name: 'Set up your space' })).toBeVisible();
+});

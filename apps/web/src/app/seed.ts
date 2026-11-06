@@ -19,6 +19,14 @@ import {
 import { seenAt } from './news';
 import { dow, today, zone } from './select';
 
+const WEEKDAYS = ['SU', 'MO', 'TU', 'WE', 'TH', 'FR', 'SA'] as const;
+/** Today's weekday and the one three days on, in week order (e.g. "MO,TH"). */
+export function waterDays(today: string): string {
+  const w = new Date(`${today}T12:00:00`).getDay();
+  const days = [w, (w + 3) % 7].sort((x, y) => ((x + 6) % 7) - ((y + 6) % 7));
+  return days.map((d) => WEEKDAYS[d]).join(',');
+}
+
 export function seedDemo(): void {
   bulk(seedAll);
 }
@@ -200,10 +208,11 @@ function seedAll(): void {
       done: false,
       assignee: null,
       // Due today whatever the weekday, so the demo always has something
-      // waiting on you (its repeat picks the next Wednesday or Saturday).
+      // waiting on you. Twice a week: today's weekday and three days on, so
+      // the next one is never tomorrow (which would still be waiting).
       due: t,
       sort_key: '02',
-      repeat: 'FREQ=WEEKLY;BYDAY=WE,SA',
+      repeat: `FREQ=WEEKLY;BYDAY=${waterDays(t)}`,
     },
     { scope: 'space' },
   );

@@ -15,6 +15,17 @@ test.beforeEach(async ({ page }) => {
 });
 
 const form = (page: Page) => page.getByRole('dialog', { name: /New plan|Edit plan/ });
+
+/** "n" opens quick add, once the app is listening (pressing too soon does nothing). */
+async function pressNew(page: Page) {
+  await expect(async () => {
+    if (!(await page.getByRole('textbox', { name: 'What’s the plan?' }).isVisible()))
+      await page.keyboard.press('n');
+    await expect(page.getByRole('textbox', { name: 'What’s the plan?' })).toBeVisible({
+      timeout: 1000,
+    });
+  }).toPass();
+}
 const iso = (d: Date) => d.toISOString().slice(0, 10);
 const inDays = (n: number) => iso(new Date(Date.now() + n * 86_400_000));
 
@@ -53,7 +64,7 @@ test('edit a plan: name, place and notes', async ({ page }) => {
 });
 
 test('a trip over several days, marked away, from quick add’s more options', async ({ page }) => {
-  await page.keyboard.press('n');
+  await pressNew(page);
   await page.getByRole('textbox', { name: 'What’s the plan?' }).fill('Lake weekend');
   await page.getByRole('button', { name: /More options/ }).click();
   const f = form(page);
@@ -76,7 +87,7 @@ test('a trip over several days, marked away, from quick add’s more options', a
 });
 
 test('a plan that repeats every week', async ({ page }) => {
-  await page.keyboard.press('n');
+  await pressNew(page);
   await page.getByRole('textbox', { name: 'What’s the plan?' }).fill('Swim');
   await page.getByRole('button', { name: /More options/ }).click();
   const f = form(page);
@@ -95,7 +106,7 @@ test('a plan that repeats every week', async ({ page }) => {
 });
 
 test('changing a private plan’s time moves the partner’s “Busy” too', async ({ page }) => {
-  await page.keyboard.press('n');
+  await pressNew(page);
   await page.getByRole('textbox', { name: 'What’s the plan?' }).fill('Physio');
   const quick = page.getByRole('dialog', { name: 'New plan' });
   await quick.getByRole('button', { name: 'Mine' }).click();
@@ -140,7 +151,7 @@ test('changing a private plan’s time moves the partner’s “Busy” too', as
 });
 
 test('quick add understands repeats, and the choice can be changed', async ({ page }) => {
-  await page.keyboard.press('n');
+  await pressNew(page);
   const quick = page.getByRole('dialog', { name: 'New plan' });
   await page.getByRole('textbox', { name: 'What’s the plan?' }).fill('Yoga every tue and thu 6am');
   await expect(quick.locator('.pchip', { hasText: 'Every Tuesday and Thursday' })).toBeVisible();
@@ -153,7 +164,7 @@ test('quick add understands repeats, and the choice can be changed', async ({ pa
   expect(await page.getByRole('button', { name: /Yoga/ }).count()).toBeGreaterThanOrEqual(3);
 
   // Picking a repeat by hand overrides what was typed.
-  await page.keyboard.press('n');
+  await pressNew(page);
   await page.getByRole('textbox', { name: 'What’s the plan?' }).fill('Book club tomorrow 7pm');
   await quick.getByRole('combobox', { name: 'Repeats' }).selectOption({ label: 'Every month' });
   await quick.getByRole('button', { name: /Add plan|Send to/ }).click();

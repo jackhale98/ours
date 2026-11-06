@@ -15,6 +15,7 @@ import {
   takeSignInLink,
 } from '../account/session';
 import { App, startRequested } from './App';
+import { demoRequested } from './demo';
 import { store } from './model';
 import { seedDemo } from './seed';
 import { agenda } from './select';
@@ -75,7 +76,12 @@ export async function mountApp(root: HTMLElement): Promise<void> {
 
   const state = account.value;
   document.title = state.status === 'none' ? 'Ours · Demo' : 'Ours';
-  if (state.status === 'none' && store.value.entries.length === 0 && !startRequested.value) {
+  // The demo: for anyone not signed in, and for a device signed in but not set
+  // up that asked for it ("Try the demo").
+  const demo =
+    state.status === 'none' ||
+    (demoRequested.value && (state.status === 'needs-keys' || state.status === 'needs-profile'));
+  if (demo && store.value.entries.length === 0 && !startRequested.value) {
     // Seed before the first render so the page appears once, complete, but in
     // its own task so start-up never blocks input for long.
     await yieldToBrowser();

@@ -27,11 +27,13 @@ import { heldForUpdate, needsNewKeys, syncStatus } from '../account/sync';
 import { LogoMark } from '../Logo';
 import './appearance';
 import { updateReady } from '../update';
+import { demoRequested, requestDemo } from './demo';
 import { waiting } from './inbox';
 import { ItemSheetHost } from './itemsheet';
 import { activeLists, allLists, currentList } from './lists';
-import { findEntry, mode, nameOf, names, partner, viewer } from './model';
+import { findEntry, mode, nameOf, names, partner, store, viewer } from './model';
 import { drawerOpen, focusDate, type PlanMode, planHash, planMode, setPlanMode } from './planview';
+import { seedDemo } from './seed';
 import { now } from './select';
 import { isSettingsSection, settingsSection } from './settingsnav';
 import { accept, afterAdd, openEvent, openPlanForm, openQuick, SheetHost, sheet } from './sheets';
@@ -149,7 +151,22 @@ function syncFromHash() {
     void deepLink(link[1]);
     return;
   }
-  if (h === 'start') startRequested.value = true;
+  if (h === 'start') {
+    startRequested.value = true;
+    requestDemo(false);
+  }
+  if (h === 'demo') {
+    // "Try the demo": this week, even on a device signed in but not set up.
+    requestDemo(true);
+    const st = account.value.status;
+    const unset = st === 'none' || st === 'needs-keys' || st === 'needs-profile';
+    if (unset && store.value.entries.length === 0) seedDemo();
+    history.replaceState(null, '', '#plan');
+    setPlanMode('agenda', false);
+    tab.value = 'plan';
+    startRequested.value = false;
+    return;
+  }
   const view = /^plan\/(week|month)$/.exec(h);
   if (view?.[1]) {
     setPlanMode(view[1] as PlanMode, false);
@@ -259,6 +276,24 @@ function WaitingLink({ variant }: { variant: 'rail' | 'top' }) {
 }
 
 /** Records from a newer version of the app are waiting: updating reads them. */
+/** The demo, opened on a device that's signed in but not set up yet. */
+function DemoWhileSettingUp() {
+  const acct = account.value.status;
+  if (!demoRequested.value || (acct !== 'needs-keys' && acct !== 'needs-profile')) return null;
+  return (
+    <div class="keybanner" role="status">
+      <Icon name="lock" size={16} />
+      <span>
+        This is the demo. You’re signed in, but{' '}
+        {acct === 'needs-keys'
+          ? 'this device doesn’t have your keys yet.'
+          : 'your space isn’t set up yet.'}{' '}
+        <a href="#start">Finish signing in</a>
+      </span>
+    </div>
+  );
+}
+
 function HeldBanner() {
   if (!heldForUpdate.value || needsNewKeys.value || updateReady.value) return null;
   return (
@@ -605,11 +640,9 @@ export function App() {
   const n = names.value;
   const acct = account.value.status;
   // Signed in but not set up yet (no space, or no keys on this device): onboarding only.
+  const settingUp = acct === 'needs-profile' || acct === 'needs-keys';
   const onboarding =
-    startRequested.value ||
-    joinedWithAccount.value ||
-    acct === 'needs-profile' ||
-    acct === 'needs-keys';
+    startRequested.value || joinedWithAccount.value || (settingUp && !demoRequested.value);
   const View = {
     plan: PlanView,
     lists: ListsView,
@@ -702,6 +735,7 @@ export function App() {
           <JoinInsteadPrompt />
           <NewKeysBanner />
           <HeldBanner />
+          <DemoWhileSettingUp />
           <RotationBanner />
           <PhraseBanner />
           <Suspense fallback={<p class="nothing">Loading…</p>}>{content}</Suspense>
