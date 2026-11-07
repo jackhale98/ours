@@ -21,7 +21,6 @@ import {
 } from '@ours/core/crypto';
 import { expand, toInstant, toWall } from '@ours/core/time';
 import { effect, signal } from '@preact/signals';
-import { featuresOf, type ListEntry, planOf } from '../app/lists';
 import { byKind, findEntry, nameOf, type Slot, store, viewer } from '../app/model';
 import { allDayParts, duration, remindersOf } from '../app/reminders';
 import { fmtTime, zone } from '../app/select';
@@ -382,6 +381,15 @@ function choreBody(minutes: number, time: string | null, due: string, list: stri
 }
 
 /**
+ * Whether a list shows due dates: its features, or for lists made before
+ * features, its kind (as `featuresOf` in app/lists.ts, which this module
+ * doesn't import: that would load the whole lists module at start-up).
+ */
+function showsDue(l: { features?: readonly string[] | undefined; kind: string }): boolean {
+  return (l.features ?? (l.kind === 'ideas' || l.kind === 'gifts' ? [] : ['due'])).includes('due');
+}
+
+/**
  * Chores with a due date and reminders, for whoever's on them (both of you
  * when nobody or both are). Only the next due date: ticking a repeating one
  * moves it on, and its reminders with it. Done ones, and ones on archived or
@@ -395,11 +403,12 @@ function choreReminders(me: Slot, now: number): Planned[] {
     if (d.done || !d.due || !d.reminders?.length) continue;
     if (d.before_days !== undefined && d.before_days !== null) continue;
     if (d.assignee && d.assignee !== 'both' && d.assignee !== me) continue;
-    const list = findEntry(d.list_id) as ListEntry | undefined;
+    const list = findEntry(d.list_id);
     if (list?.rec.kind !== 'list' || list.rec.data.archived || list.rec.data.stash) continue;
     // Only where the time and reminders can be seen and changed: a list that
     // shows due dates, not one counted from a plan.
-    if (!featuresOf(list).has('due') || planOf(list)) continue;
+    if (!showsDue(list.rec.data) || findEntry(list.rec.data.plan_id ?? '')?.rec.kind === 'event')
+      continue;
     const anchor = toInstant(`${d.due}T${d.time ?? ALL_DAY_TIME}`, zone);
     for (const minutes of new Set(d.reminders)) {
       const fire = anchor - minutes * 60_000;
