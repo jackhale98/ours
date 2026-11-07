@@ -133,7 +133,9 @@ async function deepLink(id: string): Promise<void> {
   if (!findEntry(id)) await syncNow()?.catch(() => undefined);
   const e = findEntry(id);
   if (e?.rec.kind === 'item') {
-    // A chore's reminder: open the chore.
+    // A chore's reminder: open the chore, over its lists.
+    history.replaceState(null, '', '#lists');
+    tab.value = 'lists';
     itemSheet.value = id;
     return;
   }

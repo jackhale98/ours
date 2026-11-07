@@ -86,14 +86,8 @@ function ItemSheet({ item, list }: { item: ItemEntry; list: ListEntry }) {
   const [due, setDue] = useState(d.due ?? '');
   const [before, setBefore] = useState<number | null>(d.before_days ?? null);
   const [repeat, setRepeat] = useState(d.repeat ?? '');
-  const [time, setTimeRaw] = useState(d.time ?? '');
+  const [time, setTime] = useState(d.time ?? '');
   const [reminders, setReminders] = useState<number[]>(d.reminders ?? []);
-  // Reminders count from the time, or from 9 AM without one: adding or
-  // removing the time would move them, so they start over.
-  const setTime = (next: string) => {
-    if (!!next !== !!time) setReminders([]);
-    setTimeRaw(next);
-  };
   const [rotate, setRotate] = useState(d.rotate ?? false);
   const [who, setWho] = useState<Who>(
     d.assignee === me ? 'me' : d.assignee === p ? 'partner' : 'none',
@@ -146,16 +140,26 @@ function ItemSheet({ item, list }: { item: ItemEntry; list: ListEntry }) {
       return setError('Links start with https://');
     const assignee: Slot | null = who === 'me' ? me : who === 'partner' ? p : null;
     const useDue = f.has('due');
+    // A repeating task needs a date to count from: today if none was given.
+    const nextDue = due || (repeat ? today.value : null);
+    // A time and reminders only on a date. Reminders count from the time, or
+    // from 9 AM without one: if the time was added or removed and they weren't
+    // changed, they'd move, so they're dropped.
+    const nextTime = nextDue ? time || null : null;
+    const keptMode = !!nextTime === !!d.time;
+    const untouched = JSON.stringify(reminders) === JSON.stringify(d.reminders ?? []);
+    const nextReminders =
+      nextDue && reminders.length && (keptMode || !untouched) ? reminders : null;
     update<'item'>(item.id, {
       text: name.slice(0, 500),
       ...(f.has('length') ? { length } : {}),
       ...(useDue && forPlan ? { before_days: before, due: null } : {}),
       ...(useDue && !forPlan
         ? {
-            // A repeating task needs a date to count from: today if none was given.
-            due: due || (repeat || time ? today.value : null),
-            time: time || null,
-            reminders: reminders.length ? reminders : null,
+            due: nextDue,
+            // Left out when unused and never set, so older apps can still read it.
+            ...(nextTime || d.time != null ? { time: nextTime } : {}),
+            ...(nextReminders || d.reminders != null ? { reminders: nextReminders } : {}),
             repeat: repeat || null,
             rotate: !!repeat && shared && rotate,
           }
@@ -349,6 +353,14 @@ function ItemSheet({ item, list }: { item: ItemEntry; list: ListEntry }) {
               label={shared ? 'Remind whoever’s on it' : 'Remind me'}
               atTime
             />
+            {!!reminders.length &&
+              !!time !== !!d.time &&
+              JSON.stringify(reminders) === JSON.stringify(d.reminders ?? []) && (
+                <p class="small muted" role="status">
+                  These counted from {d.time ? 'the old time' : '9 AM'}, so they’ll be cleared when
+                  you save. Add them again to keep them.
+                </p>
+              )}
           </>
         )}
         {f.has('due') && !forPlan && repeat && (

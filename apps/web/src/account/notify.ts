@@ -21,6 +21,7 @@ import {
 } from '@ours/core/crypto';
 import { expand, toInstant, toWall } from '@ours/core/time';
 import { effect, signal } from '@preact/signals';
+import { featuresOf, type ListEntry, planOf } from '../app/lists';
 import { byKind, findEntry, nameOf, type Slot, store, viewer } from '../app/model';
 import { allDayParts, duration, remindersOf } from '../app/reminders';
 import { fmtTime, zone } from '../app/select';
@@ -394,8 +395,11 @@ function choreReminders(me: Slot, now: number): Planned[] {
     if (d.done || !d.due || !d.reminders?.length) continue;
     if (d.before_days !== undefined && d.before_days !== null) continue;
     if (d.assignee && d.assignee !== 'both' && d.assignee !== me) continue;
-    const list = findEntry(d.list_id);
+    const list = findEntry(d.list_id) as ListEntry | undefined;
     if (list?.rec.kind !== 'list' || list.rec.data.archived || list.rec.data.stash) continue;
+    // Only where the time and reminders can be seen and changed: a list that
+    // shows due dates, not one counted from a plan.
+    if (!featuresOf(list).has('due') || planOf(list)) continue;
     const anchor = toInstant(`${d.due}T${d.time ?? ALL_DAY_TIME}`, zone);
     for (const minutes of new Set(d.reminders)) {
       const fire = anchor - minutes * 60_000;

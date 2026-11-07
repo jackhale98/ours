@@ -194,4 +194,39 @@ describe('several reminders per plan', () => {
     expect(plants?.body).toBe('Due today · Home');
     expect(plants?.fire_at).toBe(Date.parse(`${day}T09:00:00`));
   });
+
+  it('chores on archived, saved or plan lists, or past, don’t remind; duplicates count once', () => {
+    const now = Date.now();
+    const day = new Date(now + 2 * 86_400_000).toISOString().slice(0, 10);
+    const past = new Date(now - 2 * 86_400_000).toISOString().slice(0, 10);
+    const mk = (extra: Record<string, unknown>) =>
+      put('list', { name: 'L', kind: 'chores', private: false, ...extra }, { scope: 'space' });
+    const chore = (list: string, text: string, extra: Record<string, unknown> = {}) =>
+      put(
+        'item',
+        {
+          list_id: list,
+          text,
+          done: false,
+          assignee: null,
+          due: day,
+          sort_key: 'V',
+          reminders: [0, 0],
+          ...extra,
+        },
+        { scope: 'space' },
+      );
+    chore(mk({}), 'Kept');
+    chore(mk({ archived: true }), 'Archived');
+    chore(mk({ stash: true }), 'Saved');
+    chore(mk({}), 'Gone by', { due: past });
+    chore(mk({ features: ['tick'] }), 'No dates here');
+    // "Later that day": 6 PM on the day, without a time.
+    chore(mk({}), 'Evening', { reminders: [-540] });
+    const planned = plannedReminders(now);
+    expect(planned.filter((p) => p.title === 'Kept')).toHaveLength(1);
+    for (const t of ['Archived', 'Saved', 'Gone by', 'No dates here'])
+      expect(planned.map((p) => p.title)).not.toContain(t);
+    expect(planned.find((p) => p.title === 'Evening')?.fire_at).toBe(Date.parse(`${day}T18:00:00`));
+  });
 });

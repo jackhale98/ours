@@ -308,7 +308,7 @@ export function ItemRow({
       {sub.length > 0 && (
         <span class={`it-sub${late ? ' late' : ''}`}>
           {sub.join(' · ')}
-          {f.has('due') && !!d.reminders?.length && d.before_days == null && (
+          {f.has('due') && !!d.reminders?.length && !!d.due && !d.done && d.before_days == null && (
             <span class="it-bell">
               <Icon name="bell" size={12} />
               <span class="sr"> · reminder set</span>
@@ -420,10 +420,15 @@ function readLine(v: string, list: ListEntry) {
   const parsed = f.has('due')
     ? parseQuickAdd(v, { today: today.value, dateOrder: DATE_ORDER })
     : null;
-  // "Bins every monday 7pm": a time too, for a task with a date.
-  const taken =
-    parsed?.tokens.filter((t) => t.type === 'date' || t.type === 'repeat' || t.type === 'time') ??
-    [];
+  // "Bins every monday 7pm": a clock time too. Only one with digits, so
+  // "book evening class" keeps its words; not "for 2 hours" or "until 5".
+  const clock = parsed?.tokens.find(
+    (t) => t.type === 'time' && /\d/.test(t.text) && !/^(for|until|till|to)\b/i.test(t.text),
+  );
+  const taken = [
+    ...(parsed?.tokens.filter((t) => t.type === 'date' || t.type === 'repeat') ?? []),
+    ...(clock ? [clock] : []),
+  ];
   let name = v;
   for (const t of [...taken].sort((a, b) => b.start - a.start)) {
     name = name.slice(0, t.start) + name.slice(t.end);
@@ -441,7 +446,7 @@ function readLine(v: string, list: ListEntry) {
     me,
     names: { a: nameOf('a'), b: nameOf('b') },
   });
-  const time = parsed?.time ?? null;
+  const time = clock ? (parsed?.time ?? null) : null;
   return {
     ...read,
     repeat,

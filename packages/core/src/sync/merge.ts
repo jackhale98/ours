@@ -51,8 +51,9 @@ function mergeUnits(
 ): Record<string, unknown> | null {
   let whenFrom: Record<string, unknown> | null = null;
   for (const unit of units) {
-    const lc = unit.some((k) => !sameJson(l[k], b[k]));
-    const rc = unit.some((k) => !sameJson(r[k], b[k]));
+    // Absent and null are the same (a field older records don't have).
+    const lc = unit.some((k) => !sameJson(l[k] ?? null, b[k] ?? null));
+    const rc = unit.some((k) => !sameJson(r[k] ?? null, b[k] ?? null));
     const from = lc && rc ? (localWins ? l : r) : lc ? l : rc ? r : b;
     for (const k of unit) {
       if (from[k] === undefined) delete out[k];

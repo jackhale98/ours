@@ -42,7 +42,7 @@ function summary(w: Waiting): { title: string; why: string } {
     const d = w.item.rec.data;
     return {
       title: d.text,
-      why: `${dueText(d.due ?? today.value, d.time).text}${d.assignee ? '' : ' · nobody’s on it'}`,
+      why: `${dueText(d.due ?? today.value, d.before_days == null ? d.time : null).text}${d.assignee ? '' : ' · nobody’s on it'}`,
     };
   }
   if (w.kind === 'overdue')
@@ -117,7 +117,7 @@ function Current({ w, headRef }: { w: Waiting; headRef: { current: HTMLHeadingEl
     );
   if (w.kind === 'task') {
     const d = w.item.rec.data;
-    const due = dueText(d.due ?? today.value, d.time);
+    const due = dueText(d.due ?? today.value, d.before_days == null ? d.time : null);
     const shared = w.item.scope === 'space';
     return (
       <>
@@ -298,7 +298,13 @@ function Overdue({ w, headRef }: { w: Extract<Waiting, { kind: 'overdue' }>; hea
             {i.rec.data.text}
             <span class="small muted">
               {' '}
-              · {dueText(i.rec.data.due ?? today.value, i.rec.data.time).text}
+              ·{' '}
+              {
+                dueText(
+                  i.rec.data.due ?? today.value,
+                  i.rec.data.before_days == null ? i.rec.data.time : null,
+                ).text
+              }
             </span>
           </li>
         ))}

@@ -146,6 +146,19 @@ describe('mergeRecord', () => {
     expect(out3.record.data).toMatchObject({ due: '2026-11-16', reminders: [15, 60] });
   });
 
+  it('an older chore without the fields: a later save that leaves them out doesn’t undo a time', () => {
+    const base = item({ due: '2026-11-09' }, 1, 'x');
+    const remote = item({ due: '2026-11-09', time: '19:00', reminders: [15] }, 2, 'them');
+    // A later note edit on a phone that wrote them as empty.
+    const local = item(
+      { due: '2026-11-09', note: 'Blue bin', time: null, reminders: null },
+      3,
+      'me',
+    );
+    const out = mergeRecord(base, local, remote, true, writer);
+    expect(out.record.data).toMatchObject({ note: 'Blue bin', time: '19:00', reminders: [15] });
+  });
+
   it('merges lists field by field: a rename on one phone and a pin on the other', () => {
     const list = (
       data: Partial<ListData>,

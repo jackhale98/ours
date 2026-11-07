@@ -98,7 +98,7 @@ export function reminderProblem(
 ): string | null {
   if (!Number.isInteger(minutes)) return 'Enter a whole number.';
   if (existing.includes(minutes)) return 'You already have that reminder.';
-  if (existing.length >= MAX_REMINDERS) return `Up to ${MAX_REMINDERS} reminders per plan.`;
+  if (existing.length >= MAX_REMINDERS) return `Up to ${MAX_REMINDERS} reminders.`;
   if (allDay) {
     if (minutes < -(1439 - ALL_DAY_ANCHOR)) return 'Choose a time on or before the day.';
     if (minutes > MAX_DAYS_BEFORE * 1440 + ALL_DAY_ANCHOR)

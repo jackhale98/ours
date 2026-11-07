@@ -499,3 +499,31 @@ test('a chore can have a time and a reminder for whoever’s on it', async ({ pa
   await expect(plumber).toContainText('Due today · 5:30 PM');
   await expect(plumber.locator('.it-bell')).toBeVisible();
 });
+
+test('a chore’s time goes with its date, and everyday words stay in its name', async ({ page }) => {
+  await page.goto('/#lists');
+  await page.getByRole('button', { name: /^Home/ }).first().click();
+  const add = page.getByRole('textbox', { name: /^Add to Home/ });
+  // Not a time: the words stay, and it isn't due.
+  await add.fill('Book evening class');
+  await expect(page.locator('.add-hint')).not.toContainText('PM');
+  await add.press('Enter');
+  const book = page.locator('.it', { hasText: 'Book evening class' });
+  await expect(book).toBeVisible();
+  await expect(book).not.toContainText('Due');
+
+  // Clearing the date clears the time and reminders too.
+  await add.fill('Defrost the freezer sat 10am');
+  await add.press('Enter');
+  const freezer = page.locator('.it', { hasText: 'Defrost the freezer' });
+  await expect(freezer).toContainText('10 AM');
+  await freezer.getByRole('button', { name: 'Details: Defrost the freezer' }).click();
+  const sheet = page.getByRole('dialog', { name: 'Defrost the freezer' });
+  await sheet.getByRole('button', { name: 'Add a reminder' }).click();
+  await sheet.getByRole('button', { name: /^1 hour before$/ }).click();
+  await sheet.getByLabel('Due').fill('');
+  await sheet.getByRole('button', { name: 'Save' }).click();
+  await expect(freezer).not.toContainText('Due');
+  await expect(freezer).not.toContainText('10 AM');
+  await expect(freezer.locator('.it-bell')).toHaveCount(0);
+});
