@@ -29,7 +29,7 @@ import './appearance';
 import { updateReady } from '../update';
 import { demoRequested, requestDemo } from './demo';
 import { waiting } from './inbox';
-import { ItemSheetHost, itemSheet } from './itemsheet';
+import { itemSheet } from './itemopen';
 import { activeLists, allLists, currentList } from './lists';
 import { findEntry, mode, nameOf, names, partner, store, viewer } from './model';
 import { drawerOpen, focusDate, type PlanMode, planHash, planMode, setPlanMode } from './planview';
@@ -47,6 +47,8 @@ const CheckinView = lazy(() => import('./views/Checkin').then((m) => ({ default:
 const SearchView = lazy(() => import('./views/Search').then((m) => ({ default: m.SearchView })));
 const InboxView = lazy(() => import('./views/Inbox').then((m) => ({ default: m.InboxView })));
 const PrivacyView = lazy(() => import('./views/Privacy').then((m) => ({ default: m.PrivacyView })));
+// A list item's sheet loads when one is opened (itemopen.ts).
+const ItemSheetHost = lazy(() => import('./itemsheet').then((m) => ({ default: m.ItemSheetHost })));
 const StartView = lazy(() => import('./views/Start').then((m) => ({ default: m.StartView })));
 
 /** Show onboarding (sign-in, setup) instead of the tabs. */
@@ -762,7 +764,11 @@ export function App() {
         </button>
       )}
       <SheetHost />
-      <ItemSheetHost />
+      {itemSheet.value && (
+        <Suspense fallback={null}>
+          <ItemSheetHost />
+        </Suspense>
+      )}
       <ShortcutsSheet />
       <ToastHost />
     </>

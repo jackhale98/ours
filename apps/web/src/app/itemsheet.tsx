@@ -8,9 +8,9 @@
  */
 
 import type { IdeaLength, Reaction, Season } from '@ours/core/schema';
-import { signal } from '@preact/signals';
 import { useState } from 'preact/hooks';
 import { LENGTH_LABEL } from './freetime';
+import { itemSheet } from './itemopen';
 import {
   activeLists,
   didIt,
@@ -37,7 +37,8 @@ import { fmtLong, fmtTime, nextFreeEvening, relDay, repeatText, today } from './
 import { openEvent, openQuick } from './sheets';
 import { CloseButton, Icon, Marker, Sheet, Switch, toast, typeFirst } from './ui';
 
-export const itemSheet = signal<string | null>(null);
+export { itemSheet };
+
 const close = () => {
   itemSheet.value = null;
 };

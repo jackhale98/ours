@@ -8,7 +8,7 @@
 import { dateIn } from '@ours/core/time';
 import { signal } from '@preact/signals';
 import { useEffect, useRef } from 'preact/hooks';
-import { itemSheet } from '../itemsheet';
+import { itemSheet } from '../itemopen';
 import { currentList, dueText } from '../lists';
 import { nameOf, partner } from '../model';
 import { type Hit, search } from '../search';

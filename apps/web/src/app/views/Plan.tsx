@@ -4,7 +4,7 @@ import { addDays } from '@ours/core/time';
 import { signal } from '@preact/signals';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { tasksFor, waiting } from '../inbox';
-import { itemSheet } from '../itemsheet';
+import { itemSheet } from '../itemopen';
 import { dueOf, dueText } from '../lists';
 import { commentsFor, nameOf, names, partner, viewer } from '../model';
 import { markSeen, news } from '../news';

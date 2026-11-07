@@ -12,7 +12,8 @@ import { signal } from '@preact/signals';
 import { Fragment } from 'preact';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { LENGTH_LABEL } from '../freetime';
-import { BEFORE_CHOICES, itemSheet } from '../itemsheet';
+import { itemSheet } from '../itemopen';
+import { BEFORE_CHOICES } from '../itemsheet';
 import {
   activeLists,
   allLists,

@@ -10,7 +10,7 @@ import { addDays } from '@ours/core/time';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { putRecallAside, type Waiting, waiting } from '../inbox';
 import { PartnerInvite } from '../invite';
-import { itemSheet } from '../itemsheet';
+import { itemSheet } from '../itemopen';
 import {
   completeItem,
   completeItems,
