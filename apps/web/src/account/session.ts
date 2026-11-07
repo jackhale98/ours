@@ -615,8 +615,8 @@ export async function createSpace(name: string): Promise<void> {
   await saveRing(r);
   ring = r;
   await refresh(state.session);
+  // No week_start: weeks start as the region does until one of you picks.
   put('settings', {
-    week_start: 1,
     members: { a: { name, color: COLORS.a, user_id: state.session.user.id } },
   });
 }

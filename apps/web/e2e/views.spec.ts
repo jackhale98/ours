@@ -233,3 +233,32 @@ test('filters, shortcuts and the agenda going further (review 0009, P-8, P-10, P
   await page.keyboard.press('d');
   await expect(page).toHaveURL(/#plan$/);
 });
+
+test('weeks can start on Sunday or Monday, in the week and month views', async ({ page }) => {
+  await page.goto('/#plan/month');
+  await expect(page.locator('th.mdow').first()).toHaveText('Mon');
+  await page.goto('/#settings/together');
+  const starts = page.getByRole('group', { name: 'Weeks start on' });
+  await starts.getByRole('button', { name: 'Sunday' }).click();
+  await expect(starts.getByRole('button', { name: 'Sunday' })).toHaveAttribute(
+    'aria-pressed',
+    'true',
+  );
+
+  await page.goto('/#plan/month');
+  await expect(page.locator('th.mdow').first()).toHaveText('Sun');
+  await expect(page.locator('th.mdow').last()).toHaveText('Sat');
+  await page.goto('/#plan/week');
+  // Desktop: the grid's day heads; phones: the strip of days.
+  await expect(page.locator('.wg-day, .wday').filter({ visible: true }).first()).toContainText(
+    'Sun',
+  );
+  // And back.
+  await page.goto('/#settings/together');
+  await page
+    .getByRole('group', { name: 'Weeks start on' })
+    .getByRole('button', { name: 'Monday' })
+    .click();
+  await page.goto('/#plan/month');
+  await expect(page.locator('th.mdow').first()).toHaveText('Mon');
+});

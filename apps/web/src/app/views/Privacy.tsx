@@ -3,7 +3,8 @@ import { generateRecoveryPhrase, safetyCode } from '@ours/core/crypto';
 import { signal } from '@preact/signals';
 import { currentSafetyCode } from '../../account/session';
 import { setTheme, type ThemePref, theme } from '../../theme';
-import { mode, names, SPACE_ID, setViewer, spaceKey, viewer } from '../model';
+import { mode, names, SPACE_ID, setViewer, spaceKey, updateSettings, viewer } from '../model';
+import { weekStartsOn } from '../select';
 import { Avatar, Icon, toast } from '../ui';
 import {
   AccountCard,
@@ -220,6 +221,7 @@ export function PrivacyView() {
                   </button>
                 ))}
               </div>
+              <WeekStart />
               <PersonLook />
             </section>
           </>
@@ -239,5 +241,39 @@ export function PrivacyView() {
         )}
       </div>
     </>
+  );
+}
+
+/** Which day weeks start on in the week and month views (and the day picker), for both of you. */
+function WeekStart() {
+  const ws = weekStartsOn.value;
+  const days: [number, string][] = [
+    [1, 'Monday'],
+    [0, 'Sunday'],
+    // Saturday only where the region starts weeks then and it's in use.
+    ...(ws === 6 ? ([[6, 'Saturday']] as [number, string][]) : []),
+  ];
+  return (
+    <div class="field">
+      <span class="lbl" id="ws-h">
+        Weeks start on
+      </span>
+      {/* biome-ignore lint/a11y/useSemanticElements: toggle-button group (aria-pressed), labelled; fieldset/legend breaks the segmented layout */}
+      <div class="seg" role="group" aria-labelledby="ws-h">
+        {days.map(([d, label]) => (
+          <button
+            type="button"
+            key={d}
+            aria-pressed={ws === d}
+            onClick={() => {
+              if (ws !== d) updateSettings({ week_start: d });
+            }}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      <p class="small muted">For both of you, in the week and month views.</p>
+    </div>
   );
 }
