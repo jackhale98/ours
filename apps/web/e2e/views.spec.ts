@@ -262,3 +262,20 @@ test('weeks can start on Sunday or Monday, in the week and month views', async (
   await page.goto('/#plan/month');
   await expect(page.locator('th.mdow').first()).toHaveText('Mon');
 });
+
+test('the side rail stays put and fits on short screens', async ({ page }, info) => {
+  test.skip(info.project.name.includes('mobile'), 'phones have the tab bar');
+  await page.setViewportSize({ width: 1024, height: 520 });
+  await page.goto('/#plan');
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText('This week');
+  const rail = page.locator('.rail');
+  await page.evaluate(() => window.scrollTo(0, 2000));
+  const box = await rail.evaluate((r) => ({
+    top: Math.abs(Math.round(r.getBoundingClientRect().top)),
+    fits: r.scrollHeight <= r.clientHeight + 1,
+    bottom: Math.round((r.querySelector('.couple') as HTMLElement).getBoundingClientRect().bottom),
+  }));
+  expect(box.top).toBe(0);
+  expect(box.fits).toBe(true);
+  expect(box.bottom).toBeLessThanOrEqual(520);
+});

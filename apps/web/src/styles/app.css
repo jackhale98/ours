@@ -104,8 +104,13 @@ main:focus {
     gap: 6px;
     position: sticky;
     top: 0;
-    height: 100vh;
+    /* The visible height: on tablets 100vh runs under the browser's bars. */
+    height: 100dvh;
     padding-block: 30px 24px;
+    /* Too short for all of it (a tablet on its side): it scrolls itself. */
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-width: thin;
   }
 
   main {
@@ -128,6 +133,20 @@ main:focus {
 
 .rail .logo {
   margin-bottom: 22px;
+}
+
+/* Short screens: the same rail, closer together. */
+@media (min-width: 880px) and (max-height: 700px) {
+  .rail {
+    padding-block: 18px 14px;
+    gap: 2px;
+  }
+  .rail .logo {
+    margin-bottom: 12px;
+  }
+  .rail .newbtn {
+    margin-top: 8px;
+  }
 }
 
 .navbtn {

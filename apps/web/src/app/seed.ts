@@ -185,7 +185,9 @@ function seedAll(): void {
     ['Pay electric bill', 'b', true],
   ]);
   // Repeating tasks: the bins every Monday, taking turns; the plants twice a week.
-  const nextDay = (dow: number) => d((dow - new Date(`${t}T00:00:00Z`).getUTCDay() + 7) % 7);
+  // The next such weekday after today (a week on if it's today), so the demo
+  // reads the same whatever day it's opened.
+  const nextDay = (dow: number) => d((dow - new Date(`${t}T00:00:00Z`).getUTCDay() + 7) % 7 || 7);
   put(
     'item',
     {
