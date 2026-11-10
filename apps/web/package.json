@@ -27,7 +27,7 @@
   },
   "devDependencies": {
     "@axe-core/playwright": "4.14.0",
-    "@babel/core": "7.29.0",
+    "@babel/core": "8.1.0",
     "@playwright/test": "1.63.0",
     "@preact/preset-vite": "2.10.6",
     "@types/node": "22.19.1",
