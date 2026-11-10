@@ -23,7 +23,7 @@
     "check:worker": "node scripts/check-worker-config.mjs"
   },
   "devDependencies": {
-    "@biomejs/biome": "2.6.4",
+    "@biomejs/biome": "2.6.6",
     "@vitest/coverage-v8": "4.1.12",
     "typescript": "7.0.2",
     "vitest": "4.1.12"
